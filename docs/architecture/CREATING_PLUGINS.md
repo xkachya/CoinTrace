@@ -626,6 +626,6 @@ SensorData read() override;
 ---
 
 **Готові питання? Приєднуйтесь до спільноти!**
-- 💬 [GitHub Discussions](https://github.com/[user]/CoinTrace/discussions) - обговорення та питання
-- 📝 [GitHub Issues](https://github.com/[user]/CoinTrace/issues) - знайдені баги
+- 💬 [GitHub Discussions](https://github.com/xkachya/CoinTrace/discussions) - обговорення та питання
+- 📝 [GitHub Issues](https://github.com/xkachya/CoinTrace/issues) - знайдені баги
 - 📖 [Documentation](../../README.md) - загальна документація

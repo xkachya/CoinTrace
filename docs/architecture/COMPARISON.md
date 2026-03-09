@@ -385,8 +385,8 @@ Developer C: Додає QMC5883L
 **Наступний крок:** Читайте [PLUGIN_ARCHITECTURE.md](./PLUGIN_ARCHITECTURE.md) для детального розуміння архітектури.
 
 **Потрібна допомога?** 
-- 💬 [GitHub Discussions](https://github.com/[user]/CoinTrace/discussions) - обговорення
-- 📝 [GitHub Issues](https://github.com/[user]/CoinTrace/issues) - баги та питання
+- 💬 [GitHub Discussions](https://github.com/xkachya/CoinTrace/discussions) - обговорення
+- 📝 [GitHub Issues](https://github.com/xkachya/CoinTrace/issues) - баги та питання
 - 📖 [Documentation](../../README.md) - загальна документація
 
 ---

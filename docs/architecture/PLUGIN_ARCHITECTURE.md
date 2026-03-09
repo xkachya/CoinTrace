@@ -148,13 +148,20 @@ public:
 
 class ISensorPlugin : public IPlugin {
 public:
-    // Тип сенсора
+    // Тип сенсора (базові для прикладу)
+    // Повний список типів дивись: PLUGIN_INTERFACES_EXTENDED.md
     enum class SensorType {
-        INDUCTIVE,    // LDC1101
-        MAGNETIC,     // QMC5883L
-        CAPACITIVE,   // FDC2214
-        OPTICAL,      // Color sensor
-        CUSTOM
+        INDUCTIVE,    // LDC1101, LDC1612 - індуктивність
+        WEIGHT,       // HX711, NAU7802 - вага монети
+        MAGNETIC,     // QMC5883L, BMM150 - феромагнетизм
+        DIAMETER,     // Caliper sensors - діаметр
+        CAPACITIVE,   // FDC2214 - ємність
+        OPTICAL,      // TCS34725 - колір/відбиття
+        ACOUSTIC,     // MAX4466 - звук удару монети
+        POSITION,     // Hall effect - позиція
+        TEMPERATURE,  // DHT22, BME280 - температура
+        PRESSURE,     // BMP280 - тиск
+        CUSTOM        // Користувацький тип
     };
     
     virtual SensorType getType() const = 0;
@@ -860,7 +867,7 @@ pluginSystem->reloadPlugin("QMC5883L");
 ### 3. OTA оновлення плагінів
 ```cpp
 // Завантажити новий плагін через WiFi
-pluginSystem->installPluginOTA("https://github.com/[user]/CoinTrace/releases/download/plugins/qmc5883l-v2.0.0.zip");
+pluginSystem->installPluginOTA("https://github.com/xkachya/CoinTrace/releases/download/plugins/qmc5883l-v2.0.0.zip");
 ```
 
 ### 4. Plugin Marketplace
@@ -882,6 +889,33 @@ GitHub Releases - Community Plugins
   ]
 }
 ```
+
+---
+
+## 🔬 Розширення архітектури
+
+**Цей документ описує базову концепцію Plugin System.**  
+Для повного списку інтерфейсів та типів заліза дивіться:
+
+### 📖 [PLUGIN_INTERFACES_EXTENDED.md](./PLUGIN_INTERFACES_EXTENDED.md)
+
+**Що там знайдете:**
+- **ISensorPlugin** з 15+ типами сенсорів (вага, діаметр, товщина, звук, магнетизм...)
+- **IDisplayPlugin** - підтримка різних екранів (ST7789V2 → ILI9341 → OLED)
+- **IInputPlugin** - клавіатури, тачскріни, енкодери, джойстики
+- **IAudioPlugin** - аудіо кодеки (ES8311), buzzer, мікрофони
+- **IConnectivityPlugin** - WiFi, BLE, LoRa, NFC
+- **IPowerPlugin** - батарея, живлення, AXP192/IP5306
+- **IPeripheralPlugin** - LED, IR, servo, relay
+
+**Приклади реальних плагінів:**
+- HX711Plugin (ваговий сенсор ±0.01g)
+- ST7789V2Plugin (TFT дисплей M5Cardputer)
+- TCA8418Plugin (QWERTY клавіатура)
+- ES8311Plugin (аудіо codec з мікрофоном)
+
+**Комплексна система ідентифікації монет:**
+Вага + Індуктивність + Магнетизм + Діаметр + Товщина = 95%+ точності
 
 ---
 

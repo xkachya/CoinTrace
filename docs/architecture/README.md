@@ -45,6 +45,39 @@
 
 ---
 
+### 4. 🔧 [PLUGIN_INTERFACES_EXTENDED.md](./PLUGIN_INTERFACES_EXTENDED.md) - **Розширені інтерфейси**
+**Для кого:** Архітектори, розробники плагінів, технічні ліди  
+**Що містить:**
+- Повний список інтерфейсів для ВСЬОГО заліза (не тільки сенсори!)
+- **ISensorPlugin** - 15+ типів сенсорів (вага, індуктивність, магнетизм, діаметр, звук...)
+- **IDisplayPlugin** - підтримка різних екранів (ST7789V2, ILI9341, OLED)
+- **IInputPlugin** - клавіатури, тачскрін, енкодери
+- **IAudioPlugin** - аудіо кодеки, buzzer, мікрофони
+- **IConnectivityPlugin**, **IPowerPlugin**, **IPeripheralPlugin**
+- Приклади реальних плагінів для кожного типу
+- Комплексна система ідентифікації монет (вага + індуктивність + магнетизм + діаметр)
+
+**Прочитати першим якщо ви:** Створюєте плагін для нестандартного заліза, хочете зрозуміти повний scope системи
+
+---
+
+### 5. 🏥 [PLUGIN_DIAGNOSTICS.md](./PLUGIN_DIAGNOSTICS.md) - **Система self-diagnostics**
+**Для кого:** Розробники плагінів, DevOps, QA тестувальники  
+**Що містить:**
+- **КРИТИЧНО:** Чому базові `canInitialize()` та `isReady()` недостатні
+- **HealthStatus enum** - 15+ детальних станів (OK, DEGRADED, TIMEOUT, NOT_FOUND, SENSOR_FAULT...)
+- **Коди помилок** - точна діагностика "ЩО не так" (не просто "не працює")
+- **Self-test** - автоматична перевірка при старті (Device ID, R/W test, stability)
+- **Health monitoring** - періодична перевірка стану в loop()
+- **Автоматичне відновлення** - restart при TIMEOUT/COMM_ERROR
+- **Статистика** - success rate, failed reads, degradation detection
+- **Production-ready features** - crash reports, remote diagnostics, predictive maintenance
+- Повний приклад LDC1101 з діагностикою
+
+**Прочитати першим якщо ви:** Створюєте production систему, потрібна надійність 99.9%, хочете зрозуміти "чому плагін не працює"
+
+---
+
 ## 🎯 Швидкий старт: Що читати?
 
 ### Якщо ви **Менеджер проекту:**
@@ -58,11 +91,22 @@
 
 ### Якщо ви **Розробник** (хочете додати датчик):
 1. [CREATING_PLUGINS.md](./CREATING_PLUGINS.md) - розділ "Quick Start" (15 хв)
-2. [CREATING_PLUGINS.md](./CREATING_PLUGINS.md) - шаблони плагінів (10 хв)
-3. Практика: створити свій плагін (30 хв)
+2. [PLUGIN_DIAGNOSTICS.md](./PLUGIN_DIAGNOSTICS.md) - як додати self-test (10 хв)
+3. [PLUGIN_INTERFACES_EXTENDED.md](./PLUGIN_INTERFACES_EXTENDED.md) - типи сенсорів (5 хв)
+4. Практика: створити свій плагін з діагностикою (45 хв)
 
-**Час:** 1 година  
-**Результат:** Ваш перший плагін працює
+**Час:** 1 година 15 хвилин  
+**Результат:** Ваш перший production-ready плагін з self-diagnostics
+
+---
+
+### Якщо ви **QA/DevOps** (потрібна надійність):
+1. [PLUGIN_DIAGNOSTICS.md](./PLUGIN_DIAGNOSTICS.md) - повний документ (20 хв)
+2. [PLUGIN_ARCHITECTURE.md](./PLUGIN_ARCHITECTURE.md) - розділ "PluginSystem" (10 хв)
+3. Тестування: запустити diagnostics екран
+
+**Час:** 30 хвилин  
+**Результат:** Розумієте як діагностувати проблеми, читати логи, налаштувати моніторинг
 
 ---
 
@@ -204,16 +248,16 @@ ISensorPlugin, IIMUPlugin, IStoragePlugin
 ## 📞 Підтримка
 
 **Питання по архітектурі?**
-- 💬 [GitHub Discussions](https://github.com/[user]/CoinTrace/discussions) - обговорення архітектури
-- 📝 [GitHub Issues](https://github.com/[user]/CoinTrace/issues) - баги та пропозиції
+- 💬 [GitHub Discussions](https://github.com/xkachya/CoinTrace/discussions) - обговорення архітектури
+- 📝 [GitHub Issues](https://github.com/xkachya/CoinTrace/issues) - баги та пропозиції
 - 📖 [Main README](../../README.md) - загальна документація
 
 **Баги в документації?**
-- 🐛 [GitHub Issues](https://github.com/[user]/CoinTrace/issues)
-- ✏️ [Edit on GitHub](https://github.com/[user]/CoinTrace/edit/main/docs/architecture/)
+- 🐛 [GitHub Issues](https://github.com/xkachya/CoinTrace/issues)
+- ✏️ [Edit on GitHub](https://github.com/xkachya/CoinTrace/edit/main/docs/architecture/)
 
 **Хочете контрибутити?**
-- 🤝 [GitHub Issues](https://github.com/[user]/CoinTrace/issues) - знайти задачі
+- 🤝 [GitHub Issues](https://github.com/xkachya/CoinTrace/issues) - знайти задачі
 - 📖 [README.md](../../README.md) - як почати
 
 ---
