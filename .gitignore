@@ -39,3 +39,53 @@
 
 # debug information files
 *.dwo
+
+# ============================================
+# SECURITY: Private Documents & Leak Prevention
+# ============================================
+
+# Private/Internal documents
+*.private.*
+*.secret.*
+*.internal.*
+/internal/
+/business/
+/legal-private/
+*OWNER_RESTRICTIONS*
+*PROJECT_ARCHITECTURE*
+*IP_PROTECTION*
+
+# NumiScope project leak prevention (secret commercial project)
+*numiscope*
+*NumiScope*
+*NUMISCOPE*
+*varicap*
+*Varicap*
+*coating*
+*frequency-sweep*
+*frequency_sweep*
+*2d-matrix*
+*2d_matrix*
+
+# Sensitive credentials
+*.key
+*.pem
+*.p12
+.env
+.env.*
+credentials.json
+secrets.yml
+secrets.yaml
+
+# Financial/Business documents
+*financial*
+*pricing*
+*investor*
+*business-plan*
+*market-analysis*
+
+# Personal notes
+notes.md
+todo_private.md
+diary*.md
+journal*.md
