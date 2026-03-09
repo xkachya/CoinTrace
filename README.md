@@ -1,4 +1,4 @@
-# 🔍 CoinTrace
+# 🔍 CoinTrace™
 
 > **Open-source coin metal analyzer using inductive sensing**
 > Identifies metal alloy composition via attenuation curve fingerprinting
@@ -16,7 +16,7 @@
 
 ## 📖 Table of Contents
 
-- [What is CoinTrace?](#what-is-cointrace)
+- [What is CoinTrace™?](#what-is-cointrace)
 - [How It Works](#how-it-works)
 - [vs Competitors](#vs-competitors)
 - [Hardware](#hardware)
@@ -31,16 +31,16 @@
 
 ---
 
-## ⚡ What is CoinTrace?
+## ⚡ What is CoinTrace™?
 
-CoinTrace measures the **attenuation curve** of a coin's electromagnetic
+CoinTrace™ measures the **attenuation curve** of a coin's electromagnetic
 response across 4 controlled distances using an LDC1101 inductive sensor.
 This creates a unique **"fingerprint"** that identifies the coin's metal
 composition — without touching, scratching or damaging the coin.
 
-### Why CoinTrace?
+### Why CoinTrace™?
 
-| | Commercial verifiers (~$250–600) | CoinTrace (~$40) |
+| | Commercial verifiers (~$250–600) | CoinTrace™ (~$40) |
 |--|--|--|
 | Method | Single resistivity value | **Attenuation curve (4 points)** |
 | Frequency sweep | Fixed or single frequency | Single frequency (extensible) |
@@ -53,7 +53,7 @@ composition — without touching, scratching or damaging the coin.
 
 ## 🧬 How It Works
 
-CoinTrace takes **4 measurements** at different distances and builds
+CoinTrace™ takes **4 measurements** at different distances and builds
 an attenuation curve unique to each metal:
 
 ```
@@ -230,7 +230,7 @@ Outputs real-time CSV + live attenuation curve plot.
 
 ## 🗄️ Fingerprint Database
 
-CoinTrace uses a **tiered fingerprint database**:
+CoinTrace™ uses a **tiered fingerprint database**:
 
 **🆓 Community tier (free, open source):**
 Common metals and popular coins. Schema + basic dataset
@@ -243,7 +243,7 @@ GPL v3 requires open code, not free services.
 
 Each fingerprint is a normalized measurement vector
 that is **device-independent** — k1 and k2 values are
-the same across all CoinTrace devices.
+the same across all CoinTrace™ devices.
 
 ### Fingerprint Format
 
@@ -267,7 +267,7 @@ the same across all CoinTrace devices.
     "dL1": 724.1
   },
   "metadata": {
-    "device": "CoinTrace v1.0",
+    "device": "CoinTrace™ v1.0",
     "temp_c": 23.4,
     "date": "2026-03-21",
     "contributor": "ykachmaryk"
@@ -277,7 +277,7 @@ the same across all CoinTrace devices.
 
 ### How to Contribute a Fingerprint
 
-1. Measure your coin with CoinTrace
+1. Measure your coin with CoinTrace™
 2. Export via keyboard: `SAVE` → `EXPORT`
 3. Copy JSON from microSD
 4. Submit via Pull Request to `database/samples/`
@@ -295,7 +295,7 @@ V1 — Basic Prototype (current)
   ⬜ OLED/TFT display UI
   ⬜ Local fingerprint database (microSD)
 
-V2 — CoinTrace Device
+V2 — CoinTrace™ Device
   ⬜ Full keyboard UI
   ⬜ WiFi sync with cloud database
   ⬜ OTA firmware updates
@@ -348,7 +348,7 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 - 🐛 **Report bugs** — open an issue
 - 💡 **Suggest features** — open an issue with `[FEATURE]`
 - 🔧 **Submit code** — fork → branch → PR
-- ⭐ **Star the repo** — helps others find CoinTrace
+- ⭐ **Star the repo** — helps others find CoinTrace™
 
 ### DCO — Developer Certificate of Origin
 
@@ -367,6 +367,13 @@ under GPL v3. Sign your commits: `git commit -s`
 
 Copyright © 2026 **Yuriy Kachmaryk**, Lviv, Ukraine
 
+### Trademark Notice
+
+**CoinTrace™** is a trademark of Yuriy Kachmaryk. The software, hardware designs,
+and documentation are open source under GPL v3 / CERN OHL v2 / CC BY-SA 4.0 licenses,
+but the CoinTrace™ name and brand are protected. See [LICENSE-BRAND.md](LICENSE-BRAND.md)
+for usage guidelines.
+
 ---
 
 ## 🔗 Links
@@ -378,7 +385,8 @@ Copyright © 2026 **Yuriy Kachmaryk**, Lviv, Ukraine
 
 ---
 
-*CoinTrace is an independent open-source project not affiliated with
+*CoinTrace™ is an independent open-source project not affiliated with
 any commercial coin verification company or MikroElektronika.
+CoinTrace™ is a trademark of Yuriy Kachmaryk.
 LDC1101 is a trademark of Texas Instruments.
 All product comparisons are based on publicly available specifications.*
