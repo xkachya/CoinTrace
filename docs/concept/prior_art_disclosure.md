@@ -4,6 +4,8 @@
 **Author:** Yuriy Kachmaryk
 **Date:** 2026-03-08 (first commit timestamp)
 **Location:** Lviv, Ukraine
+**Cryptographic Proof:** Git SHA `71720cb` in repository https://github.com/xkachya/CoinTrace
+**Archive:** Recommend archiving at archive.org and archive.today for permanent proof
 
 ## Purpose
 
@@ -26,6 +28,13 @@ Coefficients k1 = ΔRp₂/ΔRp₁ and k2 = ΔRp₃/ΔRp₁
 are mathematically independent of coin diameter,
 enabling cross-device comparison without calibration.
 
+**Mathematical proof:** For a circular coin with diameter D,
+the sensor interaction area scales as D². Since both
+numerator (ΔRp₂ or ΔRp₃) and denominator (ΔRp₁) scale
+proportionally with interaction area, the ratio k = ΔRpᵢ/ΔRp₁
+cancels out the diameter dependency, making k independent
+of coin size while remaining sensitive to metal composition.
+
 ### 3. Fingerprint Vector
 Feature vector [ΔRp₁, k1, k2, slope, ΔL₁] as unique
 identifier for specific coin types comparable via
@@ -36,12 +45,27 @@ Shared database of normalized fingerprint vectors
 enabling crowd-sourced coin identification across
 multiple devices and users.
 
+### 5. Hardware Implementation
+Reference implementation using Texas Instruments LDC1101
+inductive sensor with ESP32-S3 microcontroller, demonstrating
+practical feasibility of the method with consumer-grade
+components (~$30 total cost).
+
 ## Prior Art References
 
 - Sigma Metalytics US10839633B2 (2019) — measures
   bulk resistivity at fixed distance (different method)
 - US6739444 (2004) — LC oscillator frequency shift
   (different parameter, different method)
+
+## Scope of Disclosure
+
+The disclosed concepts are not limited to the specific
+implementation described. They cover all variations including:
+- Different inductive sensors (LDC, LC oscillators, eddy current)
+- Different measurement distances and counts (2+, 3+, 4+ points)
+- Different normalization ratios and feature vectors
+- Different metal objects (coins, tokens, metals, alloys)
 
 ## Declaration
 
