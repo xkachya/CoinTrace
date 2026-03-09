@@ -89,3 +89,35 @@ notes.md
 todo_private.md
 diary*.md
 journal*.md
+
+# ============================================
+# PlatformIO & Embedded Development
+# ============================================
+
+# PlatformIO build artifacts
+.pio/
+.pioenvs/
+.piolibdeps/
+.clang_complete
+.gcc-flags.json
+
+# VS Code auto-generated files
+.vscode/c_cpp_properties.json
+.vscode/.browse.c_cpp_database*
+.vscode/ipch/
+
+# Keep useful VS Code files (uncomment if needed):
+# !.vscode/extensions.json
+# !.vscode/launch.json
+# !.vscode/tasks.json
+
+# Build artifacts
+build/
+*.bin
+*.elf
+*.map
+*.hex
+
+# Compiled firmware
+firmware/
+memory_usage.txt
