@@ -10,13 +10,14 @@ This folder contains **user-friendly guides** and tutorials for CoinTrace users.
 
 ---
 
-## 📂 Planned Content
+## 📂 Content
 
 ### Getting Started:
-- `quick-start.md` - 5-minute setup guide
-- `hardware-assembly.md` - Building your CoinTrace device
-- `firmware-installation.md` - Flashing firmware to M5Stack
-- `calibration-guide.md` - Device calibration procedures
+- **[development-setup.md](development-setup.md)** - Complete VS Code + PlatformIO setup guide ⚙️
+- `quick-start.md` - 5-minute setup guide *(planned)*
+- `hardware-assembly.md` - Building your CoinTrace device *(planned)*
+- `firmware-installation.md` - Flashing pre-built firmware to M5Stack *(planned)*
+- `calibration-guide.md` - Device calibration procedures *(planned)*
 
 ### User Guides:
 - `measuring-coins.md` - How to measure coins correctly

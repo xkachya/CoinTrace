@@ -162,14 +162,34 @@ GND          →   Pin 4          → GND
 
 ## 🚀 Getting Started
 
-### Prerequisites
+### For Developers (Modify Firmware)
 
-- [PlatformIO](https://platformio.org/) (recommended) or Arduino IDE
+Want to customize CoinTrace firmware or contribute code?
+
+📖 **[Development Setup Guide](docs/guides/development-setup.md)** — Complete guide for setting up VS Code + PlatformIO on Windows. Covers:
+- Install development tools (VS Code, PlatformIO, drivers)
+- Clone and build CoinTrace firmware
+- Upload to M5Stack Cardputer-Adv
+- Understand project structure and M5Stack API
+- Troubleshooting and debugging
+
+**Beginner-friendly:** Never coded before? The guide walks you through everything step-by-step.
+
+---
+
+### Quick Start (Advanced Users)
+
+Already have PlatformIO? Quick setup:
+
+#### Prerequisites
+
+- [PlatformIO](https://platformio.org/) already installed
 - M5Stack Cardputer-Adv board
 - LDC1101 Click Board (MIKROE-3240)
 - 7 jumper wires
+- USB-C cable (data + power)
 
-### Installation
+#### Installation
 
 ```bash
 # Clone repository
