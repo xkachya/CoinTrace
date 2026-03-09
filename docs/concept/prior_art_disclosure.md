@@ -1,10 +1,10 @@
 # Prior Art Disclosure — CoinTrace
 
-**Document type:** Public Prior Art Disclosure
-**Author:** Yuriy Kachmaryk
-**Date:** 2026-03-08 (first commit timestamp)
-**Location:** Lviv, Ukraine
-**Cryptographic Proof:** Git SHA `71720cb` in repository https://github.com/xkachya/CoinTrace
+**Document type:** Public Prior Art Disclosure  
+**Author:** Yuriy Kachmaryk  
+**Date:** 2026-03-08 (first commit timestamp)  
+**Location:** Lviv, Ukraine  
+**Cryptographic Proof:** Git SHA `71720cb` in repository https://github.com/xkachya/CoinTrace  
 **Archive Snapshots:**
 - Wayback Machine: https://web.archive.org/web/20260309003946/https://github.com/xkachya/CoinTrace/blob/main/docs/concept/prior_art_disclosure.md
 - Archive.today: https://archive.ph/5UMGt
