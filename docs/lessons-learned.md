@@ -155,3 +155,40 @@ scoop install mingw   # ~150 MB, GCC 15.2
 **Примітка:** Scoop вже був на системі (`C:\Users\Yura\scoop`). Якщо немає — спочатку [встановити Scoop](https://scoop.sh).
 
 ---
+
+## 2026-03-11 — LoadProhibited при натисканні кнопки: `KeysState` copy crash
+
+**Середовище:** ESP32-S3, M5Cardputer, M5Cardputer бібліотека, `loop()`  
+**Симптом:** `Guru Meditation Error: Core 1 panic'ed (LoadProhibited)`. `EXCVADDR=0x00000000`, `A2=0x00000000`. Трапляється лише при натисканні кнопки. Після перезавантаження — нормальна робота.
+
+**Діагностика:** Декодовано через `xtensa-esp32s3-elf-addr2line -e firmware.elf -f -C -i 0x42002641 0x4200b11d`:
+```
+loop() [main.cpp:107]
+  → KeysState::KeysState(const&)   ← copy-ctor
+    → std::vector<uint8_t>::vector(const&)
+      → std::uninitialized_copy → std::copy
+        CRASH: read from 0x00000000
+```
+
+**Причина (два баги):**  
+1. `Keyboard_Class::KeysState status = M5Cardputer.Keyboard.keysState()` — **копіює** struct по значенню. `keysState()` повертає `KeysState&` (reference). `KeysState` містить три `std::vector` (`word`, `hid_keys`, `modifier_keys`). При копіюванні копіюється вектор зі станом `size > 0`, `data() == nullptr` — race condition з keyboard scanner або стан при натисканні лише фізичної кнопки (без ASCII символу).  
+2. `status.word[0]` без перевірки `empty()` → UB + nullptr deref коли `word` порожній (натиснуто лише Fn/modifier/physical button).
+
+**Рішення:**
+```cpp
+// БУЛО (crash):
+Keyboard_Class::KeysState status = M5Cardputer.Keyboard.keysState();
+LOG_DEBUG(&gLogger, ..., status.word[0], status.word[0]);
+
+// СТАЛО (fix):
+const Keyboard_Class::KeysState& status = M5Cardputer.Keyboard.keysState();
+if (!status.word.empty()) {
+    const char key = status.word[0];
+    LOG_DEBUG(&gLogger, ..., key, (uint8_t)key);
+}
+```
+
+**Де в коді:** `src/main.cpp:107` → `loop()`  
+**Правило:** `keysState()` повертає reference — ніколи не копіювати. Завжди перевіряти `word.empty()` перед `word[0]`.
+
+---
