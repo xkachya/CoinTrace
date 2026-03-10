@@ -308,7 +308,22 @@ ISensorPlugin, IIMUPlugin, IStoragePlugin
 
 ---
 
-## 📞 Підтримка
+## � Lessons Learned
+
+Практичний лог технічних інцидентів та їх рішень — накопичений досвід реального debugging.  
+Читай **перед** тим, як витрачати час на пошук незрозумілих проблем з ESP32-S3, FreeRTOS або PlatformIO native tests.
+
+📄 **[docs/lessons-learned.md](../lessons-learned.md)**
+
+Приклади записів:
+- Boot loop на ESP32-S3: 3 незалежні причини (flash_mode, mutex у конструкторі, LX6-прапор)
+- `HWCDC` vs `HardwareSerial`: чому `SerialTransport` використовує `Print&`
+- PlatformIO native tests на Windows: MinGW + розташування `mock_impl.cpp`
+- Правильний порядок `#include <FreeRTOS.h>` перед `<semphr.h>`
+
+---
+
+## �📞 Підтримка
 
 **Питання по архітектурі?**
 - 💬 [GitHub Discussions](https://github.com/xkachya/CoinTrace/discussions) - обговорення архітектури
