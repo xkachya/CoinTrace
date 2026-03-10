@@ -1,0 +1,37 @@
+{
+  "global_min_level": "DEBUG",
+  "transports": {
+    "serial": {
+      "enabled": true,
+      "baud_rate": 115200,
+      "format": "TEXT",
+      "min_level": "DEBUG"
+    },
+    "ring_buffer": {
+      "enabled": true,
+      "capacity": 100,
+      "use_psram": true,
+      "min_level": "DEBUG"
+    },
+    "websocket": {
+      "enabled": true,
+      "port": 81,
+      "path": "/log",
+      "min_level": "INFO",
+      "queue_size": 32
+    },
+    "ble": {
+      "enabled": false,
+      "service_uuid": "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
+      "char_uuid":    "6E400003-B5A3-F393-E0A9-E50E24DCCA9E",
+      "min_level": "WARNING"
+    },
+    "sd": {
+      "enabled": false,
+      "path": "/logs/cointrace.log",
+      "max_size_kb": 512,
+      "rotate_count": 3,
+      "min_level": "INFO"
+    }
+  }
+}

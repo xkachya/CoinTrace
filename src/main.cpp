@@ -1,10 +1,19 @@
 // CoinTrace - Open Source Inductive Coin Analyzer
 // License: GPL v3 (firmware) + CERN OHL v2 (hardware)
-// Hardware: M5Stack Cardputer-Adv + LDC1101
+// Hardware: M5Stack Cardputer-Adv + LDC1101 (SPI)
 // Repository: https://github.com/xkachya/CoinTrace
 
 #include <Arduino.h>
 #include <M5Cardputer.h>
+#include "Logger.h"
+#include "SerialTransport.h"
+#include "RingBufferTransport.h"
+#include "logger_macros.h"
+
+// ── Logger globals (ініціалізуються першими в setup()) ────────────
+static Logger              gLogger;
+static SerialTransport     gSerialTransport(Serial, SerialTransport::Format::TEXT, 115200);
+static RingBufferTransport gRingTransport(100, /*usePsram=*/true);
 
 // Display CoinTrace version and configuration on startup
 void displayStartupInfo() {
@@ -57,38 +66,36 @@ void setup() {
   M5Cardputer.begin(cfg);
   M5Cardputer.Display.setRotation(1);
   
-  // Initialize serial for debugging
+  // Serial.begin() до Logger — SerialTransport використовує вже ініціалізований Serial
   Serial.begin(115200);
   delay(100);
-  
-  #ifdef DEBUG_MODE
-  Serial.println("\n=== CoinTrace Development Build ===");
-  Serial.printf("Version: %s\n", COINTRACE_VERSION);
-  Serial.printf("CPU Frequency: %d MHz\n", ESP.getCpuFreqMHz());
-  Serial.printf("Flash Size: %d MB\n", ESP.getFlashChipSize() / 1024 / 1024);
-  Serial.printf("Free Heap: %d bytes\n", ESP.getFreeHeap());
-  #ifdef BOARD_HAS_PSRAM
-  Serial.printf("PSRAM Size: %d MB\n", ESP.getPsramSize() / 1024 / 1024);
-  #endif
-  #endif
-  
-  // Display startup screen
+
+  // ── 1. Logger ПЕРШИМ — до будь-якого іншого коду ─────────────
+  // begin() створює FreeRTOS mutex (не можна в конструкторі: він виконується
+  // як статичний глобал до старту FreeRTOS scheduler).
+  gLogger.begin();
+  gLogger.addTransport(&gSerialTransport);
+  gLogger.addTransport(&gRingTransport);
+
+  gLogger.info("System", "CoinTrace %s starting", COINTRACE_VERSION);
+  gLogger.info("System", "CPU: %d MHz | Heap: %u B | PSRAM: %u MB",
+               ESP.getCpuFreqMHz(), ESP.getFreeHeap(),
+               (unsigned int)(ESP.getPsramSize() / 1024 / 1024));
+  LOG_DEBUG(&gLogger, "System", "Flash: %u MB",
+            (unsigned int)(ESP.getFlashChipSize() / 1024 / 1024));
+  LOG_DEBUG(&gLogger, "LDC1101", "I2C SDA=%d SCL=%d addr=0x%02X freq=%dHz steps=%d",
+            LDC1101_I2C_SDA, LDC1101_I2C_SCL, LDC1101_I2C_ADDR,
+            SINGLE_FREQUENCY, DISTANCE_STEPS);
+
+  // ── 2. Display startup screen ────────────────────────────────
   displayStartupInfo();
-  
-  #ifdef LDC1101_DEBUG
-  Serial.println("\n=== LDC1101 Configuration ===");
-  Serial.printf("I2C SDA: GPIO %d\n", LDC1101_I2C_SDA);
-  Serial.printf("I2C SCL: GPIO %d\n", LDC1101_I2C_SCL);
-  Serial.printf("I2C Address: 0x%02X\n", LDC1101_I2C_ADDR);
-  Serial.printf("Operating Frequency: %d Hz\n", SINGLE_FREQUENCY);
-  Serial.printf("Distance Steps: %d\n", DISTANCE_STEPS);
-  #endif
-  
-  // TODO: Initialize LDC1101 driver
+
+  // ── 3. TODO: Hardware init (SPI/I2C + plugin context) ────────
+  // SPI.begin(...);
   // Wire.begin(LDC1101_I2C_SDA, LDC1101_I2C_SCL);
-  // ldc1101.begin(LDC1101_I2C_ADDR);
-  
-  Serial.println("\nCoinTrace initialized. Ready!");
+  // ctx.log = &gLogger; ctx.spiMutex = xSemaphoreCreateMutex();
+
+  gLogger.info("System", "CoinTrace ready");
 }
 
 void loop() {
@@ -99,9 +106,7 @@ void loop() {
     if (M5Cardputer.Keyboard.isPressed()) {
       Keyboard_Class::KeysState status = M5Cardputer.Keyboard.keysState();
       
-      #ifdef SERIAL_DEBUG
-      Serial.printf("Key pressed: %c (0x%02X)\n", status.word[0], status.word[0]);
-      #endif
+      LOG_DEBUG(&gLogger, "Input", "Key: %c (0x%02X)", status.word[0], status.word[0]);
       
       // Display key on screen
       M5Cardputer.Display.fillRect(0, M5Cardputer.Display.height() - 20, 

@@ -206,18 +206,19 @@ pio device monitor --baud 115200
 ### PlatformIO Configuration
 
 ```ini
-[env:m5stack-cardputer]
+[env:cointrace-dev]
 platform = espressif32@6.7.0
-board = esp32-s3-devkitc-1
+board = m5cardputer-adv         ; Custom board JSON in boards/m5cardputer-adv.json
 framework = arduino
-upload_speed = 1500000
+upload_speed = 921600
 build_flags =
     -DESP32S3
     -DARDUINO_USB_CDC_ON_BOOT=1
     -DARDUINO_USB_MODE=1
+    -DCOINTRACE_VERSION=\"1.0.0-dev\"
 lib_deps =
-    M5Cardputer=https://github.com/m5stack/M5Cardputer
-    bogde/HX711
+    m5stack/M5Cardputer @ ^1.0.0
+    Wire
 ```
 
 ### Python Monitor (for data analysis)
@@ -310,6 +311,7 @@ the same across all CoinTrace™ devices.
 V1 — Basic Prototype (current)
   ✅ LDC1101 + Cardputer-Adv
   ✅ 4-distance measurement
+  ✅ Logger system (Serial + RingBuffer, 40 unit tests)
   ✅ Serial data output
   ⬜ Python analysis tools
   ⬜ OLED/TFT display UI

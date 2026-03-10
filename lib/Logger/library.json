@@ -1,0 +1,12 @@
+{
+  "name": "Logger",
+  "version": "1.0.0",
+  "description": "CoinTrace multi-transport thread-safe logger for ESP32-S3/FreeRTOS",
+  "keywords": ["logger", "freertos", "esp32", "cointrace"],
+  "authors": { "name": "CoinTrace Team" },
+  "repository": { "type": "git", "url": "https://github.com/xkachya/CoinTrace" },
+  "license": "GPL-3.0",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": { "srcDir": "src" }
+}

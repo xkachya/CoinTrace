@@ -4,8 +4,8 @@
 **Версія:** 2.0.0  
 **Попередня версія:** 1.0.0 (10 березня 2026) — виправлено за результатами рецензії  
 **Дата:** 10 березня 2026  
-**Контекст:** CoinTrace Plugin System, ESP32-S3 (M5Stack Cardputer / CoreS3)  
-**Статус:** До імплементації — читати перед написанням будь-якого коду
+**Контекст:** CoinTrace Plugin System, ESP32-S3 (M5Stack Cardputer-Adv, ESP32-S3FN8)  
+**Статус:** ✅ Фаза 1 Implemented (11 березня 2026) — Serial + RingBuffer працюють на девайсі, 40 unit-тестів пройдено
 
 ---
 
@@ -373,9 +373,12 @@ class SerialTransport : public ILogTransport {
 public:
     enum class Format { TEXT, JSON };
 
-    explicit SerialTransport(HardwareSerial& serial   = Serial,
-                             Format          format   = Format::TEXT,
-                             uint32_t        baudRate = 115200);
+    // Print& замість HardwareSerial& — необхідно для ESP32-S3 з USB CDC:
+    // на ESP32-S3 Serial має тип HWCDC (не HardwareSerial), але обидва
+    // успадковують Print. Використання Print& забезпечує сумісність.
+    explicit SerialTransport(Print&   serial   = Serial,
+                             Format   format   = Format::TEXT,
+                             uint32_t baudRate = 115200);
 
     bool        begin()  override;
     void        write(const LogEntry& entry) override;
@@ -384,9 +387,9 @@ public:
     // КОНТРАКТ: ця реалізація НЕ ВИКЛИКАЄ Logger::* — Serial.write() напряму
 
 private:
-    HardwareSerial& serial_;
-    Format          format_;
-    uint32_t        baudRate_;
+    Print&   serial_;
+    Format   format_;
+    uint32_t baudRate_;
 };
 ```
 
@@ -1016,22 +1019,27 @@ void testLdc1101ErrorLogging() {
 
 ## 12. Порядок імплементації
 
-### Фаза 1 — MVP: Serial і RingBuffer (1 день)
+### Фаза 1 — MVP: Serial і RingBuffer ✅ DONE (11 березня 2026)
 
 Замінює всі `Serial.printf()`, дає Logger в `PluginContext`.
 
-| Крок | Файл | Що робити |
-|------|------|-----------|
-| 1 | `include/LogLevel.h` | `enum class LogLevel` |
-| 2 | `include/LogEntry.h` | struct + `toText()` + `toJSON()` + `toBLECompact()` |
-| 3 | `include/ILogTransport.h` | Інтерфейс + контракт NO-LOG-IN-WRITE |
-| 4 | `lib/Logger/SerialTransport.cpp` | Sync TEXT/JSON вивід |
-| 5 | `lib/Logger/RingBufferTransport.cpp` | Ring з PSRAM fallback + `getLastError()` |
-| 6 | `include/Logger.h` + `lib/Logger/Logger.cpp` | dispatch (stack buf, timeout mutex) + removeTransport |
-| 7 | `src/main.cpp` | Замінити `Serial.print*` на `gLogger.*` |
-| 8 | `include/PluginContext.h` | Перевірити що `Logger* log` вже є |
+| Крок | Файл | Що робити | Статус |
+|------|------|-----------|--------|
+| 1 | `lib/Logger/src/LogLevel.h` | `enum class LogLevel` | ✅ |
+| 2 | `lib/Logger/src/LogEntry.h/cpp` | struct + `toText()` + `toJSON()` + `toBLECompact()` | ✅ |
+| 3 | `lib/Logger/src/ILogTransport.h` | Інтерфейс + контракт NO-LOG-IN-WRITE | ✅ |
+| 4 | `lib/Logger/src/SerialTransport.h/cpp` | Sync TEXT/JSON, використовує `Print&` (HWCDC сумісність) | ✅ |
+| 5 | `lib/Logger/src/RingBufferTransport.h/cpp` | Ring з fallback на heap (Cardputer-Adv не має PSRAM) | ✅ |
+| 6 | `lib/Logger/src/Logger.h/cpp` | `begin()` pattern (mutex не в конструкторі!), dispatch, removeTransport | ✅ |
+| 7 | `src/main.cpp` | `gLogger.begin()` → `addTransport()` в `setup()` | ✅ |
+| 8 | `lib/Logger/src/logger_macros.h` | `LOG_DEBUG` zero-cost макрос для production | ✅ |
+| 9 | `test/test_log_entry/`, `test/test_ring_buffer/`, `test/test_logger/` | 40 unit-тестів, `pio test -e native-test` | ✅ |
 
-**Результат Фази 1:** всі повідомлення в одному місці, Ring доступний для UI і тестів.
+> ⚠️ **Урок з імплементації:** `xSemaphoreCreateMutex()` ЗАБОРОНЕНО в конструкторі глобального об'єкта — FreeRTOS scheduler ще не запущений. Mutex створюється тільки в `Logger::begin()`, який викликається з `setup()`.
+
+> ⚠️ **ESP32-S3 специфіка:** `Serial` на ESP32-S3 з `ARDUINO_USB_CDC_ON_BOOT=1` має тип `HWCDC`, а не `HardwareSerial`. Обидва успадковують `Print` — `SerialTransport(Print& serial)` вирішує невідповідність.
+
+**Результат Фази 1:** всі повідомлення в одному місці, Serial виводить `[  672ms] INFO  System | CoinTrace 1.0.0-dev starting`, Ring доступний для UI і тестів.
 
 ### Фаза 2 — WebSocket + SD (1–2 дні, після WiFi і SD)
 
