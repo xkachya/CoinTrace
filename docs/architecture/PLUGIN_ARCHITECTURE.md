@@ -223,14 +223,17 @@ public:
 
 struct PluginContext {
     // Вже ініціалізовані шини
-    TwoWire*       wire;    // I2C шина (ініціалізована системою)
-    SPIClass*      spi;     // SPI шина (ініціалізована системою)
-    
+    TwoWire*          wire;        // I2C шина (ініціалізована системою)
+    SemaphoreHandle_t wireMutex;   // Mutex для I2C — обов'язковий для async плагінів
+    SPIClass*         spi;         // SPI шина (ініціалізована системою)
+    SemaphoreHandle_t spiMutex;    // Mutex для SPI — обов'язковий для async плагінів
+                                   // ⚠️ Cardputer-Adv: SD карта і LDC1101 на одній SPI шині!
+
     // Система конфігурації
-    ConfigManager* config;  // Доступ до config.json та hardware профілів
-    
+    ConfigManager*    config;      // Доступ до config.json та hardware профілів
+
     // Система логування
-    Logger*        log;     // Уніфіковане логування з рівнями (DEBUG/INFO/WARNING/ERROR)
+    Logger*           log;         // Уніфіковане логування з рівнями (DEBUG/INFO/WARNING/ERROR)
 };
 ```
 

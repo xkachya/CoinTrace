@@ -390,11 +390,16 @@ private:
     static void readTaskFunc(void* param) {
         auto* self = (AsyncSensorPlugin*)param;
         while (true) {
-            auto data = self->readFromHardware();
-            
-            xSemaphoreTake(self->dataMutex, portMAX_DELAY);
-            self->latestData = data;
-            xSemaphoreGive(self->dataMutex);
+            // ⚠️ Будь-який доступ до I2C/SPI з async task — брати відповідний mutex!
+            // (SPI приклад — для I2C аналогічно використовуй wireMutex)
+            if (xSemaphoreTake(self->ctx->spiMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                auto data = self->readFromHardware();
+                xSemaphoreGive(self->ctx->spiMutex);
+                
+                xSemaphoreTake(self->dataMutex, portMAX_DELAY);
+                self->latestData = data;
+                xSemaphoreGive(self->dataMutex);
+            }
             
             vTaskDelay(pdMS_TO_TICKS(100));
         }
@@ -495,10 +500,12 @@ void testPlugin() {
     
     // Мок контексту для тесту
     PluginContext mockCtx = {
-        .wire   = &Wire,
-        .spi    = &SPI,
-        .config = nullptr,  // TODO: підключити ConfigManager
-        .log    = &testLogger
+        .wire      = &Wire,
+        .wireMutex = xSemaphoreCreateMutex(),
+        .spi       = &SPI,
+        .spiMutex  = xSemaphoreCreateMutex(),
+        .config    = nullptr,  // TODO: підключити ConfigManager
+        .log       = &testLogger
     };
     
     Serial.println("=== Plugin Test ===");

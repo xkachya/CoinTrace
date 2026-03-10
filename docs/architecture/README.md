@@ -104,6 +104,23 @@
 
 ---
 
+### 7. 📋 [LOGGER_ARCHITECTURE.md](./LOGGER_ARCHITECTURE.md) - **Архітектура сервісу логування**
+**Для кого:** Розробники (ОБОВ'ЯЗКОВО перед імплементацією логера), архітектори  
+**Що містить:**
+- Logger — перший сервіс що ініціалізується (до Wire, SPI, плагінів)
+- `dispatch()` зі stack-local буфером — без heap allocation, без deadlock
+- **ILogTransport** контракт: `write()` НІКОЛИ не викликає Logger методи
+- 5 транспортів: Serial (sync), WebSocket (async), RingBuffer (in-memory), SD (async + spiMutex), BLE (async)
+- Thread Safety: mutex з 5ms timeout + drop замість `portMAX_DELAY`
+- SDTransport: `spiMutex` обов'язковий — SD і LDC1101 на одній SPI шині (Cardputer-Adv)
+- Повний розподіл пам'яті (байт по байту), logger.json конфігурація
+- `main.cpp` ініціалізація з `PluginContext` — Logger підключається до системи плагінів
+- **Порядок імплементації:** Фаза 1 (Serial + RingBuffer, 1 день) → Фаза 2 (WS + SD) → Фаза 3 (BLE)
+
+**Прочитати першим якщо ви:** Починаєте імплементацію Logger, хочете зрозуміти як замінити всі `Serial.printf()` на `ctx->log->`
+
+---
+
 ## 🎯 Швидкий старт: Що читати?
 
 ### Якщо ви **Менеджер проекту:**
@@ -120,9 +137,10 @@
 2. [CREATING_PLUGINS.md](./CREATING_PLUGINS.md) - розділ "Quick Start" (15 хв)
 3. [PLUGIN_DIAGNOSTICS.md](./PLUGIN_DIAGNOSTICS.md) - як додати self-test (10 хв)
 4. [PLUGIN_INTERFACES_EXTENDED.md](./PLUGIN_INTERFACES_EXTENDED.md) - типи сенсорів (5 хв)
-5. Практика: створити свій плагін з діагностикою (45 хв)
+5. [LOGGER_ARCHITECTURE.md](./LOGGER_ARCHITECTURE.md) - як використовувати `ctx->log->` (10 хв)
+6. Практика: створити свій плагін з діагностикою (45 хв)
 
-**Час:** 1 година 30 хвилин  
+**Час:** 1 година 40 хвилин  
 **Результат:** Ваш перший production-ready плагін з self-diagnostics що дотримується контракту
 
 ---

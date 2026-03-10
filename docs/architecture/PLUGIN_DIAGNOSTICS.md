@@ -133,6 +133,17 @@ public:
 class LDC1101Plugin : public ISensorPlugin {
 private:
     PluginContext* ctx = nullptr;  // ✅ Контекст системи
+    int csPin = -1;                // SPI CS пін (з конфіг ldc1101.spi_cs_pin)
+
+    // Регістри LDC1101 (SPI, per datasheet SNOSD01D)
+    static const uint8_t LDC1101_DEVICE_ID = 0x3F;  // CHIP_ID
+    static const uint8_t LDC1101_CONFIG    = 0x0B;  // START_CONFIG
+    static const uint8_t LDC1101_STATUS    = 0x20;  // STATUS
+    static const uint8_t LDC1101_RP_MSB    = 0x22;  // RP_DATA_MSB
+    static const uint8_t LDC1101_RP_LSB    = 0x21;  // RP_DATA_LSB
+    // Примітка: LDC1101 не має записуваного TEST_REG; в реальній реалізації
+    // використовуйте DIG_CONFIG (0x04) для R/W перевірки
+    static const uint8_t LDC1101_TEST_REG  = 0x04;  // DIG_CONFIG (для R/W тесту)
     
     // Статистика
     struct {
@@ -158,30 +169,18 @@ public:
     bool initialize(PluginContext* context) override {
         ctx = context;  // ✅ Зберігаємо контекст
         
-        // ✅ Швидка перевірка I2C через вже ініціалізований Wire
-        ctx->wire->beginTransmission(LDC1101_ADDR);
-        uint8_t result = ctx->wire->endTransmission();
+        // ✅ SPI CS пін — з конфігурації
+        csPin = ctx->config ? ctx->config->getInt("ldc1101.spi_cs_pin", 5) : 5;
+        pinMode(csPin, OUTPUT);
+        digitalWrite(csPin, HIGH);
+        delay(5);  // POR stabilization
         
-        if (result == 0) {
-            diagnostics.currentStatus = HealthStatus::OK;
-        } else if (result == 2) {
+        // Перевірка SPI зв'язку: читаємо CHIP_ID
+        uint8_t chipId = readRegister(LDC1101_DEVICE_ID);
+        if (chipId != 0xD4) {
             diagnostics.currentStatus = HealthStatus::NOT_FOUND;
-            diagnostics.lastError = {2, "I2C NACK - device not found"};
-            ctx->log->error(getName(), "Hardware not found at 0x2A");
-            return false;
-        } else {
-            diagnostics.currentStatus = HealthStatus::COMMUNICATION_ERROR;
-            diagnostics.lastError = {result, "I2C communication error"};
-            ctx->log->error(getName(), "I2C communication error");
-            return false;
-        }
-        
-        // Перевірка Device ID
-        uint8_t deviceId = readRegister(LDC1101_DEVICE_ID);
-        if (deviceId != 0xD4) {
-            diagnostics.currentStatus = HealthStatus::SENSOR_FAULT;
-            diagnostics.lastError = {3, "Invalid device ID (wrong chip?)"};
-            ctx->log->error(getName(), "Device ID mismatch");
+            diagnostics.lastError = {2, "CHIP_ID mismatch — SPI/CS wiring issue"};
+            ctx->log->error(getName(), "CHIP_ID: expected 0xD4, got 0x%02X", chipId);
             return false;
         }
         
@@ -210,7 +209,7 @@ public:
     // === ДІАГНОСТИКА ===
     
     HealthStatus getHealthStatus() const override {
-        // Швидка перевірка (без I2C операцій)
+        // Швидка перевірка (без SPI операцій — тільки stale check)
         if (!enabled) return HealthStatus::DISABLED;
         if (!ready) return HealthStatus::INITIALIZATION_FAILED;
         
@@ -363,8 +362,7 @@ public:
     }
     
     bool checkHardwarePresence() override {
-        Wire.beginTransmission(LDC1101_ADDR);
-        return (Wire.endTransmission() == 0);
+        return (readRegister(LDC1101_DEVICE_ID) == 0xD4);  // SPI CHIP_ID check
     }
     
     bool checkCommunication() override {
@@ -453,27 +451,24 @@ private:
     float calibrationBaseline = 0;
     
     uint8_t readRegister(uint8_t reg) {
-        ctx->wire->beginTransmission(LDC1101_ADDR);
-        ctx->wire->write(reg);
-        if (ctx->wire->endTransmission() != 0) {
-            diagnostics.failedReads++;
-            return 0xFF;
-        }
-        
-        ctx->wire->requestFrom(LDC1101_ADDR, (uint8_t)1);
-        if (ctx->wire->available()) {
-            return ctx->wire->read();
-        }
-        
-        diagnostics.failedReads++;
-        return 0xFF;
+        if (!ctx || !ctx->spi || csPin < 0) { diagnostics.failedReads++; return 0xFF; }
+        ctx->spi->beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+        digitalWrite(csPin, LOW);
+        ctx->spi->transfer(reg | 0x80);  // R/W bit = 1 (read)
+        uint8_t val = ctx->spi->transfer(0x00);
+        digitalWrite(csPin, HIGH);
+        ctx->spi->endTransaction();
+        return val;
     }
     
     void writeRegister(uint8_t reg, uint8_t value) {
-        ctx->wire->beginTransmission(LDC1101_ADDR);
-        ctx->wire->write(reg);
-        ctx->wire->write(value);
-        ctx->wire->endTransmission();
+        if (!ctx || !ctx->spi || csPin < 0) return;
+        ctx->spi->beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+        digitalWrite(csPin, LOW);
+        ctx->spi->transfer(reg & 0x7F);  // R/W bit = 0 (write)
+        ctx->spi->transfer(value);
+        digitalWrite(csPin, HIGH);
+        ctx->spi->endTransaction();
     }
     
     float readRP() {

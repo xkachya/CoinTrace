@@ -132,16 +132,19 @@ SPI.begin(config.spi_sck, config.spi_miso, config.spi_mosi);
 
 ```cpp
 struct PluginContext {
-    TwoWire*       wire;    // Ініціалізований I2C (не nullptr)
-    SPIClass*      spi;     // Ініціалізований SPI (не nullptr)
-    ConfigManager* config;  // Доступ до конфігурації (не nullptr)
-    Logger*        log;     // Система логування (не nullptr)
+    TwoWire*          wire;        // Ініціалізований I2C (не nullptr)
+    SemaphoreHandle_t wireMutex;   // FreeRTOS mutex для I2C шини (не nullptr)
+    SPIClass*         spi;         // Ініціалізований SPI (не nullptr)
+    SemaphoreHandle_t spiMutex;    // FreeRTOS mutex для SPI шини (не nullptr)
+    ConfigManager*    config;      // Доступ до конфігурації (не nullptr)
+    Logger*           log;         // Система логування (не nullptr)
 };
 ```
 
 **Що це означає:**
 - Плагін може безпечно використовувати `ctx->wire`, `ctx->spi` без перевірки на `nullptr`
 - `ctx->log` завжди доступний для логування
+- `ctx->wireMutex` і `ctx->spiMutex` завжди валідні — використовуються async плагінами
 
 ---
 
@@ -157,7 +160,55 @@ struct PluginContext {
 
 ---
 
-### 1.5 Memory Management
+### 1.5 Правило: async плагіни і спільні шини
+
+**Гарантія:** `ctx->wireMutex` і `ctx->spiMutex` ініціалізовані системою до першого виклику `initialize()`.
+
+**Контракт:** Якщо плагін запускає власний FreeRTOS task з доступом до шини — він **зобов'язаний** брати відповідний mutex перед кожною транзакцією.
+
+```cpp
+// ✅ Правильно: async плагін з доступом до SPI
+static void readTaskFunc(void* param) {
+    auto* self = (MyPlugin*)param;
+    while (true) {
+        // Взяти spiMutex перед будь-яким SPI зверненням
+        if (xSemaphoreTake(self->ctx->spiMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            self->ctx->spi->beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+            // ... SPI транзакція ...
+            self->ctx->spi->endTransaction();
+            xSemaphoreGive(self->ctx->spiMutex);
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
+// ✅ Правильно: async плагін з доступом до I2C
+static void readTaskFunc(void* param) {
+    auto* self = (MyPlugin*)param;
+    while (true) {
+        if (xSemaphoreTake(self->ctx->wireMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            // ... I2C транзакція ...
+            xSemaphoreGive(self->ctx->wireMutex);
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+// ✅ Плагіни БЕЗ async task (Strategy A) — mutex НЕ потрібен
+void update() override {
+    // Без task — race condition неможливий, mutex не беремо
+    // Strategy A: всі update() викликаються послідовно з одного task
+    ctx->spi->transfer(...);
+}
+```
+
+**⚠️ Cardputer-Adv специфіка:** SD карта і LDC1101 ділять одну SPI шину (G40/G14/G39).
+`SDTransport` (Logger) також використовує `ctx->spiMutex` при записі на SD.
+Будь-який плагін або сервіс що звертається до SPI з async task — зобов'язаний брати `ctx->spiMutex`.
+
+---
+
+### 1.6 Memory Management
 
 **Гарантія:** Система виділяє пам'ять для плагіна один раз при завантаженні і звільняє при shutdown.
 
