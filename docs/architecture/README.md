@@ -25,8 +25,8 @@
 **Що містить:**
 - Покроковий туторіал "Ваш перший плагін за 15 хвилин"
 - Шаблони плагінів (I2C, SPI, IMU)
-- Checklis перед публікацією
-- Debugging порадиt
+- Checklist перед публікацією
+- Debugging поради
 - Приклади складних випадків
 
 **Прочитати першим якщо ви:** Хочете додати свій датчик/модуль, контрибутите в проект
@@ -78,6 +78,32 @@
 
 ---
 
+### 6. ⚖️ [PLUGIN_CONTRACT.md](./PLUGIN_CONTRACT.md) - **Контракт система ↔ плагін**
+**Для кого:** Розробники плагінів (ОБОВ'ЯЗКОВО), архітектори, QA тестувальники  
+**Що містить:**
+- **КРИТИЧНО:** Формальний контракт між системою і плагіном
+- **Що система гарантує плагіну:**
+  - Порядок викликів методів (canInitialize → initialize → update → shutdown)
+  - Wire та SPI вже ініціалізовані (❌ заборонено викликати Wire.begin() в плагіні!)
+  - PluginContext з доступом до ресурсів (I2C, SPI, config, logger)
+  - Thread safety гарантії (update() single-threaded, read() може бути з будь-якого task)
+  - Memory management (система керує lifecycle плагіна)
+- **Що плагін зобов'язаний гарантувати системі:**
+  - Performance обмеження (update() max 10ms, read() max 5ms)
+  - Thread safety (read() має бути thread-safe через mutex)
+  - No exceptions (ESP32 не має повноцінної підтримки exceptions)
+  - Коректний shutdown() навіть якщо initialize() провалився
+  - Memory обмеження (max 8KB RAM на плагін)
+  - Валідний HealthStatus завжди
+- **Санкції за порушення:** що станеться якщо не дотриматись (crash, corrupted data, watchdog reset)
+- **Checklist перед публікацією** - як перевірити дотримання контракту
+- **Повний приклад** правильного плагіна з mutex та діагностикою
+- **Versioning** - як змінюється контракт (patch/minor/major)
+
+**Прочитати першим якщо ви:** Створюєте свій перший плагін (ОБОВ'ЯЗКОВО перед кодуванням!), хочете зрозуміти "що я повинен/можу/не можу робити"
+
+---
+
 ## 🎯 Швидкий старт: Що читати?
 
 ### Якщо ви **Менеджер проекту:**
@@ -90,20 +116,22 @@
 ---
 
 ### Якщо ви **Розробник** (хочете додати датчик):
-1. [CREATING_PLUGINS.md](./CREATING_PLUGINS.md) - розділ "Quick Start" (15 хв)
-2. [PLUGIN_DIAGNOSTICS.md](./PLUGIN_DIAGNOSTICS.md) - як додати self-test (10 хв)
-3. [PLUGIN_INTERFACES_EXTENDED.md](./PLUGIN_INTERFACES_EXTENDED.md) - типи сенсорів (5 хв)
-4. Практика: створити свій плагін з діагностикою (45 хв)
+1. **[PLUGIN_CONTRACT.md](./PLUGIN_CONTRACT.md)** - ОБОВ'ЯЗКОВО! Контракт система ↔ плагін (15 хв)
+2. [CREATING_PLUGINS.md](./CREATING_PLUGINS.md) - розділ "Quick Start" (15 хв)
+3. [PLUGIN_DIAGNOSTICS.md](./PLUGIN_DIAGNOSTICS.md) - як додати self-test (10 хв)
+4. [PLUGIN_INTERFACES_EXTENDED.md](./PLUGIN_INTERFACES_EXTENDED.md) - типи сенсорів (5 хв)
+5. Практика: створити свій плагін з діагностикою (45 хв)
 
-**Час:** 1 година 15 хвилин  
-**Результат:** Ваш перший production-ready плагін з self-diagnostics
+**Час:** 1 година 30 хвилин  
+**Результат:** Ваш перший production-ready плагін з self-diagnostics що дотримується контракту
 
 ---
 
 ### Якщо ви **QA/DevOps** (потрібна надійність):
-1. [PLUGIN_DIAGNOSTICS.md](./PLUGIN_DIAGNOSTICS.md) - повний документ (20 хв)
-2. [PLUGIN_ARCHITECTURE.md](./PLUGIN_ARCHITECTURE.md) - розділ "PluginSystem" (10 хв)
-3. Тестування: запустити diagnostics екран
+1. [PLUGIN_CONTRACT.md](./PLUGIN_CONTRACT.md) - контракт, санкції (10 хв)
+2. [PLUGIN_DIAGNOSTICS.md](./PLUGIN_DIAGNOSTICS.md) - повний документ (20 хв)
+3. [PLUGIN_ARCHITECTURE.md](./PLUGIN_ARCHITECTURE.md) - розділ “PluginSystem” (10 хв)
+4. Тестування: запустити diagnostics екран
 
 **Час:** 30 хвилин  
 **Результат:** Розумієте як діагностувати проблеми, читати логи, налаштувати моніторинг
@@ -112,8 +140,9 @@
 
 ### Якщо ви **Архітектор** (проектуєте систему):
 1. [PLUGIN_ARCHITECTURE.md](./PLUGIN_ARCHITECTURE.md) - повний документ (30 хв)
-2. [CREATING_PLUGINS.md](./CREATING_PLUGINS.md) - API reference (15 хв)
-3. [COMPARISON.md](./COMPARISON.md) - як пояснити команді (10 хв)
+2. [PLUGIN_CONTRACT.md](./PLUGIN_CONTRACT.md) - контракт і гарантії (15 хв)
+3. [CREATING_PLUGINS.md](./CREATING_PLUGINS.md) - API reference (15 хв)
+4. [COMPARISON.md](./COMPARISON.md) - як пояснити команді (10 хв)
 
 **Час:** 1 година  
 **Результат:** Повне розуміння архітектури + можете пояснити команді
@@ -162,7 +191,7 @@ ISensorPlugin, IIMUPlugin, IStoragePlugin
 
 **Configuration-Driven** - підхід коли поведінка системи визначається конфігураційними файлами, не хардкод
 
-**Service Locator** - паттерн для отримання доступу до сервісів/плагінів
+**Service Locator** — ⚠️ антипатерн в цьому проекті. Замінений `PluginContext` (DI). Описаний в глосарії лише для розуміння чому від нього відмовились.
 
 **Dependency Injection** - паттерн передачі залежностей в об'єкти (не створюють самі)
 
@@ -270,6 +299,10 @@ ISensorPlugin, IIMUPlugin, IStoragePlugin
 | | | - Plugin System базова концепція |
 | | | - Configuration-Driven підхід |
 | | | - Hardware Abstraction Layer |
+| 1.1.0 | 2026-03-10 | Додано `PLUGIN_CONTRACT.md` |
+| | | - Формальний контракт система ↔ плагін |
+| | | - `PluginContext`, Thread Safety, Memory limits |
+| | | - Переведено `initialize(PluginContext* ctx)` |
 
 ---
 

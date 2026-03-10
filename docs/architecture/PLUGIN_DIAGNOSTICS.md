@@ -90,7 +90,7 @@ public:
     
     // === Базові методи (як раніше) ===
     virtual bool canInitialize() = 0;
-    virtual bool initialize() = 0;
+    virtual bool initialize(PluginContext* ctx) = 0;  // Актуальна сигнатура
     virtual void update() = 0;
     virtual void shutdown() = 0;
     
@@ -132,6 +132,8 @@ public:
 
 class LDC1101Plugin : public ISensorPlugin {
 private:
+    PluginContext* ctx = nullptr;  // ✅ Контекст системи
+    
     // Статистика
     struct {
         uint32_t totalReads = 0;
@@ -148,33 +150,38 @@ public:
     // === Базова ініціалізація ===
     
     bool canInitialize() override {
-        // Швидка перевірка I2C
-        Wire.begin();
-        Wire.beginTransmission(LDC1101_ADDR);
-        uint8_t result = Wire.endTransmission();
+        // На цьому етапі context ще немає
+        // Повертаємо true — перевіримо hardware в initialize()
+        return true;
+    }
+    
+    bool initialize(PluginContext* context) override {
+        ctx = context;  // ✅ Зберігаємо контекст
+        
+        // ✅ Швидка перевірка I2C через вже ініціалізований Wire
+        ctx->wire->beginTransmission(LDC1101_ADDR);
+        uint8_t result = ctx->wire->endTransmission();
         
         if (result == 0) {
             diagnostics.currentStatus = HealthStatus::OK;
-            return true;
         } else if (result == 2) {
             diagnostics.currentStatus = HealthStatus::NOT_FOUND;
             diagnostics.lastError = {2, "I2C NACK - device not found"};
+            ctx->log->error(getName(), "Hardware not found at 0x2A");
             return false;
         } else {
             diagnostics.currentStatus = HealthStatus::COMMUNICATION_ERROR;
             diagnostics.lastError = {result, "I2C communication error"};
+            ctx->log->error(getName(), "I2C communication error");
             return false;
         }
-    }
-    
-    bool initialize() override {
-        if (!canInitialize()) return false;
         
         // Перевірка Device ID
         uint8_t deviceId = readRegister(LDC1101_DEVICE_ID);
         if (deviceId != 0xD4) {
             diagnostics.currentStatus = HealthStatus::SENSOR_FAULT;
             diagnostics.lastError = {3, "Invalid device ID (wrong chip?)"};
+            ctx->log->error(getName(), "Device ID mismatch");
             return false;
         }
         
@@ -187,6 +194,7 @@ public:
         if (readBack != 0x15) {
             diagnostics.currentStatus = HealthStatus::INITIALIZATION_FAILED;
             diagnostics.lastError = {4, "Configuration write failed"};
+            ctx->log->error(getName(), "Config write failed");
             return false;
         }
         
@@ -194,6 +202,8 @@ public:
         enabled = true;
         diagnostics.currentStatus = HealthStatus::OK;
         diagnostics.lastError = {0, "No error"};
+        
+        ctx->log->info(getName(), "Initialized successfully");
         return true;
     }
     
@@ -443,16 +453,16 @@ private:
     float calibrationBaseline = 0;
     
     uint8_t readRegister(uint8_t reg) {
-        Wire.beginTransmission(LDC1101_ADDR);
-        Wire.write(reg);
-        if (Wire.endTransmission() != 0) {
+        ctx->wire->beginTransmission(LDC1101_ADDR);
+        ctx->wire->write(reg);
+        if (ctx->wire->endTransmission() != 0) {
             diagnostics.failedReads++;
             return 0xFF;
         }
         
-        Wire.requestFrom(LDC1101_ADDR, (uint8_t)1);
-        if (Wire.available()) {
-            return Wire.read();
+        ctx->wire->requestFrom(LDC1101_ADDR, (uint8_t)1);
+        if (ctx->wire->available()) {
+            return ctx->wire->read();
         }
         
         diagnostics.failedReads++;
@@ -460,10 +470,10 @@ private:
     }
     
     void writeRegister(uint8_t reg, uint8_t value) {
-        Wire.beginTransmission(LDC1101_ADDR);
-        Wire.write(reg);
-        Wire.write(value);
-        Wire.endTransmission();
+        ctx->wire->beginTransmission(LDC1101_ADDR);
+        ctx->wire->write(reg);
+        ctx->wire->write(value);
+        ctx->wire->endTransmission();
     }
     
     float readRP() {
@@ -596,7 +606,10 @@ void loop() {
                     Serial.printf("  🔄 Attempting recovery...\n");
                     plugin->shutdown();
                     delay(100);
-                    if (plugin->initialize()) {
+                    // ✅ Система зберігає PluginContext при першій ініціалізації
+                    // і повертає його для повторного initialize()
+                    PluginContext* savedCtx = pluginSystem->getContext(plugin);
+                    if (plugin->initialize(savedCtx)) {
                         Serial.printf("  ✅ Recovery successful!\n");
                     }
                 }

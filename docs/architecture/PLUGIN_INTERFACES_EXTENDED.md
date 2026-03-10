@@ -114,6 +114,7 @@ public:
 
 class HX711Plugin : public ISensorPlugin {
 private:
+    PluginContext* ctx = nullptr;
     const uint8_t DOUT_PIN = 5;
     const uint8_t SCK_PIN = 6;
     HX711 scale;
@@ -135,11 +136,21 @@ public:
         };
     }
     
-    bool initialize() override {
-        scale.begin(DOUT_PIN, SCK_PIN);
+    bool canInitialize() override {
+        return true;  // GPIO завжди доступні
+    }
+    
+    bool initialize(PluginContext* context) override {
+        ctx = context;
+        scale.begin(DOUT_PIN, SCK_PIN);  // Налаштування GPIO пінів
         scale.set_scale(calibrationFactor);
         scale.tare();  // Скинути вагу
-        return scale.is_ready();
+        if (!scale.is_ready()) {
+            ctx->log->error(getName(), "HX711 not responding — check wiring");
+            return false;
+        }
+        ctx->log->info(getName(), "Initialized successfully");
+        return true;
     }
     
     SensorData read() override {
@@ -159,7 +170,7 @@ public:
     }
     
     bool calibrate() override {
-        Serial.println("Place 100g calibration weight...");
+        ctx->log->info(getName(), "Place 100g calibration weight...");
         delay(5000);
         
         float rawValue = scale.get_units(10);
@@ -228,6 +239,7 @@ public:
 
 class ST7789V2Plugin : public IDisplayPlugin {
 private:
+    PluginContext* ctx = nullptr;
     M5GFX* display;  // Використовуємо M5GFX
     
 public:
@@ -246,11 +258,17 @@ public:
         };
     }
     
-    bool initialize() override {
+    bool canInitialize() override {
+        return true;  // Дисплей завжди присутній на M5Cardputer
+    }
+    
+    bool initialize(PluginContext* context) override {
+        ctx = context;
         display = &M5Cardputer.Display;
-        display->begin();
+        // ✅ M5Cardputer.begin() вже ініціалізував дисплей
         display->setRotation(1);  // Landscape
         display->setBrightness(128);
+        ctx->log->info(getName(), "ST7789V2 initialized");
         return true;
     }
     
@@ -375,44 +393,57 @@ public:
 ### Приклад: Комплексна система ідентифікації монет
 
 ```cpp
-void analyzeCoin() {
-    // 1. Отримати всі активні сенсори
-    auto weightSensor = pluginSystem->getPlugin<ISensorPlugin>("HX711");
-    auto inductiveSensor = pluginSystem->getPlugin<ISensorPlugin>("LDC1101");
-    auto magneticSensor = pluginSystem->getPlugin<ISensorPlugin>("QMC5883L");
-    auto diameterSensor = pluginSystem->getPlugin<ISensorPlugin>("Caliper");
-    
-    // 2. Перевірити рівень (IMU)
-    auto imu = pluginSystem->getPlugin<IIMUPlugin>("BMI270");
-    if (!imu->isLevel(0.05)) {
-        displayPlugin->drawText(10, 60, "⚠️ Вирівняйте пристрій!", TFT_YELLOW);
-        return;
+// ✅ Отримуємо плагіни через PluginSystem (не глобальні змінні)
+class CoinAnalyzer {
+    PluginSystem& plugins;
+    CoinDatabase& db;
+
+public:
+    explicit CoinAnalyzer(PluginSystem& ps, CoinDatabase& coinDb)
+        : plugins(ps), db(coinDb) {}
+
+    void analyzeCoin() {
+        // 1. Отримати всі активні сенсори
+        auto weightSensor   = plugins.getPlugin<ISensorPlugin>("HX711");
+        auto inductiveSensor = plugins.getPlugin<ISensorPlugin>("LDC1101");
+        auto magneticSensor  = plugins.getPlugin<ISensorPlugin>("QMC5883L");
+        auto diameterSensor  = plugins.getPlugin<ISensorPlugin>("Caliper");
+        auto display         = plugins.getPlugin<IDisplayPlugin>("ST7789V2");
+        auto audio           = plugins.getPlugin<IAudioPlugin>("Buzzer");
+        auto storage         = plugins.getPlugin<IStoragePlugin>("SPIFFS");
+
+        // 2. Перевірити рівень (IMU)
+        auto imu = plugins.getPlugin<IIMUPlugin>("BMI270");
+        if (!imu->isLevel(0.05)) {
+            display->drawText(10, 60, "⚠️ Вирівняйте пристрій!", TFT_YELLOW);
+            return;
+        }
+        
+        // 3. Зчитати всі параметри монети
+        CoinParameters coin;
+        coin.weight    = weightSensor->read().value1;      // Вага (g)
+        coin.inductance = inductiveSensor->read().value1;  // RP (Ohm)
+        coin.magnetic  = magneticSensor->read().value1;    // Gauss
+        coin.diameter  = diameterSensor->read().value1;    // mm
+        
+        // 4. Ідентифікувати монету
+        CoinIdentity result = db.identify(coin);
+        
+        // 5. Показати результат
+        display->clear();
+        display->drawText(10, 10, result.name, TFT_WHITE);
+        display->drawText(10, 30, result.year, TFT_CYAN);
+        display->drawText(10, 50, result.metal, TFT_GREEN);
+        
+        // 6. Звуковий сигнал
+        if (result.confidence > 0.9) {
+            audio->beep(1000, 200);  // 1kHz, 200ms
+        }
+        
+        // 7. Зберегти вимірювання
+        storage->save("last_measurement", &coin, sizeof(coin));
     }
-    
-    // 3. Зчитати всі параметри монети
-    CoinParameters coin;
-    coin.weight = weightSensor->read().value1;          // Вага (g)
-    coin.inductance = inductiveSensor->read().value1;   // RP (Ohm)
-    coin.magnetic = magneticSensor->read().value1;      // Gauss
-    coin.diameter = diameterSensor->read().value1;      // mm
-    
-    // 4. Ідентифікувати монету
-    CoinIdentity result = coinDatabase->identify(coin);
-    
-    // 5. Показати результат
-    displayPlugin->clear();
-    displayPlugin->drawText(10, 10, result.name, TFT_WHITE);
-    displayPlugin->drawText(10, 30, result.year, TFT_CYAN);
-    displayPlugin->drawText(10, 50, result.metal, TFT_GREEN);
-    
-    // 6. Звуковий сигнал
-    if (result.confidence > 0.9) {
-        audioPlugin->beep(1000, 200);  // 1kHz, 200ms
-    }
-    
-    // 7. Зберегти вимірювання
-    storagePlugin->save("last_measurement", &coin, sizeof(coin));
-}
+};
 ```
 
 ---

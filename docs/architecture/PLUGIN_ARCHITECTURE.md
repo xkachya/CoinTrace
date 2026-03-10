@@ -108,7 +108,10 @@ CoinTrace/
     └── architecture/
         ├── PLUGIN_ARCHITECTURE.md     # Цей документ
         ├── CREATING_PLUGINS.md        # Гайд створення плагінів
-        └── HARDWARE_PROFILES.md       # Гайд профілів hardware
+        ├── PLUGIN_CONTRACT.md         # Формальний контракт система ↔ плагін
+        ├── PLUGIN_DIAGNOSTICS.md      # Система self-diagnostics
+        ├── PLUGIN_INTERFACES_EXTENDED.md  # Розширені інтерфейси
+        └── COMPARISON.md              # Економічне обґрунтування
 ```
 
 ---
@@ -119,6 +122,7 @@ CoinTrace/
 
 ```cpp
 // include/IPlugin.h
+// Актуальний інтерфейс — деталі в розділі PluginContext нижче
 
 class IPlugin {
 public:
@@ -128,10 +132,10 @@ public:
     virtual const char* getAuthor() const = 0;
     
     // Життєвий цикл
-    virtual bool canInitialize() = 0;  // Чи доступний hardware?
-    virtual bool initialize() = 0;      // Ініціалізація
-    virtual void update() = 0;          // Оновлення (викликається в loop)
-    virtual void shutdown() = 0;        // Вимкнення
+    virtual bool canInitialize() = 0;                    // Перевірка попередніх умов (без шин)
+    virtual bool initialize(PluginContext* ctx) = 0;     // Ініціалізація з доступом до ресурсів
+    virtual void update() = 0;                           // Оновлення (викликається в loop)
+    virtual void shutdown() = 0;                         // Вимкнення
     
     // Статус
     virtual bool isEnabled() const = 0;
@@ -206,7 +210,287 @@ public:
 
 ---
 
-## 📝 Приклад: Створення нового плагіна (QMC5883L)
+## � PluginContext: Доступ до ресурсів системи
+
+### Критична зміна архітектури (за рекомендацією рецензії)
+
+**Проблема старого підходу:** Кожен плагін викликав `Wire.begin()` самостійно → конфлікти I2C шини, перезапис пінів, непередбачувана поведінка.
+
+**Рішення:** Структура `PluginContext` передає вже ініціалізовані ресурси в плагін.
+
+```cpp
+// include/PluginContext.h
+
+struct PluginContext {
+    // Вже ініціалізовані шини
+    TwoWire*       wire;    // I2C шина (ініціалізована системою)
+    SPIClass*      spi;     // SPI шина (ініціалізована системою)
+    
+    // Система конфігурації
+    ConfigManager* config;  // Доступ до config.json та hardware профілів
+    
+    // Система логування
+    Logger*        log;     // Уніфіковане логування з рівнями (DEBUG/INFO/WARNING/ERROR)
+};
+```
+
+### Оновлений інтерфейс IPlugin
+
+```cpp
+class IPlugin {
+public:
+    // Метадані плагіна
+    virtual const char* getName() const = 0;
+    virtual const char* getVersion() const = 0;
+    virtual const char* getAuthor() const = 0;
+    
+    // Життєвий цикл
+    virtual bool canInitialize() = 0;  // Чи доступний hardware? (без PluginContext)
+    
+    // ⚠️ КРИТИЧНА ЗМІНА: initialize() тепер отримує PluginContext
+    virtual bool initialize(PluginContext* ctx) = 0;  // Ініціалізація з доступом до ресурсів
+    
+    virtual void update() = 0;          // Оновлення (викликається в loop)
+    virtual void shutdown() = 0;        // Вимкнення
+    
+    // Статус
+    virtual bool isEnabled() const = 0;
+    virtual bool isReady() const = 0;
+    
+    virtual ~IPlugin() = default;
+};
+```
+
+### Приклад використання PluginContext
+
+```cpp
+class MyPlugin : public ISensorPlugin {
+private:
+    PluginContext* ctx;  // Зберігаємо контекст
+    
+public:
+    bool canInitialize() override {
+        // На цьому етапі context ще немає
+        // Просто перевіряємо базову доступність (якщо можливо)
+        return true;
+    }
+    
+    bool initialize(PluginContext* context) override {
+        ctx = context;  // Зберігаємо контекст
+        
+        // ✅ Використовуємо вже ініціалізований I2C
+        ctx->wire->beginTransmission(I2C_ADDR);
+        if (ctx->wire->endTransmission() != 0) {
+            ctx->log->error(getName(), "I2C NACK - hardware not found");
+            return false;
+        }
+        
+        // ✅ Логуємо через уніфіковану систему
+        ctx->log->info(getName(), "Initialized successfully");
+        return true;
+    }
+    
+    void update() override {
+        // ✅ I2C операції без Wire.begin()
+        ctx->wire->beginTransmission(I2C_ADDR);
+        ctx->wire->write(REGISTER_DATA);
+        ctx->wire->endTransmission();
+        
+        // Читання даних...
+    }
+};
+```
+
+**Критично:** Плагін **НЕ повинен** викликати `Wire.begin()` або `SPI.begin()` — це робить PluginSystem один раз при старті.
+
+---
+
+## ⚡ Thread Safety та Performance контракт
+
+**ESP32-S3 має 2 ядра (Core 0 та Core 1).** FreeRTOS може викликати методи плагіна з різних tasks одночасно, що створює ризики race conditions.
+
+### Контракт система ↔ плагін
+
+Детальний контракт описано в окремому документі:
+
+### 📖 [PLUGIN_CONTRACT.md](./PLUGIN_CONTRACT.md) ← **ОБОВ'ЯЗКОВО ПРОЧИТАТИ!**
+
+**Основні правила:**
+
+#### Що гарантує система:
+- ✅ `update()` викликається тільки з main task (Core 0) — single-threaded
+- ✅ `Wire` та `SPI` вже ініціалізовані до першого виклику методів плагіна
+- ✅ `canInitialize()` → `initialize()` → `update()` — порядок гарантований
+- ✅ `shutdown()` завжди викликається перед деструктором
+
+#### Що зобов'язаний гарантувати плагін:
+- ⚠️ `update()` не блокує довше **10 ms** (використовуйте state machine або окремий task)
+- ⚠️ `read()` не блокує довше **5 ms**
+- ⚠️ `read()` **thread-safe** — може викликатись з будь-якого task одночасно з `update()`
+- ⚠️ Не кидати C++ exceptions (ESP32 не має повноцінної підтримки)
+- ⚠️ `shutdown()` працює навіть якщо `initialize()` провалився
+
+### Приклад thread-safe плагіна з mutex
+
+```cpp
+class ThreadSafePlugin : public ISensorPlugin {
+private:
+    PluginContext* ctx;
+    float cachedValue = 0.0f;
+    SemaphoreHandle_t mutex;  // FreeRTOS mutex для захисту shared state
+    
+public:
+    bool initialize(PluginContext* context) override {
+        ctx = context;
+        
+        // Створюємо mutex для thread safety
+        mutex = xSemaphoreCreateMutex();
+        if (!mutex) {
+            ctx->log->error(getName(), "Failed to create mutex");
+            return false;
+        }
+        
+        // Ініціалізація hardware...
+        return true;
+    }
+    
+    void update() override {
+        // Core 0: Читаємо з sensor
+        float newValue = readFromSensor();
+        
+        // Thread-safe запис
+        xSemaphoreTake(mutex, portMAX_DELAY);
+        cachedValue = newValue;
+        xSemaphoreGive(mutex);
+    }
+    
+    SensorData read() override {
+        // Core 1: Thread-safe читання (може викликатись одночасно з update())
+        xSemaphoreTake(mutex, portMAX_DELAY);
+        float value = cachedValue;
+        xSemaphoreGive(mutex);
+        
+        return {value, 0, 1.0f, millis(), true};
+    }
+    
+    void shutdown() override {
+        if (mutex) {
+            vSemaphoreDelete(mutex);
+            mutex = nullptr;
+        }
+    }
+};
+```
+
+**Детальніше:** [PLUGIN_CONTRACT.md](./PLUGIN_CONTRACT.md) містить повний checklis, приклади порушень та санкції.
+
+---
+
+## 💾 Memory Management
+
+### Обмеження пам'яті для embedded систем
+
+**ESP32-S3 має:**
+- 512 KB SRAM (основна пам'ять)
+- 8 MB PSRAM (опційно, повільніша)
+- 8 MB Flash (для коду)
+
+**Стратегія розподілу RAM:**
+- 350 KB — система (PluginSystem, ConfigManager, Logger, FreeRTOS)
+- 160 KB — плагіни (20 плагінів × 8 KB кожен)
+- 2 KB — резерв для stack overflow захисту
+
+### Memory контракт
+
+#### Обмеження для одного плагіна: **максимум 8 KB RAM**
+
+```cpp
+class MyPlugin : public ISensorPlugin {
+private:
+    // ✅ Малі буфери допустимі
+    float buffer[100];        // 400 bytes
+    char logBuffer[256];      // 256 bytes
+    
+    // ❌ Великі буфери НЕ допустимі
+    // float bigBuffer[10000];   // 40 KB — ПОРУШЕННЯ!
+    
+    // ✅ Для великих даних використовувати PSRAM або SD карту
+    float* psramBuffer;       // Виділяти через ps_malloc()
+};
+```
+
+### Memory lifecycle
+
+**Система керує lifecycle плагіна:**
+
+```cpp
+// PluginSystem робить:
+IPlugin* plugin = new MyPlugin();   // Один раз при старті
+// ...робота...
+delete plugin;                       // При shutdown або Hot-Reload
+```
+
+**Плагін відповідає за свою internal пам'ять:**
+
+```cpp
+class MyPlugin : public ISensorPlugin {
+private:
+    float* dynamicBuffer;
+    
+public:
+    bool initialize(PluginContext* ctx) override {
+        // Виділяємо internal пам'ять
+        dynamicBuffer = (float*)malloc(2048);  // 2 KB
+        if (!dynamicBuffer) {
+            ctx->log->error(getName(), "Out of memory");
+            return false;
+        }
+        return true;
+    }
+    
+    void shutdown() override {
+        // ✅ Звільняємо internal пам'ять
+        if (dynamicBuffer) {
+            free(dynamicBuffer);
+            dynamicBuffer = nullptr;
+        }
+    }
+};
+```
+
+### Діагностика використання пам'яті
+
+```cpp
+void MyPlugin::update() {
+    // Періодично логуємо free heap для моніторингу
+    static uint32_t lastCheck = 0;
+    if (millis() - lastCheck > 30000) {  // Кожні 30 сек
+        uint32_t freeHeap = ESP.getFreeHeap();
+        ctx->log->info(getName(), "Free heap: " + String(freeHeap) + " bytes");
+        lastCheck = millis();
+    }
+}
+```
+
+**Правило:** Якщо `ESP.getFreeHeap() < 50 KB` — система в небезпеці. Переглянути використання RAM плагінами.
+
+### Для великих даних: PSRAM
+
+```cpp
+bool initialize(PluginContext* ctx) override {
+    // Виділяємо з PSRAM (якщо доступно)
+    bigBuffer = (float*)ps_malloc(100 * 1024);  // 100 KB в PSRAM
+    if (!bigBuffer) {
+        ctx->log->warning(getName(), "PSRAM not available, using SD card");
+        // Fallback на SD карту
+    }
+    return true;
+}
+```
+
+---
+
+## �📝 Приклад: Створення нового плагіна (QMC5883L)
 
 ### 1. Створити папку плагіна
 
@@ -251,11 +535,13 @@ lib/QMC5883LPlugin/
 #define QMC5883L_PLUGIN_H
 
 #include "ISensorPlugin.h"
+#include "PluginContext.h"
 #include <Wire.h>
 
 class QMC5883LPlugin : public ISensorPlugin {
 private:
     static const uint8_t I2C_ADDR = 0x0D;
+    PluginContext* ctx = nullptr;  // ✅ Зберігаємо контекст
     bool enabled = false;
     bool ready = false;
     
@@ -267,13 +553,20 @@ public:
     
     // Життєвий цикл
     bool canInitialize() override {
-        Wire.begin();
-        Wire.beginTransmission(I2C_ADDR);
-        return (Wire.endTransmission() == 0);
+        // На цьому етапі context ще немає
+        // Повертаємо true — перевіримо hardware в initialize()
+        return true;
     }
     
-    bool initialize() override {
-        if (!canInitialize()) return false;
+    bool initialize(PluginContext* context) override {
+        ctx = context;  // ✅ Зберігаємо контекст
+        
+        // ✅ Перевірка hardware через вже ініціалізований Wire
+        ctx->wire->beginTransmission(I2C_ADDR);
+        if (ctx->wire->endTransmission() != 0) {
+            ctx->log->error(getName(), "I2C NACK at 0x0D - hardware not found");
+            return false;
+        }
         
         // Налаштування QMC5883L
         writeRegister(0x0B, 0x01); // Reset
@@ -282,6 +575,9 @@ public:
         
         ready = true;
         enabled = true;
+        
+        // ✅ Логування успішної ініціалізації
+        ctx->log->info(getName(), "Initialized successfully (200Hz, ±8G)");
         return true;
     }
     
@@ -290,9 +586,13 @@ public:
     }
     
     void shutdown() override {
+        if (!ctx) return;  // Захист якщо initialize() не викликався
+        
         writeRegister(0x09, 0x00); // Standby mode
         enabled = false;
         ready = false;
+        
+        ctx->log->info(getName(), "Shutdown complete");
     }
     
     // Статус
@@ -322,25 +622,28 @@ public:
     
     bool calibrate() override {
         // Калібрування магнітометра (складніше, тут спрощено)
+        ctx->log->warning(getName(), "Calibration not implemented yet");
         return true;
     }
     
 private:
     void writeRegister(uint8_t reg, uint8_t value) {
-        Wire.beginTransmission(I2C_ADDR);
-        Wire.write(reg);
-        Wire.write(value);
-        Wire.endTransmission();
+        // ✅ Використовуємо ctx->wire замість Wire
+        ctx->wire->beginTransmission(I2C_ADDR);
+        ctx->wire->write(reg);
+        ctx->wire->write(value);
+        ctx->wire->endTransmission();
     }
     
     int16_t readRegister16(uint8_t reg) {
-        Wire.beginTransmission(I2C_ADDR);
-        Wire.write(reg);
-        Wire.endTransmission();
+        // ✅ Використовуємо ctx->wire замість Wire
+        ctx->wire->beginTransmission(I2C_ADDR);
+        ctx->wire->write(reg);
+        ctx->wire->endTransmission();
         
-        Wire.requestFrom(I2C_ADDR, (uint8_t)2);
-        int16_t low = Wire.read();
-        int16_t high = Wire.read();
+        ctx->wire->requestFrom(I2C_ADDR, (uint8_t)2);
+        int16_t low = ctx->wire->read();
+        int16_t high = ctx->wire->read();
         return (high << 8) | low;
     }
 };
@@ -859,15 +1162,22 @@ pluginSystem->scanForPlugins("lib/");
 ```
 
 ### 2. Hot-Reload плагінів
+
+> ⚠️ **Застереження:** ESP32-S3 не підтримує динамічне завантаження `.so`/`.dylib` в runtime як на десктопних ОС. `reloadPlugin()` означає переініціалізацію `shutdown()` → `initialize()` в рамках поточної сесії. Для оновлення **коду** плагіна потрібне повне перезавантаження пристрою (OTA прошивка).
+
 ```cpp
-// Перезавантажити плагін без перезавантаження пристрою
+// Переініціалізація плагіна без перезавантаження (конфігураційні зміни)
 pluginSystem->reloadPlugin("QMC5883L");
 ```
 
 ### 3. OTA оновлення плагінів
+
+> ⚠️ **Потребує перезавантаження:** OTA завантажує нову прошивку в flash, після якої потрібний reboot.
+
 ```cpp
 // Завантажити новий плагін через WiFi
 pluginSystem->installPluginOTA("https://github.com/xkachya/CoinTrace/releases/download/plugins/qmc5883l-v2.0.0.zip");
+// Після завантаження — виконати ESP.restart() для активації
 ```
 
 ### 4. Plugin Marketplace

@@ -27,6 +27,7 @@ lib/BH1750Plugin/
   "description": "Digital light intensity sensor (lux meter)",
   "type": "sensor",
   "i2c_address": "0x23",
+  "contract_version": "1.0.0",
   "dependencies": ["Wire"],
   "enabled_by_default": false
 }
@@ -39,11 +40,13 @@ lib/BH1750Plugin/
 #define BH1750_PLUGIN_H
 
 #include "ISensorPlugin.h"
+#include "PluginContext.h"
 #include <Wire.h>
 
 class BH1750Plugin : public ISensorPlugin {
 private:
     static const uint8_t I2C_ADDR = 0x23;
+    PluginContext* ctx = nullptr;  // ✅ Контекст системи
     bool ready = false;
     
 public:
@@ -54,21 +57,29 @@ public:
     
     // Перевірка доступності hardware
     bool canInitialize() override {
-        Wire.begin();
-        Wire.beginTransmission(I2C_ADDR);
-        return (Wire.endTransmission() == 0);
+        // На цьому етапі context ще немає
+        // Повертаємо true — перевіримо в initialize()
+        return true;
     }
     
     // Ініціалізація
-    bool initialize() override {
-        if (!canInitialize()) return false;
+    bool initialize(PluginContext* context) override {
+        ctx = context;  // ✅ Зберігаємо контекст
+        
+        // ✅ Перевірка hardware через вже ініціалізований Wire
+        ctx->wire->beginTransmission(I2C_ADDR);
+        if (ctx->wire->endTransmission() != 0) {
+            ctx->log->error(getName(), "I2C NACK at 0x23 - check wiring");
+            return false;
+        }
         
         // BH1750 Power On + Continuous High Resolution Mode
-        Wire.beginTransmission(I2C_ADDR);
-        Wire.write(0x10);
-        Wire.endTransmission();
+        ctx->wire->beginTransmission(I2C_ADDR);
+        ctx->wire->write(0x10);
+        ctx->wire->endTransmission();
         
         ready = true;
+        ctx->log->info(getName(), "Initialized successfully");
         return true;
     }
     
@@ -79,10 +90,14 @@ public:
     
     // Вимкнення
     void shutdown() override {
-        Wire.beginTransmission(I2C_ADDR);
-        Wire.write(0x00); // Power Down
-        Wire.endTransmission();
+        if (!ctx) return;  // Захист якщо initialize() не викликався
+        
+        ctx->wire->beginTransmission(I2C_ADDR);
+        ctx->wire->write(0x00); // Power Down
+        ctx->wire->endTransmission();
         ready = false;
+        
+        ctx->log->info(getName(), "Shutdown complete");
     }
     
     // Статус
@@ -96,12 +111,12 @@ public:
     SensorData read() override {
         if (!ready) return {0, 0, 0, 0};
         
-        Wire.requestFrom(I2C_ADDR, (uint8_t)2);
-        if (Wire.available() != 2) {
+        ctx->wire->requestFrom(I2C_ADDR, (uint8_t)2);
+        if (ctx->wire->available() != 2) {
             return {0, 0, 0, 0};
         }
         
-        uint16_t raw = (Wire.read() << 8) | Wire.read();
+        uint16_t raw = (ctx->wire->read() << 8) | ctx->wire->read();
         float lux = raw / 1.2; // Convert to lux
         
         return {
@@ -182,8 +197,8 @@ BH1750               ✅ 1.0.0  ← Готово!
 
 ### Тестування
 - [ ] Плагін компілюється без помилок
-- [ ] `canInitialize()` повертає `false` якщо hardware не підключено
-- [ ] `initialize()` коректно налаштовує датчик
+- [ ] `canInitialize()` повертає `true` (перевірка hardware в `initialize()`)
+- [ ] `initialize(ctx)` коректно налаштовує датчик
 - [ ] `read()` повертає реальні дані
 - [ ] `shutdown()` коректно вимикає датчик
 - [ ] Плагін не падає якщо hardware відключити під час роботи
@@ -204,6 +219,7 @@ BH1750               ✅ 1.0.0  ← Готово!
 class MyI2CSensorPlugin : public ISensorPlugin {
 private:
     static const uint8_t I2C_ADDR = 0x??;
+    PluginContext* ctx = nullptr;  // ✅ Контекст системи
     bool ready = false;
     
 public:
@@ -212,15 +228,23 @@ public:
     const char* getAuthor() const override { return "Your Name"; }
     
     bool canInitialize() override {
-        Wire.begin();
-        Wire.beginTransmission(I2C_ADDR);
-        return (Wire.endTransmission() == 0);
+        // На цьому етапі context ще немає
+        return true;
     }
     
-    bool initialize() override {
-        if (!canInitialize()) return false;
+    bool initialize(PluginContext* context) override {
+        ctx = context;  // ✅ Зберігаємо контекст
+        
+        // ✅ Перевірка hardware через ctx->wire (вже ініціалізований!)
+        ctx->wire->beginTransmission(I2C_ADDR);
+        if (ctx->wire->endTransmission() != 0) {
+            ctx->log->error(getName(), "Hardware not found");
+            return false;
+        }
+        
         // TODO: Налаштувати датчик
         ready = true;
+        ctx->log->info(getName(), "Initialized");
         return true;
     }
     
@@ -247,6 +271,7 @@ public:
 ```cpp
 class MySPISensorPlugin : public ISensorPlugin {
 private:
+    PluginContext* ctx = nullptr;
     SPIClass* spi = nullptr;
     uint8_t csPin;
     bool ready = false;
@@ -255,14 +280,14 @@ public:
     MySPISensorPlugin(uint8_t cs = 5) : csPin(cs) {}
     
     bool canInitialize() override {
-        pinMode(csPin, OUTPUT);
-        digitalWrite(csPin, HIGH);
+        // ✅ Без апаратних шин — ctx ще недоступний
         return true;
     }
     
-    bool initialize() override {
-        spi = new SPIClass(VSPI);
-        spi->begin();
+    bool initialize(PluginContext* context) override {
+        ctx = context;
+        spi = ctx->spi;  // ✅ SPI вже ініціалізований системою
+        // ❌ НЕ викликати spi->begin()!
         // TODO: Налаштувати SPI датчик
         ready = true;
         return true;
@@ -324,23 +349,28 @@ public:
 ```cpp
 class ConfigurableSensorPlugin : public ISensorPlugin {
 private:
+    PluginContext* ctx = nullptr;
     struct Config {
         uint8_t sampleRate;
         float threshold;
         bool autoCalibrate;
     } config;
     
-public:
-    void loadConfig(const char* configPath) {
-        // Читання з data/plugins/mysensor.json
-        File f = SPIFFS.open(configPath, "r");
-        // TODO: Парсинг JSON
-        config.sampleRate = 100;
-        config.threshold = 0.5;
+    void loadConfig() {
+        // ✅ Читання конфігурації через ctx->config
+        config.sampleRate   = ctx->config->getInt("mysensor.sampleRate", 100);
+        config.threshold    = ctx->config->getFloat("mysensor.threshold", 0.5);
+        config.autoCalibrate = ctx->config->getBool("mysensor.autoCalibrate", false);
     }
     
-    bool initialize() override {
-        loadConfig("/data/plugins/mysensor.json");
+public:
+    bool canInitialize() override {
+        return true;
+    }
+    
+    bool initialize(PluginContext* context) override {
+        ctx = context;
+        loadConfig();  // ✅ Тепер ctx доступний
         // Використовувати config.sampleRate, etc.
         return true;
     }
@@ -352,6 +382,7 @@ public:
 ```cpp
 class AsyncSensorPlugin : public ISensorPlugin {
 private:
+    PluginContext* ctx = nullptr;
     SemaphoreHandle_t dataMutex;
     TaskHandle_t readTask;
     SensorData latestData;
@@ -370,9 +401,15 @@ private:
     }
     
 public:
-    bool initialize() override {
+    bool canInitialize() override {
+        return true;
+    }
+    
+    bool initialize(PluginContext* context) override {
+        ctx = context;
         dataMutex = xSemaphoreCreateMutex();
         xTaskCreate(readTaskFunc, "SensorRead", 4096, this, 5, &readTask);
+        ctx->log->info(getName(), "Async task started");
         return true;
     }
     
@@ -424,26 +461,27 @@ public:
 ```cpp
 class MyPlugin : public ISensorPlugin {
 private:
-    bool debugMode = true;
-    
-    void log(const char* msg) {
-        if (debugMode) {
-            Serial.printf("[%s] %s\n", getName(), msg);
-        }
-    }
+    PluginContext* ctx = nullptr;
     
 public:
-    bool initialize() override {
-        log("Starting initialization...");
+    bool canInitialize() override {
+        return true;
+    }
+    
+    bool initialize(PluginContext* context) override {
+        ctx = context;
+        ctx->log->debug(getName(), "Starting initialization...");
         
-        if (!canInitialize()) {
-            log("ERROR: Hardware not found!");
+        // Перевірка hardware
+        ctx->wire->beginTransmission(I2C_ADDR);
+        if (ctx->wire->endTransmission() != 0) {
+            ctx->log->error(getName(), "ERROR: Hardware not found!");
             return false;
         }
         
-        log("Hardware detected");
+        ctx->log->debug(getName(), "Hardware detected");
         // ... налаштування
-        log("Initialization complete");
+        ctx->log->info(getName(), "Initialization complete");
         return true;
     }
 };
@@ -455,20 +493,28 @@ public:
 void testPlugin() {
     auto* plugin = new MyPlugin();
     
+    // Мок контексту для тесту
+    PluginContext mockCtx = {
+        .wire   = &Wire,
+        .spi    = &SPI,
+        .config = nullptr,  // TODO: підключити ConfigManager
+        .log    = &testLogger
+    };
+    
     Serial.println("=== Plugin Test ===");
     Serial.printf("Name: %s\n", plugin->getName());
     Serial.printf("Version: %s\n", plugin->getVersion());
     
-    Serial.print("Hardware check... ");
+    Serial.print("Pre-check... ");
     if (plugin->canInitialize()) {
-        Serial.println("✅ Found");
+        Serial.println("✅ OK");
     } else {
-        Serial.println("❌ Not found");
+        Serial.println("❌ Failed");
         return;
     }
     
     Serial.print("Initialization... ");
-    if (plugin->initialize()) {
+    if (plugin->initialize(&mockCtx)) {  // ✅ передаємо PluginContext
         Serial.println("✅ OK");
     } else {
         Serial.println("❌ Failed");
@@ -552,14 +598,23 @@ zip -r BH1750Plugin-v1.0.0.zip .
 
 ## 🎓 Поради досвідчених розробників
 
-### 1. Завжди перевіряйте hardware
+### 1. canInitialize() — без апаратних шин
 
 ```cpp
 bool canInitialize() override {
-    // НЕ падай якщо hardware не знайдено!
-    // Просто поверни false
-    Wire.beginTransmission(I2C_ADDR);
-    return (Wire.endTransmission() == 0);
+    // ✅ НЕ використовуємо Wire/SPI тут — ctx ще недоступний
+    // Реальна перевірка hardware відбувається на початку initialize()
+    return true;
+}
+
+bool initialize(PluginContext* context) override {
+    ctx = context;
+    // ✅ Тут перевіряємо hardware:
+    ctx->wire->beginTransmission(I2C_ADDR);
+    if (ctx->wire->endTransmission() != 0) {
+        return false;  // Hardware не знайдений — initialize() повернув false
+    }
+    // ... ініціалізація
 }
 ```
 
