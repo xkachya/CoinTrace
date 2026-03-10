@@ -104,16 +104,23 @@ void loop() {
   // Keyboard event handling
   if (M5Cardputer.Keyboard.isChange()) {
     if (M5Cardputer.Keyboard.isPressed()) {
-      Keyboard_Class::KeysState status = M5Cardputer.Keyboard.keysState();
+      // Use reference — keysState() returns KeysState&.
+      // Copying by value crashes: the vector copy-ctor reads data()==nullptr
+      // when hid_keys/modifier_keys are non-empty but not yet allocated
+      // (race with keyboard scanner, or physical-button-only press).
+      const Keyboard_Class::KeysState& status = M5Cardputer.Keyboard.keysState();
       
-      LOG_DEBUG(&gLogger, "Input", "Key: %c (0x%02X)", status.word[0], status.word[0]);
-      
-      // Display key on screen
-      M5Cardputer.Display.fillRect(0, M5Cardputer.Display.height() - 20, 
-                                     M5Cardputer.Display.width(), 20, BLACK);
-      M5Cardputer.Display.setCursor(10, M5Cardputer.Display.height() - 18);
-      M5Cardputer.Display.setTextColor(YELLOW);
-      M5Cardputer.Display.printf("Key: %c", status.word[0]);
+      if (!status.word.empty()) {
+        const char key = status.word[0];
+        LOG_DEBUG(&gLogger, "Input", "Key: %c (0x%02X)", key, (uint8_t)key);
+
+        // Display key on screen
+        M5Cardputer.Display.fillRect(0, M5Cardputer.Display.height() - 20,
+                                       M5Cardputer.Display.width(), 20, BLACK);
+        M5Cardputer.Display.setCursor(10, M5Cardputer.Display.height() - 18);
+        M5Cardputer.Display.setTextColor(YELLOW);
+        M5Cardputer.Display.printf("Key: %c", key);
+      }
     }
   }
   
