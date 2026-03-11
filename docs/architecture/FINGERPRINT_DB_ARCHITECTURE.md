@@ -131,12 +131,12 @@ Slope чого, в яких одиницях, яким методом? Не сп
   },
 
   "raw": {
-    "rp0":  0.0,
-    "rp1":  312.4,
-    "rp2":  267.5,
-    "rp3":  183.2,
-    "l0":   0.0,
-    "l1":   724.1
+    "rp0":  10247.3,
+    "rp1":  10559.7,
+    "rp2":  10514.8,
+    "rp3":  10430.5,
+    "l0":   1204.3,
+    "l1":   1928.4
   },
 
   "vector": {
@@ -204,13 +204,15 @@ ISO-подібний код металу:
 - `freq_hz` — integer Hz. Не "1MHz", не 1000, не 1000000.0 — тільки `1000000`.
 - `steps_mm` — масив integer мм. `[0, 1, 3]` = три виміри: без спейсера, 1 мм, 3 мм.
 - `coil_model` — string. `"MIKROE-3240"` для LDC1101 Click Board. Якщо саморобна котушка — `"custom-v1"` + `"coil_turns"`.
-- `resp_time_code` — integer 0–7, відповідає RESP_TIME bits в LDC1101 config регістрі.
+- `resp_time_code` — integer 0–7, відповідає RESP_TIME bits в LDC1101 config регістрі (таблиця `code → час конверсії`: `LDC1101_ARCHITECTURE.md §RESP_TIME`; значення за замовчуванням = 6 ≈ 4 мс, баланс шум/швидкість).
 
 #### `raw` — source of truth
 
 Значення безпосередньо з LDC1101, після RP_SET scaling, до будь-яких обчислень:
 - `rp0..rp3` — Rp в Ohm на кожній відстані зі `steps_mm` + baseline (rp0 = baseline без монети)
 - `l0, l1` — L в µH: baseline і при 0 мм
+
+> **Семантика `rp0`/`l0` — абсолютні значення, не дельти.** `rp0` і `l0` — абсолютні показники LDC1101 RP_DATA / L_DATA, виміряні **без монети**. Для MIKROE-3240 типово: `rp0` ≈ 5000–15000 Ohm, `l0` ≈ 500–2000 µH. `rp1`/`rp2`/`rp3` і `l1` — абсолютні показники **з монетою**. Зберігання абсолютних значень дозволяє діагностику та крос-девайс порівняння.
 
 **Всі значення float32 (JSON number з 4 знаками після коми).**
 
@@ -272,7 +274,7 @@ dist = √(w₁·(dRp1_n - ref_dRp1_n)² + w₂·(k1-ref_k1)² + w₃·(k2-ref_k
           + w₄·(slope-ref_slope)² + w₅·(dL1_n-ref_dL1_n)²)
 
 де:
-  dRp1_n  = dRp1 / dRp1_MAX   (нормалізований до [0..1], dRp1_MAX ≈ 500 для типових монет)
+  dRp1_n  = dRp1 / dRp1_MAX   (нормалізований до [0..1], dRp1_MAX = 600 Ohm — §3.3)
   dL1_n   = dL1 / dL1_MAX     (нормалізований аналогічно)
   w₁..w₅  = ваги, підбираються емпірично на validation set
 ```
@@ -484,6 +486,19 @@ Firmware порівнює з centroid, використовує radius для co
 **Алгоритм обчислення centroid (в CI `tools/build_aggregates.py`):**
 
 ```python
+# Допоміжна функція відстані — рівноважна Euclidean на нормалізованих координатах
+# (Діє до отримання validation set R-01 і підбору w₁–w₅; §3.3)
+DRPL1_MAX = 600.0   # Ohm  — dRp1_MAX з §3.3
+DL1_MAX   = 2000.0  # µH   — dL1_MAX з §3.3
+
+def weighted_euclidean(v1, v2):
+    """Нормалізована Euclidean по 5 компонентах. Замінити на weighted після R-01."""
+    def nrm(v):
+        return (v["dRp1"] / DRPL1_MAX, v["k1"], v["k2"],
+                v["slope_rp_per_mm_lr"], v["dL1"] / DL1_MAX)
+    return sum((a - b) ** 2 for a, b in zip(nrm(v1), nrm(v2))) ** 0.5
+
+
 def build_aggregate(records):
     published = [r for r in records if r["metadata"].get("status") == "published"]
     vecs = [r["vector"] for r in published]
@@ -497,8 +512,10 @@ def build_aggregate(records):
     if len(vecs) >= 5:
         distances = [weighted_euclidean(v, centroid) for v in vecs]
         lo, hi = percentile(distances, 10), percentile(distances, 90)
-        vecs = [v for v, d in zip(vecs, distances) if lo <= d <= hi]
-        centroid = weighted_mean(vecs, weights[:len(vecs)])  # recompute
+        # Зберігаємо відповідність vecs↔weights після trim (FIX P-04: weights[:N] брав хибні ваги що вижили)
+        pairs = [(v, w) for v, w, d in zip(vecs, weights, distances) if lo <= d <= hi]
+        vecs, weights = zip(*pairs) if pairs else (list(vecs), list(weights))
+        centroid = weighted_mean(vecs, weights)  # recompute after trim
 
     # radius_95pct = 95-й перцентиль відстаней від centroid
     distances = [weighted_euclidean(v, centroid) for v in vecs]
@@ -508,7 +525,7 @@ def build_aggregate(records):
 ```
 
 **Поведінка firmware при відсутньому `_aggregate.json`** (перший contributor в папці):
-1. Firmware читає всі `*.json` у папці (до `MAX_RECORDS_PER_COIN = 10` — захист від OOM)
+1. Firmware читає всі `*.json` у папці (до `MAX_RECORDS_PER_COIN = 10` — захист від OOM; константа оголошується в `src/config/fingerprint_config.h`)
 2. Обчислює centroid in-memory без ваг (спрощений шлях, одноразово)
 3. Використовує `σ = 0.15` bootstrap значення (§3.4) для confidence
 4. Результат не зберігається на SD — CI генерує `_aggregate.json` після merge PR
@@ -544,7 +561,7 @@ def build_aggregate(records):
       "metal_code":     "XAG925",
       "coin_name":      "Austrian Maria Theresa Thaler",
       "year":           1780,
-      "centroid":       {"dRp1_n": 0.617, "k1": 0.715, "k2": 0.385,
+      "centroid":       {"dRp1_n": 0.514, "k1": 0.715, "k2": 0.385,
                          "slope": -0.128, "dL1_n": 0.005},
       "radius_95pct":   0.012,
       "records_count":  3
@@ -556,6 +573,14 @@ def build_aggregate(records):
 **RAM бюджет:** `centroid` (5 float) + `radius_95pct` (1 float) + metadata (~60 байт) ≈ **80 байт/запис**.
 - 1000 монет × 80 байт = **80 KB** — безпечно для 337 KB RAM ESP32-S3.
 - `aggregate_path` в index не зберігається — шлях будується динамічно: `samples/{protocol_id}/{metal_code}/{id}/_aggregate.json`.
+
+> **Правило нормалізації при генерації `index.json` (P-03 — обов'язково для `build_index.py`):**
+> CI-скрипт переводить абсолютні значення з `_aggregate.json` (де centroid.ђRp1 — в Ohm) в нормалізовані:
+> - `dRp1_n = centroid.dRp1 / 600`
+> - `dL1_n  = centroid.dL1  / 2000`
+>
+> де `600` і `2000` — константи `DRPL1_MAX` / `DL1_MAX` з `src/config/fingerprint_config.h` (відповідають `dRp1_MAX` і `dL1_MAX` з §3.3).
+> Firmware нормалізує новий вимір аналогічно **перед** порівнянням з `index.json`. Порушення цього правила призведе до того, що `dRp1` (0–600 range) домінує над `k1`, `k2` (0–1 range) і пошук стане некоректним.
 
 **Двофазний пошук:**
 1. Фаза 1 (RAM): порівнення нового вектора з усіма centroid-ами → топ-10 кандидатів за weighted Euclidean
@@ -778,4 +803,4 @@ Firmware вибирає папку за `conditions.protocol_id` запису.
 
 ---
 
-*Версія документа: 1.2.0 — 2026-03-11*
+*Версія документа: 1.3.0 — 2026-03-11*
