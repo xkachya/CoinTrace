@@ -1,7 +1,7 @@
 # Fingerprint Database Architecture — CoinTrace
 
 **Статус:** 📐 Запроектовано, очікує імплементації  
-**Версія:** 1.0.0  
+**Версія:** 1.4.0  
 **Дата:** 2026-03-11  
 **Автор:** Yuriy Kachmaryk
 
@@ -434,11 +434,13 @@ jobs:
 
 ```python
 # tools/validate_fingerprint.py
+# Примітка: BOUNDS перевіряє абсолютні значення `vector` (Ohm, µH) —
+# не нормалізовані координати centroid з `index.json` (де dRp1_n = dRp1/600).
 BOUNDS = {
     "k1":   (0.3, 0.99),   # фізичні межі для будь-якого металу
     "k2":   (0.1, 0.98),
-    "dRp1": (10.0, 800.0), # Ohm
-    "dL1":  (0.0, 2000.0), # µH
+    "dRp1": (10.0, 800.0), # Ohm — абсолютне значення з vector
+    "dL1":  (0.0, 2000.0), # µH  — абсолютне значення з vector
     "slope_rp_per_mm_lr": (-0.35, -0.01),  # LR по Y=[1.0,k1,k2] vs X=[0,1,3]; фіз. межі ≈(−0.30,−0.02)
 }
 
@@ -479,6 +481,9 @@ record_3: k1=0.719, k2=0.383
   "std_dev":  {"dRp1": 2.1,   "k1": 0.003, "k2": 0.002, ...},
   "radius_95pct": 0.012
 }
+```
+
+> **Одиниці в `_aggregate.json`:** `centroid.dRp1` і `std_dev.dRp1` — **абсолютні (Ohm)**; `centroid.dL1` — **абсолютні (µH)**. `k1`, `k2`, `slope` — безрозмірні. При генерації `index.json` CI нормалізує `dRp1` і `dL1` (→ `dRp1_n`, `dL1_n`). Два файли навмисно мають різні одиниці — `_aggregate.json` для CI-аналітики, `index.json` для firmware RAM-пошуку.
 ```
 
 Firmware порівнює з centroid, використовує radius для confidence calibration.
@@ -575,7 +580,7 @@ def build_aggregate(records):
 - `aggregate_path` в index не зберігається — шлях будується динамічно: `samples/{protocol_id}/{metal_code}/{id}/_aggregate.json`.
 
 > **Правило нормалізації при генерації `index.json` (P-03 — обов'язково для `build_index.py`):**
-> CI-скрипт переводить абсолютні значення з `_aggregate.json` (де centroid.ђRp1 — в Ohm) в нормалізовані:
+> CI-скрипт переводить абсолютні значення з `_aggregate.json` (де `centroid.dRp1` — в Ohm) в нормалізовані:
 > - `dRp1_n = centroid.dRp1 / 600`
 > - `dL1_n  = centroid.dL1  / 2000`
 >
@@ -803,4 +808,4 @@ Firmware вибирає папку за `conditions.protocol_id` запису.
 
 ---
 
-*Версія документа: 1.3.0 — 2026-03-11*
+*Версія документа: 1.4.0 — 2026-03-11*
