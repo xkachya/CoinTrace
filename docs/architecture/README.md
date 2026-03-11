@@ -155,6 +155,26 @@
 
 ---
 
+### 10. 🗄️ [FINGERPRINT_DB_ARCHITECTURE.md](./FINGERPRINT_DB_ARCHITECTURE.md) - **Архітектура бази відбитків монет**
+**Для кого:** Всі хто збирає дані, розробники DB/matching алгоритму, community contributors  
+> ⚠️ Прочитати **до** першого публічного release або першого зовнішнього contributor PR  
+
+**Що містить:**
+- **Чому backward compatibility тут важча ніж для REST API** — мовчазна несумісність без помилок
+- Чотири незалежних виміри поламки: schema/algo/protocol versioning, фізичні залежності k1/k2, `slope` семантика, ненормалізований `dRp1`
+- **Канонічна схема v1:** `schema_ver` + `algo_ver` + `protocol_ver` + `conditions` + `raw` + `vector`
+- **`conditions` — ключ сумісності:** два records порівнянні тільки якщо `freq_hz` і `steps_mm` однакові
+- **`raw` — source of truth:** єдина основа для міграційних скриптів при зміні algo
+- Таксономія змін: safe (додати optional поле) vs breaking (перейменувати, змінити одиниці)
+- **Git-based community DB:** CI validation, статистична агрегація дублікатів, автоіндекс
+- **Frozen physical constants:** чому `SINGLE_FREQUENCY` не можна тримати в `platformio.ini`
+- 6 ADR + 10-пунктовий блокуючий чек-лист до першого public release
+- Міграційні стратегії для кожного типу version bump
+
+**Прочитати першим якщо ви:** Хочете зрозуміти чому `"version": 1` недостатньо, готуєте перший fingerprint запис, або плануєте community contributions
+
+---
+
 ## 🎯 Швидкий старт: Що читати?
 
 ### Якщо ви **Менеджер проекту:**

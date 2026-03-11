@@ -724,11 +724,22 @@ class CoinTrace:
 
 ### 8.6 Backward Compatibility Fingerprint Database
 
-**Проблема:** Якщо змінити формат fingerprint vector між v1 і v2 — вся community database стає несумісною.  
-**Митигація:**  
-- Поле `"version": 1` в кожному JSON fingerprint зараз
-- Міграційні скрипти при зміні формату
-- Математично: k1 і k2 — device-independent, тому різні пристрої дають ті самі значення → безпечне накопичення community даних
+**Проблема:** Якщо змінити формат fingerprint vector між v1 і v2 — вся community database стає несумісною. Особливість: це **мовчазна** несумісність — firmware не впаде з помилкою, а тихо видасть неправильний результат (confidence 0.6 там де має бути 0.95).
+
+**Чотири незалежних виміри поламки:**
+1. `"version": 1` покриває три різних речі (schema / algo / protocol) — потрібні три окремих поля
+2. k1 і k2 залежать від `freq_hz` і `steps_mm` — вони мають бути частиною fingerprint, не конфіга
+3. `slope` в README.md семантично невизначений (одиниці? метод обчислення?)
+4. `dRp1` ненормалізований → домінує в Euclidean distance → скасовує size-independence
+
+**Детальний аналіз і всі ADR:** 📄 **[FINGERPRINT_DB_ARCHITECTURE.md](./FINGERPRINT_DB_ARCHITECTURE.md)**
+
+**Коротка митигація (§10 Чек-лист в FINGERPRINT_DB_ARCHITECTURE.md):**
+- Три версійних поля: `schema_ver`, `algo_ver`, `protocol_ver`
+- Секція `conditions` (freq_hz, steps_mm, coil_model) — обов'язкова, ключ сумісності
+- Секція `raw` (rp0..rp3, l0, l1) — source of truth для майбутніх міграцій
+- CI validation (GitHub Actions) для всіх PR в `database/`
+- `SINGLE_FREQUENCY` → `config/measurement_protocol_v1.h` (не в `platformio.ini`)
 
 ---
 
