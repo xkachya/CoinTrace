@@ -143,7 +143,7 @@ Slope чого, в яких одиницях, яким методом? Не сп
     "dRp1":               312.4,
     "k1":                 0.856,
     "k2":                 0.587,
-    "slope_rp_per_mm_lr": -21.7,
+    "slope_rp_per_mm_lr": -0.137,
     "dL1":                724.1
   },
 
@@ -155,6 +155,7 @@ Slope чого, в яких одиницях, яким методом? Не сп
     "contributor":        "ykachmaryk",
     "reference_quality":  "believed_authentic",
     "mint_certificate":   "",
+    "status":             "published",
     "notes":              ""
   }
 }
@@ -248,6 +249,16 @@ algo_ver = 1:
 
 - `mint_certificate` — ідентифікатор сертифіката монетного двору (якщо є). Порожній рядок якщо відсутній.
 
+- `status` — lifecycle стан запису:
+
+  | Значення | Де зберігається | CI дозволяє PR в `samples/`? |
+  |---|---|---|
+  | `"draft"` | Тільки локально на SD (невідома монета, незавершений запис) | ❌ Ні |
+  | `"reviewed"` | Локально, перевірено власником, готовий до submission | ✅ Так |
+  | `"published"` | Прийнятий в community database через merged PR | ✅ Так |
+
+  За замовчуванням (якщо поле відсутнє): `"reviewed"`. Draft records зберігаються виключно локально — CI блокує будь-який PR де хоча б один record має `"status": "draft"`.
+
 > **Важливо:** Перший запис кластера XAG999 ПОВИНЕН мати `reference_quality: "certified"`, бо він є точкою відліку для всього кластера. Зміщений anchor = зміщені всі порівняння.
 
 ### 3.3 Метрика відстані для ідентифікації
@@ -267,6 +278,44 @@ dist = √(w₁·(dRp1_n - ref_dRp1_n)² + w₂·(k1-ref_k1)² + w₃·(k2-ref_k
 ```
 
 **Альтернатива для v1.1 — Mahalanobis distance**, якщо з'явиться достатньо записів для оцінки covariance matrix per-class. Не для v1.
+
+> **`dRp1_MAX` та `dL1_MAX` — звідки ці числа:**
+> - `dRp1_MAX = 600 Ohm` — фізичний максимум ΔRp для MIKROE-3240 при 1 MHz (велика срібна монета ~40 мм). Значення ≥500 Ohm реальні. Уточнюється після validation set (**R-01**).
+> - `dL1_MAX = 2000 µH` — верхня межа ΔL для феромагнітного матеріалу (сталь, нікель). Кольорові метали (Ag, Cu, Au, Al): ΔL ≈ 0–50 µH. Магнітні (Fe, Ni): 200–2000 µH. Уточнюється аналогічно.
+
+---
+
+### 3.4 Confidence transform: відстань → відсоток
+
+**Функція для відображення на екрані та BLE RESULT характеристиці (§5.3 CONNECTIVITY_ARCHITECTURE.md):**
+
+```
+confidence = exp(−dist² / σ²)   [0.0 .. 1.0]
+
+де:
+  dist = weighted Euclidean з §3.3
+  σ    = radius_95pct / √(−ln(0.05))  ≈  radius_95pct / 1.732
+```
+
+`radius_95pct` береться з `_aggregate.json` кластера. Якщо `_aggregate.json` відсутній (перший запис кластера) — σ = **0.15** як bootstrap значення.
+
+| σ | confidence при dist=0 | confidence при dist=0.1 | confidence при dist=0.2 |
+|---|---|---|---|
+| 0.05 | 100% | 2% | ~0% |
+| **0.15** | **100%** | **64%** | **17%** |
+| 0.30 | 100% | 90% | 64% |
+
+**Sigma = 0.15 — рекомендований старт** до накопичення validation set. Дозволяє розрізняти близькі метали (Ag999 vs Ag925) без надмірного розширення зони прийняття.
+
+**Порогові значення для відображення:**
+
+| confidence | Колір | Напис |
+|---|---|---|
+| ≥ 0.90 | 🟢 Зелений | "Висока схожість" |
+| 0.70–0.89 | 🟡 Жовтий | "Середня схожість" |
+| < 0.70 | 🔴 Червоний | "Слабка схожість / підозра" |
+
+> Ці пороги — початкові. Уточнюються після validation set. Не кодувати як константи — виносити в конфігурацію firmware.
 
 ---
 
@@ -432,6 +481,38 @@ record_3: k1=0.719, k2=0.383
 
 Firmware порівнює з centroid, використовує radius для confidence calibration.
 
+**Алгоритм обчислення centroid (в CI `tools/build_aggregates.py`):**
+
+```python
+def build_aggregate(records):
+    published = [r for r in records if r["metadata"].get("status") == "published"]
+    vecs = [r["vector"] for r in published]
+
+    # Зважений centroid: certified = вага 3.0, інші = 1.0
+    weights = [3.0 if r["metadata"]["reference_quality"] == "certified" else 1.0
+               for r in published]
+    centroid = weighted_mean(vecs, weights)
+
+    # Outlier trim (тільки якщо ≥ 5 записів): відкинути top/bottom 10%
+    if len(vecs) >= 5:
+        distances = [weighted_euclidean(v, centroid) for v in vecs]
+        lo, hi = percentile(distances, 10), percentile(distances, 90)
+        vecs = [v for v, d in zip(vecs, distances) if lo <= d <= hi]
+        centroid = weighted_mean(vecs, weights[:len(vecs)])  # recompute
+
+    # radius_95pct = 95-й перцентиль відстаней від centroid
+    distances = [weighted_euclidean(v, centroid) for v in vecs]
+    return {"centroid": centroid, "std_dev": std_dev(vecs),
+            "radius_95pct": percentile(distances, 95),
+            "records_count": len(vecs)}
+```
+
+**Поведінка firmware при відсутньому `_aggregate.json`** (перший contributor в папці):
+1. Firmware читає всі `*.json` у папці (до `MAX_RECORDS_PER_COIN = 10` — захист від OOM)
+2. Обчислює centroid in-memory без ваг (спрощений шлях, одноразово)
+3. Використовує `σ = 0.15` bootstrap значення (§3.4) для confidence
+4. Результат не зберігається на SD — CI генерує `_aggregate.json` після merge PR
+
 ### 6.3 Index staleness та merge conflicts
 
 `index.json` що перераховує всі монети → при кожному PR оновлюється → merge conflicts між паралельними PR.
@@ -448,6 +529,37 @@ Firmware порівнює з centroid, використовує radius для co
     git add database/index.json
     git commit -m "chore: rebuild fingerprint index [skip ci]"
 ```
+
+**Формат `index.json` — оптимізований для in-memory пошуку на ESP32-S3:**
+
+```json
+{
+  "version": 1,
+  "generated_at": "2026-03-11T14:00:00Z",
+  "protocols": ["p1_1mhz_013mm"],
+  "entries": [
+    {
+      "id":             "xag925/at_thaler_1780",
+      "protocol_id":    "p1_1mhz_013mm",
+      "metal_code":     "XAG925",
+      "coin_name":      "Austrian Maria Theresa Thaler",
+      "year":           1780,
+      "centroid":       {"dRp1_n": 0.617, "k1": 0.715, "k2": 0.385,
+                         "slope": -0.128, "dL1_n": 0.005},
+      "radius_95pct":   0.012,
+      "records_count":  3
+    }
+  ]
+}
+```
+
+**RAM бюджет:** `centroid` (5 float) + `radius_95pct` (1 float) + metadata (~60 байт) ≈ **80 байт/запис**.
+- 1000 монет × 80 байт = **80 KB** — безпечно для 337 KB RAM ESP32-S3.
+- `aggregate_path` в index не зберігається — шлях будується динамічно: `samples/{protocol_id}/{metal_code}/{id}/_aggregate.json`.
+
+**Двофазний пошук:**
+1. Фаза 1 (RAM): порівнення нового вектора з усіма centroid-ами → топ-10 кандидатів за weighted Euclidean
+2. Фаза 2 (SD): читання `_aggregate.json` тільки для топ-10 → уточнення confidence з radius_95pct
 
 ### 6.4 Структура директорій database
 
@@ -650,6 +762,8 @@ Firmware вибирає папку за `conditions.protocol_id` запису.
 - [ ] **DB-09** Налаштувати автогенерацію `database/index.json` через CI
 - [ ] **DB-10** Задокументувати `CONTRIBUTOR_GUIDE.md` — як вимірювати і подавати fingerprint
 - [ ] **DB-11** Написати `database/protocols/registry.json` з першим записом `p1_1mhz_013mm`, статус `"canonical"`
+- [ ] **DB-12** Додати `metadata.status` в JSON Schema (DB-02) + CI правило: `status == "draft"` → блокувати PR в `samples/`
+- [ ] **DB-13** Специфікувати tolerance spacerів ≤ ±0.05 мм у `CONTRIBUTOR_GUIDE.md` (DB-10): метод верифікації — штангенциркуль + reference вимір відомої монети перед першим submission
 
 ---
 
@@ -664,4 +778,4 @@ Firmware вибирає папку за `conditions.protocol_id` запису.
 
 ---
 
-*Версія документа: 1.1.0 — 2026-03-11*
+*Версія документа: 1.2.0 — 2026-03-11*
