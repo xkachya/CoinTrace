@@ -121,7 +121,25 @@
 
 ---
 
-### 8. 🔌 [LDC1101_ARCHITECTURE.md](./LDC1101_ARCHITECTURE.md) - **Архітектура плагіна індуктивного сенсора**
+### 8. 🌐 [CONNECTIVITY_ARCHITECTURE.md](./CONNECTIVITY_ARCHITECTURE.md) - **Connectivity: транспорти, протоколи, клієнти**
+**Для кого:** Розробники, архітектори, всі хто буде реалізовувати WiFi/BLE/Serial протоколи  
+**Що містить:**
+- Інвентар hardware можливостей (USB/WiFi/BLE/QR і їх trade-off)
+- **Інструменти для дебагінгу** до появи UI: Python serial client, nRF Connect, httpie, wscat, mock server
+- Serial Protocol: JSON-Lines + COBS binary — вибір і обґрунтування
+- HTTP REST API: повний список endpoints + `/api/v1/` versioning
+- WebSocket streaming для real-time attenuation curve
+- BLE GATT service + Web Bluetooth API (без native app)
+- Клієнтські стратегії: Web UI в LittleFS, PWA, Python CLI
+- **6 ADR (Architecture Decision Records)** — рішення що не можна змінити після публічного release
+- Аналіз 6 потенційних боттлнеків при масштабуванні
+- Фазовий роадмап (Фаза 0 → 1 → 1.5 → 2)
+
+**Прочитати першим якщо ви:** Починаєте WiFi/BLE фазу, хочете знати які інструменти потрібні для дебагінгу, або приймаєте рішення про протоколи
+
+---
+
+### 9. 🔌 [LDC1101_ARCHITECTURE.md](./LDC1101_ARCHITECTURE.md) - **Архітектура плагіна індуктивного сенсора**
 **Для кого:** Імплементатор `LDC1101Plugin`, розробники інших SPI сенсорів  
 **Що містить:**
 - Фізика вимірювання: RP (провідність) + L (магнітна проникність) — тільки комбінація дозволяє ідентифікувати метал
