@@ -1,9 +1,9 @@
 # CoinTrace Logger: Архітектурний документ
 
 **Тип документа:** Архітектурна специфікація  
-**Версія:** 2.1.0  
+**Версія:** 2.1.1  
 **Попередня версія:** 2.0.0 (10 березня 2026) — виправлено за результатами рецензії v1.0.0  
-**Дата:** 12 березня 2026  
+**Дата:** 13 березня 2026  
 **Контекст:** CoinTrace Plugin System, ESP32-S3 (M5Stack Cardputer-Adv, ESP32-S3FN8)  
 **Статус:** ✅ Фаза 1 Implemented (11 березня 2026) — Serial + RingBuffer працюють на девайсі, 40 unit-тестів пройдено
 
@@ -959,6 +959,8 @@ void Logger::errorFromISR(const char* component, const char* msg);
 | `dispatch()` | **5 мс** | Гарячий шлях (hot path). Drop-on-timeout прийнятний — NF1 < 100 мкс. |
 | `removeTransport()`, `getEntries()`, `clear()` | **10 мс** | Адміністративні операції (не hot path). Подовжений timeout знижує false-drop під час SD rotation. |
 
+> **[SPI-3] `spi_vspi_mutex` — рекомендований timeout:** `SDTransport` захоплює `spi_vspi_mutex` перед SD write (разом з `LDC1101Plugin::measure()` та `FingerprintDB::loadAggregate()`). Рекомендований timeout: **50 мс** (LDC1101 burst макс ~45 мс + margin). `portMAX_DELAY` ЗАБОРОНЕНИЙ — ризик system hang при hardware failure. При timeout-і: `LOG_WARN("SDTransport", "spi_vspi_mutex timeout, dropping entry")` + drop.
+
 ---
 
 ## 9. Управління пам'яттю
@@ -982,12 +984,12 @@ Logger об'єкт:                ~112 байт
 
 Stack per log->info() call:    256 байт   (localBuf, тимчасово)
 
-RingBufferTransport(100):      ~21.5 KB   (22 000 B = 220 B × 100; SRAM при usePsram=false)
+RingBufferTransport(250):      ~53.7 KB   (55 000 B = 220 B × 250; SRAM при usePsram=false; STORAGE ADR-ST-006)
 WebSocketTransport queue(64):  ~14 KB     (PSRAM або heap)
 SDTransport queue(32):          ~7 KB
 BLETransport queue(32):         ~7 KB
 ──────────────────────────────────────
-ВСЬОГО (4 транспорти):         ~49.5 KB
+ВСЬОГО (4 транспорти):         ~81.7 KB
 Якщо ring + WS + SD в PSRAM:  SRAM < 1 KB (тільки mutex і pointers)
 ```
 

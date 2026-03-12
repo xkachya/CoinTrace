@@ -1,8 +1,8 @@
 # Fingerprint Database Architecture — CoinTrace
 
 **Статус:** 📐 Запроектовано, очікує імплементації  
-**Версія:** 1.5.0  
-**Дата:** 2026-03-12  
+**Версія:** 1.5.1  
+**Дата:** 2026-03-13  
 **Автор:** Yuriy Kachmaryk
 
 > ⚠️ **КРИТИЧНО:** Рішення в цьому документі не можна змінити після появи першого зовнішнього contributor (першого PR від сторонньої людини). Прочитати і погодити до початку будь-якого збору даних.
@@ -604,7 +604,7 @@ def build_aggregate(records):
 
 **Двофазний пошук:**
 1. Фаза 1 (RAM): порівнення нового вектора з усіма centroid-ами → топ-10 кандидатів за weighted Euclidean
-2. Фаза 2 (SD): читання `_aggregate.json` тільки для топ-10 → уточнення confidence з radius_95pct
+2. Фаза 2 (SD): читання `_aggregate.json` тільки для топ-10 → уточнення confidence з radius_95pct. **[SPI-2]** `FingerprintDB::loadAggregate()` захоплює `spi_vspi_mutex` (таймаут 50 мс) перед SD read. `portMAX_DELAY` заборонено. НЕ викликає `Logger::*` під час SD IO (запобігає deadlock з `SDTransport`).
 
 ### 6.4 Структура директорій database
 
