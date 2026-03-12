@@ -30,7 +30,7 @@
 
 **Характер знахідок:** переважно «залишкові ефекти» PRE-патчів — виправлення в одному місці не поширилось на всі посилання (PRE-10 scope incomplete), або нові секції (§12.1, §14.1) потребують доповнення після введення open-once LittleFSTransport pattern.
 
-**Блокуючі для P-3:** A-H1 (false confidence in concurrency) + B-H1 (crash в DEGRADED mode) + C-H1 (filesystem corruption при Hard Reset). Решта — medium/low, не блокують, але повинні бути виправлені до першого production build.
+**Блокуючі для P-3:** A-H1 + A-H2 + B-H1 + C-H1 — **всі закриті в v1.3.2 (commit `224bf26`)**. FUTURE backlog (8 відкритих з v1.2.0 + 4 нових) — не блокують P-3, але повинні бути вирішені до першого production build. Зведений backlog: §11.
 
 ---
 
@@ -38,16 +38,16 @@
 
 | ID | Модуль | Знахідка | Severity | Статус |
 |---|---|---|---|---|
-| **A-H1** | Concurrency | ADR-ST-005 thread safety table: `incrementMeasCount()` — "Один atomic NVS write" після PRE-10 | 🟠 HIGH | Відкрита |
-| **A-H2** | Concurrency | ADR-ST-006 conclusions: "один atomic write на вимір. Немає race condition." — аналогічний residue | 🟠 HIGH | Відкрита |
-| **B-H1** | Boot | §17.2 [5]: LittleFSTransport ініціалізується безумовно, навіть якщо mountData() [4] повернув DEGRADED | 🟠 HIGH | Відкрита |
-| **C-H1** | Hard Reset | §14.1: LittleFSTransport bg task не зупиняється перед `LittleFS_data.format()` → UB | 🟠 HIGH | Відкрита |
-| **D-M1** | Write Model | §13.1: критичне попередження "139 діб до failure" використовує 72 writes/day (per-entry модель, до PRE-8) | 🟡 MEDIUM | Відкрита |
-| **E-M1** | Concurrency | Lock ordering `lfs_data_mutex_` → `spi_vspi_mutex` не задокументована → майбутній deadlock ризик | 🟡 MEDIUM | Відкрита |
-| **E-M2** | Concurrency | Watchdog free space check (`esp_littlefs_info()`) — не специфіковано, що виклик має бути всередині `lfs_data_mutex_` scope | 🟡 MEDIUM | Відкрита |
-| **E-M3** | Concurrency | `LittleFSDataGuard::ok()=false` — контракт поведінки handler при тайм-ауті не специфікований | 🟡 MEDIUM | Відкрита |
-| **F-L1** | Documentation | §16 Soft Reset row: "⚠️ Measurements optional" — суперечить PRE-5 (measurements не видаляються) | 🟢 LOW | Відкрита |
-| **F-L2** | Documentation | §10 OQ-07 summary: "Вирішено: 3×300KB" — залишок до PRE-1; правильно "2×200KB" | 🟢 LOW | Відкрита |
+| **A-H1** | Concurrency | ADR-ST-005 thread safety table: `incrementMeasCount()` — "Один atomic NVS write" після PRE-10 | 🟠 HIGH | ✅ SA2-1 (v1.3.2) |
+| **A-H2** | Concurrency | ADR-ST-006 conclusions: "один atomic write на вимір. Немає race condition." — аналогічний residue | 🟠 HIGH | ✅ SA2-2 (v1.3.2) |
+| **B-H1** | Boot | §17.2 [5]: LittleFSTransport ініціалізується безумовно, навіть якщо mountData() [4] повернув DEGRADED | 🟠 HIGH | ✅ SA2-3 (v1.3.2) |
+| **C-H1** | Hard Reset | §14.1: LittleFSTransport bg task не зупиняється перед `LittleFS_data.format()` → UB | 🟠 HIGH | ✅ SA2-4 (v1.3.2) |
+| **D-M1** | Write Model | §13.1: критичне попередження "139 діб до failure" використовує 72 writes/day (per-entry модель, до PRE-8) | 🟡 MEDIUM | ✅ SA2-5 (v1.3.2) |
+| **E-M1** | Concurrency | Lock ordering `lfs_data_mutex_` → `spi_vspi_mutex` не задокументована → майбутній deadlock ризик | 🟡 MEDIUM | ✅ SA2-6 (v1.3.2) |
+| **E-M2** | Concurrency | Watchdog free space check (`esp_littlefs_info()`) — не специфіковано, що виклик має бути всередині `lfs_data_mutex_` scope | 🟡 MEDIUM | ✅ SA2-7 (v1.3.2) |
+| **E-M3** | Concurrency | `LittleFSDataGuard::ok()=false` — контракт поведінки handler при тайм-ауті не специфікований | 🟡 MEDIUM | ✅ SA2-8 (v1.3.2) |
+| **F-L1** | Documentation | §16 Soft Reset row: "⚠️ Measurements optional" — суперечить PRE-5 (measurements не видаляються) | 🟢 LOW | ✅ SA2-9 (v1.3.2) |
+| **F-L2** | Documentation | §10 OQ-07 summary: "Вирішено: 3×300KB" — залишок до PRE-1; правильно "2×200KB" | 🟢 LOW | ✅ SA2-10 (v1.3.2) |
 
 ---
 
@@ -422,17 +422,48 @@ PRE-1 (Variant A, v1.3.0) замінив 3×300KB → 2×200KB. OQ-07 closing te
 
 ---
 
-## 11. Backlog — додаткові знахідки
+## 11. Backlog — зведений список всіх відкритих знахідок
 
-Наступні знахідки не блокують P-3, але мають бути вирішені до production release:
+> Цей розділ є **єдиним авторитетним backlog реєстром** — включає перенесені знахідки з v1.2.0 (FUTURE-1..9) та нові SA2-FUTURE-1..4. FUTURE-4 з v1.2.0 закрита через SA2-4.
 
-| ID | Знахідка | Рекомендація |
-|---|---|---|
-| **SA2-FUTURE-1** | Hard Reset (§14.1) не очищає coredump partition (FUTURE-9 carryover) — після Hard Reset + reboot, [7.5] знайде stale coredump і збереже її в щойно відформатований LittleFS | Додати крок `b2. esp_partition_erase_range(coredump_partition, 0, size)` до Hard Reset sequence |
-| **SA2-FUTURE-2** | TCA8418 DEGRADED + LittleFS_data corrupt = "stuck boot" без виходу (§17.2 [1.5] note) — GPIO0 recovery форматує тільки data, не є повним Hard Reset | Документувати secondary recovery path: GPIO0 утримання > 10s = повний Hard Reset без клавіатури |
-| **SA2-FUTURE-3** | FAT32 SD write-to-temp-then-rename pattern відсутня — power fail під час rotation SD copy → corrupt archive file | При SD copy: писати в `tmp_log.txt`, потім rename → `2026-03-12.txt` |
-| **SA2-FUTURE-4** | §15 P-4 `SDTransport.h/.cpp`: Logger SD async transport — per LOGGER_ARCHITECTURE, SDTransport отримує data тільки від LittleFSTransport at rotation (не є самостійним dispatch target в CoinTrace). §15 roadmap artifact — потребує clarification | Уточнити §15 P-4: SDTransport не є самостійним Logger transport у CoinTrace; SD writes відбуваються в LittleFSTransport::rotate() |
+### До першого user testing / beta
+
+| ID | Джерело | Знахідка | Рекомендація |
+|---|---|---|---|
+| **FUTURE-1** | v1.2.0 M5-M1 | Rotation тримає `lfs_data_mutex_` ~150-350 ms; guard timeout 500 ms (SA2-8) зменшує timeout errors, але rotation може затримати WebServer reads | Або incremental rotation (release mutex між rename/copy/delete), або документувати max latency SLA для WebServer |
+| **FUTURE-2** | v1.2.0 M2-M1 | `LOG_ERROR` у `LittleFSDataGuard` ctor → повний dispatch chain під час самого contention (self-amplification) | Замінити на `Serial.println("[ERR] lfs_data lock timeout")` напряму, без Logger dispatch |
+| **SA2-FUTURE-1** | v1.3.0 C-H1 note | Hard Reset не очищає coredump partition — після Hard Reset + reboot, [7.5] знайде stale coredump і збереже її в щойно відформатований LittleFS | Додати крок `b2. esp_partition_erase_range(coredump_partition, 0, size)` до §14.1 Hard Reset sequence |
+| **SA2-FUTURE-2** | v1.3.0 B-H1 note | TCA8418 DEGRADED + LittleFS_data corrupt = "stuck boot" без виходу — GPIO0 recovery форматує тільки data, не є повним Hard Reset | Документувати secondary recovery path: GPIO0 утримання > 10s = повний Hard Reset без клавіатури |
+| **SA2-FUTURE-3** | v1.3.0 Module C | FAT32: power fail під час rotation SD copy → corrupt archive file (no temp+rename pattern) | При SD copy: писати в `tmp_YYYYMMDD.txt`, потім rename → `2026-03-12.txt`; при reboot видаляти `tmp_*.txt` сміття |
+
+### До першого public release / community DB
+
+| ID | Джерело | Знахідка | Рекомендація |
+|---|---|---|---|
+| **FUTURE-3** | v1.2.0 M7-L1 | `device_id` з 2 байтів MAC = 65 536 IDs → ~50% birthday collision при 300+ пристроях | `hex(mac[2:6])` → 8 hex chars = 16M IDs; зміна = breaking до community DB submission |
+| **FUTURE-5** | v1.2.0 M7-L2 | SD hot-insertion post-boot → Matching (Deep) недоступний до reboot | Polling `SDCardManager::checkHotplug()` кожні 5 с, або `POST /api/v1/storage/remount` |
+| **SA2-FUTURE-4** | v1.3.0 Module F | §15 P-4 `SDTransport.h/.cpp` roadmap artifact: SDTransport не є самостійним Logger dispatch target у CoinTrace (SD writes в LittleFSTransport::rotate()) | Уточнити §15 P-4: видалити або перефразувати SDTransport entry |
+
+### Перед production + security review
+
+| ID | Джерело | Знахідка | Рекомендація |
+|---|---|---|---|
+| **FUTURE-6** | v1.2.0 M6-L1 | Flash повністю використаний; NVS encryption post-v1 = breaking change (потребує `nvs_keys` partition) | При наступній partition revision зарезервувати 4 KB nvs_keys за рахунок coredump або bootloader gap |
+
+### Pre-v2 / Long-term
+
+| ID | Джерело | Знахідка | Рекомендація |
+|---|---|---|---|
+| **FUTURE-7** | v1.2.0 M7-L3 | `RING_SIZE` зміна між версіями = out-of-bounds slot; не задокументовано як immutable | Додати до ADR-ST-006: `RING_SIZE = immutable post-v1`; зміна = major version bump з migration guide |
+| **FUTURE-8** | v1.2.0 M7-L3 | OTA rollback + `schema_ver` compatibility matrix не специфікована | ADR-ST-007: rollback-сумісний firmware MUST читати всі `schema_ver ≤ current`; підвищення `schema_ver` = окремий compatibility ADR |
+
+### Закриті backlog items (довідково)
+
+| ID | Джерело | Знахідка | Закрито |
+|---|---|---|---|
+| ~~FUTURE-4~~ | v1.2.0 M7-M1 | Hard Reset: LittleFSTransport bg task не зупиняється перед format() | ✅ **SA2-4** (v1.3.2) — крок a0 `LittleFSTransport::stop()` |
+| ~~FUTURE-9~~ | v1.2.0 M7-L4 | Hard Reset не очищає coredump partition | → перенесено як **SA2-FUTURE-1** (деталізовано вище) |
 
 ---
 
-*Версія STORAGE_AUDIT_v1.3.0 — другий незалежний аудит після [PRE-1]..[PRE-11]. Документ STORAGE_ARCHITECTURE.md потребує [SA2-1]..[SA2-10] для production readiness.*
+*Версія STORAGE_AUDIT_v1.3.0 — другий незалежний аудит після [PRE-1]..[PRE-11]. Всі [SA2-1]..[SA2-10] закриті в STORAGE_ARCHITECTURE.md v1.3.2 (commit `224bf26`). Відкритий backlog: 8 знахідок (FUTURE-1..3, FUTURE-5..8, SA2-FUTURE-1..4 mінус SA2-FUTURE-4 що є low). Для роботи достатньо тільки цього документа — STORAGE_AUDIT_v1.2.0.md є архівним.*
