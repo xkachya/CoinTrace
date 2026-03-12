@@ -51,7 +51,7 @@
 | **M3-M1** | Boot | `LittleFS_data.format()` на [1.5] — неясна реалізація до `mountData()` (крок [4]) | 🟡 MEDIUM | ✅ PRE-4 (v1.3.0) |
 | **M3-M2** | Boot | Нумерація boot sequence пропускає [6]; розробники можуть вважати це помилкою | 🟡 MEDIUM | ✅ PRE-6 (v1.3.0) |
 | **M3-M3** | Boot | Coredump filename `<ts>.json` = epoch timestamp після power cycle → перезапис попереднього файлу | 🟡 MEDIUM | ✅ PRE-7 (v1.3.0) |
-| **M4-M1** | NVS | `log_gen: UInt8` в NVS namespace `storage` — роль не описана, ймовірно артефакт | 🟡 MEDIUM | PRE-11 (SHOULD) |
+| **M4-M1** | NVS | `log_gen: UInt8` в NVS namespace `storage` — роль не описана, ймовірно артефакт | 🟡 MEDIUM | ✅ PRE-11 (v1.3.1) |
 | **M5-M1** | Logger | Log rotation (4 rename+delete) тримає `lfs_data_mutex_` до 200 ms > WebServer timeout 100 ms | 🟡 MEDIUM | FUTURE-1 (Backlog) |
 | **M6-M1** | NVS | `incrementMeasCount()` — TOCTOU: два окремі NVS calls, безпечно тільки з одного task | 🟡 MEDIUM | ✅ PRE-10 (v1.3.1) |
 | **M7-M1** | Misc | Hard Reset: `lfs_data.format()` (крок b) не зупиняє LittleFSTransport bg task → pending writes у відформатований FS | 🟡 MEDIUM | FUTURE-4 (Backlog) |
@@ -635,9 +635,13 @@ void incrementMeasCount();
 
 ---
 
-#### [PRE-11] 🟡 Очистити log_gen з NVS layout або задокументувати (M4-M1)
+#### [PRE-11] ✅ Видалено: log_gen з NVS layout (M4-M1)
 
-У §7.2 NVS namespace `storage`: або видалити `"log_gen": UInt8` якщо не використовується, або додати опис: коли читається/записується, як взаємодіє з rotation у §12.1.
+**Вирішено в v1.3.1:** §7.2 namespace `storage` — поле `"log_gen": UInt8` видалено. Rotation повністю визначається через `lfs_file_size()` при відкритті `log.0.jsonl` — LittleFS-native, без NVS, без додаткової точки відмови. Оновлено також §4.2 B-04 (неправильний підрахунок `log_rotate ≈ 3 entries` → `meas_count ≈ 1 entry`).
+
+**Обгрунтування:** `log_gen` був артефактом раннього дизайну — ідея NVS-лічильника rotation замінена прямим підходом. NVS budget namespace `storage`: 3 entries → 1 entry.
+
+**Оригінальна дія:** У §7.2 NVS namespace `storage`: або видалити `"log_gen": UInt8` якщо не використовується, або додати опис: коли читається/записується, як взаємодіє з rotation у §12.1.
 
 ---
 

@@ -210,7 +210,7 @@ NVS зберігає дані у pages 4 KB, entries 32 B. Розрахунок:
 WiFi (ssid 32B + pass 63B + mode 1B) ≈ 3 entries × 32B = 96 B
 Sensor cal (rp0, rp1, rp2, rp3, l0...l3 = 8 floats + 2 timestamps + valid) ≈ 15 entries
 System settings (brightness, language, log_level, dev_name) ≈ 8 entries
-Storage bookkeeping (meas_count, log_rotate) ≈ 3 entries
+Storage bookkeeping (meas_count) ≈ 1 entry  # [PRE-11] log_gen видалено, rotation → lfs_file_size()
 OTA metadata ≈ 5 entries
 BLE pairing data (bonding keys) ≈ 10 entries per device × N devices
 NVS overhead + wear leveling pages ≈ 30% overhead
@@ -408,9 +408,10 @@ NVS (60 KB)
 │   └── "display_rot": UInt8  (display rotation, default 1)
 │
 ├── namespace: "storage"                 # Storage bookkeeping
-│   ├── "meas_count": UInt32  # Total measurements ever (monotonic, НІКОЛИ не скидати)
-│   │                         # Slot index = meas_count % RING_SIZE (обчислюється, не зберігається)
-│   └── "log_gen"   : UInt8   # Log generation counter (для ротації)
+│   └── "meas_count": UInt32  # Total measurements ever (monotonic, НІКОЛИ не скидати)
+│                             # Slot index = meas_count % RING_SIZE (обчислюється, не зберігається)
+│                             # [PRE-11] видалено log_gen: rotation контролюється через lfs_file_size()
+│                             # (LittleFS-native, без NVS), не через окремий write-first counter
 │
 └── namespace: "ota"                     # OTA metadata (CONNECTIVITY ADR-007)
     ├── "confirmed" : Bool    # OTA confirmed by physical key press
