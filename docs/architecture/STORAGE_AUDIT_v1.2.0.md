@@ -4,7 +4,7 @@
 **Аудитована версія:** STORAGE_ARCHITECTURE.md v1.2.0 (commit `5c32633`)  
 **Дата аудиту:** 2026-03-12  
 **Методологія:** Formal space budget simulation · FreeRTOS concurrency modeling · Boot state machine verification · API invariant analysis  
-**Статус:** ⚠️ Перехід до P-3 ЗАБЛОКОВАНИЙ — критична знахідка M1-C1 потребує рішення
+**Статус:** ✅ [PRE-1]..[PRE-8] закрито · STORAGE_ARCHITECTURE.md оновлено до v1.3.0 (commit `5973c11`) · Перехід до P-3 розблоковано
 
 ---
 
@@ -31,7 +31,7 @@
 
 Виявлено **21 знахідку** (1 критична, 7 високих, 8 середніх, 5 низьких).
 
-**Критичний блокер:** LittleFS space budget у steady-state перевищує розмір partition на ~460 KB через неврахування block granularity (кожен файл вимірів займає повний 4 KB block незалежно від логічного розміру 700 B). Рішення необхідне до початку фази P-3.
+**✅ [PRE-1] Вирішено (Variant A, v1.3.0):** Критичний блокер LittleFS space budget закритий — log rotation скорочено до 2×200 KB. Steady-state: 435/448 blocks, margin 52 KB (~3%). Перехід до P-3 розблоковано. Решта 20 знахідок: [PRE-2]..[PRE-8] специфіковано в v1.3.0; [PRE-9]..[PRE-11] відкриті SHOULD; 9 знахідок у Backlog.
 
 ---
 
@@ -39,22 +39,22 @@
 
 | ID | Модуль | Знахідка | Severity | Статус |
 |---|---|---|---|---|
-| **M1-C1** | Space Budget | Measurements block overhead: 300×4KB=1200KB vs. 300×700B=210KB | 🔴 CRITICAL | Відкрита |
-| **M2-H1** | Concurrency | spi_vspi_mutex scope в SDTransport охоплює лише `write()`, не `open→write→close` | 🟠 HIGH | Відкрита |
-| **M2-H2** | Concurrency | LDC1101 BUSY polling всередині spi_vspi_mutex scope: до 2 с блокування SDTransport | 🟠 HIGH | Відкрита |
-| **M3-H1** | Boot | GPIO0 [1.5]: `display()` викликається до ініціалізації LCD (крок [9]) | 🟠 HIGH | Відкрита |
-| **M3-H2** | Boot | GPIO0 [1.5]: `delay(5000)` = TWDT default timeout → reset race | 🟠 HIGH | Відкрита |
-| **M4-H1** | API | `GET /measure/{id}` — відсутня перевірка `id < meas_count - RING_SIZE` → silent wrong data | 🟠 HIGH | Відкрита |
-| **M4-H2** | API | `ring_used` після Soft Reset з видаленням файлів = 300, реально = 0 | 🟠 HIGH | Відкрита |
-| **M5-H1** | Logger | open/close per log entry = 4× flash write overhead vs. keep-open+sync патерн | 🟠 HIGH | Відкрита |
-| **M2-M1** | Concurrency | `LOG_ERROR` у `LittleFSDataGuard` ctor викликає повний dispatch chain (включно SD) під час самого contention | 🟡 MEDIUM | Відкрита |
-| **M3-M1** | Boot | `LittleFS_data.format()` на [1.5] — неясна реалізація до `mountData()` (крок [4]) | 🟡 MEDIUM | Відкрита |
-| **M3-M2** | Boot | Нумерація boot sequence пропускає [6]; розробники можуть вважати це помилкою | 🟡 MEDIUM | Відкрита |
-| **M3-M3** | Boot | Coredump filename `<ts>.json` = epoch timestamp після power cycle → перезапис попереднього файлу | 🟡 MEDIUM | Відкрита |
-| **M4-M1** | NVS | `log_gen: UInt8` в NVS namespace `storage` — роль не описана, ймовірно артефакт | 🟡 MEDIUM | Відкрита |
-| **M5-M1** | Logger | Log rotation (4 rename+delete) тримає `lfs_data_mutex_` до 200 ms > WebServer timeout 100 ms | 🟡 MEDIUM | Відкрита |
-| **M6-M1** | NVS | `incrementMeasCount()` — TOCTOU: два окремі NVS calls, безпечно тільки з одного task | 🟡 MEDIUM | Відкрита |
-| **M7-M1** | Misc | Hard Reset: `lfs_data.format()` (крок b) не зупиняє LittleFSTransport bg task → pending writes у відформатований FS | 🟡 MEDIUM | Відкрита |
+| **M1-C1** | Space Budget | Measurements block overhead: 300×4KB=1200KB vs. 300×700B=210KB | 🔴 CRITICAL | ✅ PRE-1 (v1.3.0) |
+| **M2-H1** | Concurrency | spi_vspi_mutex scope в SDTransport охоплює лише `write()`, не `open→write→close` | 🟠 HIGH | ✅ PRE-3 (v1.3.0) |
+| **M2-H2** | Concurrency | LDC1101 BUSY polling всередині spi_vspi_mutex scope: до 2 с блокування SDTransport | 🟠 HIGH | PRE-9 (SHOULD) |
+| **M3-H1** | Boot | GPIO0 [1.5]: `display()` викликається до ініціалізації LCD (крок [9]) | 🟠 HIGH | ✅ PRE-4 (v1.3.0) |
+| **M3-H2** | Boot | GPIO0 [1.5]: `delay(5000)` = TWDT default timeout → reset race | 🟠 HIGH | ✅ PRE-4 (v1.3.0) |
+| **M4-H1** | API | `GET /measure/{id}` — відсутня перевірка `id < meas_count - RING_SIZE` → silent wrong data | 🟠 HIGH | ✅ PRE-2 (v1.3.0) |
+| **M4-H2** | API | `ring_used` після Soft Reset з видаленням файлів = 300, реально = 0 | 🟠 HIGH | ✅ PRE-5 (v1.3.0) |
+| **M5-H1** | Logger | open/close per log entry = 4× flash write overhead vs. keep-open+sync патерн | 🟠 HIGH | ✅ PRE-8 (v1.3.0) |
+| **M2-M1** | Concurrency | `LOG_ERROR` у `LittleFSDataGuard` ctor викликає повний dispatch chain (включно SD) під час самого contention | 🟡 MEDIUM | FUTURE-2 (Backlog) |
+| **M3-M1** | Boot | `LittleFS_data.format()` на [1.5] — неясна реалізація до `mountData()` (крок [4]) | 🟡 MEDIUM | ✅ PRE-4 (v1.3.0) |
+| **M3-M2** | Boot | Нумерація boot sequence пропускає [6]; розробники можуть вважати це помилкою | 🟡 MEDIUM | ✅ PRE-6 (v1.3.0) |
+| **M3-M3** | Boot | Coredump filename `<ts>.json` = epoch timestamp після power cycle → перезапис попереднього файлу | 🟡 MEDIUM | ✅ PRE-7 (v1.3.0) |
+| **M4-M1** | NVS | `log_gen: UInt8` в NVS namespace `storage` — роль не описана, ймовірно артефакт | 🟡 MEDIUM | PRE-11 (SHOULD) |
+| **M5-M1** | Logger | Log rotation (4 rename+delete) тримає `lfs_data_mutex_` до 200 ms > WebServer timeout 100 ms | 🟡 MEDIUM | FUTURE-1 (Backlog) |
+| **M6-M1** | NVS | `incrementMeasCount()` — TOCTOU: два окремі NVS calls, безпечно тільки з одного task | 🟡 MEDIUM | PRE-10 (SHOULD) |
+| **M7-M1** | Misc | Hard Reset: `lfs_data.format()` (крок b) не зупиняє LittleFSTransport bg task → pending writes у відформатований FS | 🟡 MEDIUM | FUTURE-4 (Backlog) |
 | **M6-L1** | NVS | Немає `nvs_keys` partition reserve; додавання NVS encryption post-v1 = breaking change | 🟢 LOW | Backlog |
 | **M7-L1** | Misc | `device_id` з 2 байтів MAC = 65 536 унікальних ID → birthday collision ~68% при 500 пристроях | 🟢 LOW | Backlog |
 | **M7-L2** | Misc | SD hot-insertion не специфікована: SD вставлена post-boot → Matching (Deep) недоступний до reboot | 🟢 LOW | Backlog |
@@ -519,9 +519,11 @@ device_id = "CoinTrace-" + hex(esp_efuse_get_custom_mac()[4:6])
 
 ---
 
-#### [PRE-2] 🟠 Специфікувати GET /api/v1/measure/{id} ID Range Validation (M4-H1)
+#### [PRE-2] ✅ Специфіковано: GET /api/v1/measure/{id} ID Range Validation (M4-H1)
 
-**Дія:** Додати до §12.3 явну специфікацію перевірки:
+**Вирішено в v1.3.0:** §12.3 — рядок `GET /api/v1/measure/{id}` доповнено обов'язковою перевіркою ID range (HTTP 404 для evicted та future IDs). Деталі у STORAGE_ARCHITECTURE.md §12.3.
+
+**Оригінальна дія:** Додати до §12.3 явну специфікацію перевірки:
 ```
 if meas_count == 0 → HTTP 404
 if id >= meas_count → HTTP 404 (майбутній вимір)
@@ -532,9 +534,11 @@ if meas_count > RING_SIZE AND id < (meas_count - RING_SIZE) → HTTP 404 (overwr
 
 ---
 
-#### [PRE-3] 🟠 Уточнити spi_vspi_mutex scope для SDTransport (M2-H1)
+#### [PRE-3] ✅ Специфіковано: spi_vspi_mutex scope для SDTransport (M2-H1)
 
-**Дія:** Додати до ADR-ST-008 та §9.4 явне формулювання:
+**Вирішено в v1.3.0:** ADR-ST-008 Consequences — додано явне формулювання scope `SD.open() → file.write() → file.close()` як атомарна операція з code-comment correct/incorrect. Деталі у STORAGE_ARCHITECTURE.md ADR-ST-008.
+
+**Оригінальна дія:** Додати до ADR-ST-008 та §9.4 явне формулювання:
 ```
 Mutex scope для SDTransport = SD.open() → file.write() → file.close()
 як одна атомарна операція. НЕ тільки file.write() call.
@@ -544,9 +548,11 @@ Mutex scope для SDTransport = SD.open() → file.write() → file.close()
 
 ---
 
-#### [PRE-4] 🟠 Виправити GPIO0 Recovery [1.5]: display() + TWDT (M3-H1, M3-H2)
+#### [PRE-4] ✅ Специфіковано: GPIO0 Recovery [1.5] (M3-H1, M3-H2, M3-M1)
 
-**Дія:** Оновити §17.2 boot sequence:
+**Вирішено в v1.3.0:** §17.2 [1.5] — `display()` → `Serial.println()`, `delay(5000)` → `50×100ms loop + esp_task_wdt_reset()`, умова `millis() < 3000` прибрана, `LittleFS.format()` → `esp_spiffs_format("littlefs_data")` (IDF API, не потребує mount). Закриває M3-H1, M3-H2, M3-M1.
+
+**Оригінальна дія:** Оновити §17.2 boot sequence:
 ```
 [1.5] GPIO0 recovery check
     if GPIO0 == LOW:
@@ -563,17 +569,21 @@ Mutex scope для SDTransport = SD.open() → file.write() → file.close()
 
 ---
 
-#### [PRE-5] 🟠 Специфікувати ring_used після Soft Reset з видаленням (M4-H2)
+#### [PRE-5] ✅ Специфіковано: ring_used після Soft Reset (M4-H2)
 
-**Дія:** Вибрати один консистентний варіант та зафіксувати у §14.1:
+**Вирішено в v1.3.0:** §14.1 — опціональний крок "видалити /measurements/*" прибрано. Задокументовано ризик inconsistency (`ring_used` vs реальні файли) при зовнішньому видаленні без скидання `meas_count`. Обрано Variant C: Soft Reset не видаляє файли — ring overwrite semantics є правильним механізмом.
+
+**Оригінальна дія:** Вибрати один консистентний варіант та зафіксувати у §14.1:
 - **Рекомендовано:** не видаляти файли при Soft Reset (перезапишуться природньо). `ring_used` завжди консистентний.
 - Або: якщо видалення опціонально — при виборі "видалити виміри" також скидати `meas_count` у NVS.
 
 ---
 
-#### [PRE-6] 🟡 Вирішити нумерацію boot sequence [6] (M3-M2)
+#### [PRE-6] ✅ Специфіковано: нумерація boot sequence [6] (M3-M2)
 
-**Дія:** Додати коментар або перенумерувати:
+**Вирішено в v1.3.0:** §17.2 — між кроками [5] і [7] додано `;[6] навмисно відсутній — esp_core_dump_image_check() перенесено у [7.5] (потребує SD mount для збереження)`. Явна документація відсутності [6].
+
+**Оригінальна дія:** Додати коментар або перенумерувати:
 ```
 ; [6] навмисно відсутній — esp_core_dump_image_check() перенесено у [7.5]
 ;     (coredump потребує SD mount для збереження)
@@ -581,16 +591,20 @@ Mutex scope для SDTransport = SD.open() → file.write() → file.close()
 
 ---
 
-#### [PRE-7] 🟡 Вирішити coredump filename без timestamp (M3-M3)
+#### [PRE-7] ✅ Специфіковано: coredump filename без timestamp (M3-M3)
 
-**Дія:** Вибрати та зафіксувати в §17.2:
+**Вирішено в v1.3.0:** §17.2 [7.5] та §17.3 — filename змінено з `<ts>.json` на `coredump_mc<meas_count>.json`. `meas_count` монотонний, унікальний, доступний без RTC.
+
+**Оригінальна дія:** Вибрати та зафіксувати в §17.2:
 - **Рекомендовано:** `coredump_mc<meas_count>.json` — унікальний, без RTC dependency.
 
 ---
 
-#### [PRE-8] 🟡 Logger: специфікувати open-once патерн (M5-H1)
+#### [PRE-8] ✅ Специфіковано: Logger open-once патерн (M5-H1)
 
-**Дія:** Додати до §12.1 explicit specification:
+**Вирішено в v1.3.0:** §12.1 — LittleFSTransport bullets доповнено: `lfs_file_open(APPEND)` один раз при старті/після rotation; `lfs_file_sync()` після кожного запису (power-fail safe); `lfs_file_close()` тільки при rotation або shutdown. Закриває M5-H1.
+
+**Оригінальна дія:** Додати до §12.1 explicit specification:
 ```
 LittleFSTransport: log.0.jsonl тримається ВІДКРИТИМ між записами.
 lfs_file_sync() після кожного запису (power-fail safe).
