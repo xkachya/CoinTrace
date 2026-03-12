@@ -29,6 +29,7 @@ bool Logger::addTransport(ILogTransport* transport) {
 }
 
 void Logger::removeTransport(ILogTransport* transport) {
+    if (!mutex_) return;  // begin() not yet called — mutex not initialized (LA-6)
     if (xSemaphoreTake(mutex_, pdMS_TO_TICKS(10)) != pdTRUE) return;
 
     for (uint8_t i = 0; i < transportCount_; i++) {
@@ -68,14 +69,9 @@ void Logger::dispatch(LogLevel level, const char* component,
 
     // 2. Форматування в СТЕК до захоплення mutex.
     //    Кожна задача форматує у власний stack frame — без shared state.
-    //    Розмір stack call: localBuf(256) + LogEntry(217) + va_list(4) ≈ 480 байт.
+    //    Розмір stack call: localBuf(256) + LogEntry(220) + va_list(4) ≈ 480 байт.
     char localBuf[LOGGER_FORMAT_BUFFER_SIZE];
     int written = vsnprintf(localBuf, sizeof(localBuf), fmt, args);
-
-    // Якщо повідомлення обрізане — позначити явно (останні 4 символи → "...")
-    if (written >= (int)sizeof(localBuf)) {
-        memcpy(localBuf + sizeof(localBuf) - 5, "...", 4);
-    }
 
     // 3. LogEntry будується на стеку — без heap allocation
     LogEntry entry;
@@ -85,6 +81,13 @@ void Logger::dispatch(LogLevel level, const char* component,
     entry.component[sizeof(entry.component) - 1] = '\0';
     strncpy(entry.message, localBuf, sizeof(entry.message) - 1);
     entry.message[sizeof(entry.message) - 1] = '\0';
+
+    // LA-2: маркер обрізання на рівні entry.message (не localBuf).
+    // localBuf=256, entry.message=192: стара логіка memcpy до localBuf[251] ніколи
+    // не досягала entry.message (strncpy копіює лише 191 символ).
+    if (written >= (int)sizeof(entry.message)) {
+        memcpy(entry.message + sizeof(entry.message) - 4, "...", 4);
+    }
 
     // 4. Mutex: null-guard якщо begin() ще не викликано (defense).
     if (!mutex_) return;

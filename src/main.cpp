@@ -13,7 +13,7 @@
 // ── Logger globals (ініціалізуються першими в setup()) ────────────
 static Logger              gLogger;
 static SerialTransport     gSerialTransport(Serial, SerialTransport::Format::TEXT, 115200);
-static RingBufferTransport gRingTransport(100, /*usePsram=*/true);
+static RingBufferTransport gRingTransport(100, /*usePsram=*/false);  // ESP32-S3FN8: NO PSRAM (LA-1)
 
 // Display CoinTrace version and configuration on startup
 void displayStartupInfo() {

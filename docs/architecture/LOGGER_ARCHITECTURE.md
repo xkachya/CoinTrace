@@ -1,9 +1,9 @@
 # CoinTrace Logger: Архітектурний документ
 
 **Тип документа:** Архітектурна специфікація  
-**Версія:** 2.0.0  
-**Попередня версія:** 1.0.0 (10 березня 2026) — виправлено за результатами рецензії  
-**Дата:** 10 березня 2026  
+**Версія:** 2.1.0  
+**Попередня версія:** 2.0.0 (10 березня 2026) — виправлено за результатами рецензії v1.0.0  
+**Дата:** 12 березня 2026  
 **Контекст:** CoinTrace Plugin System, ESP32-S3 (M5Stack Cardputer-Adv, ESP32-S3FN8)  
 **Статус:** ✅ Фаза 1 Implemented (11 березня 2026) — Serial + RingBuffer працюють на девайсі, 40 unit-тестів пройдено
 
@@ -37,6 +37,34 @@ v1.0 мав і `RingBuffer ringBuffer` всередині Logger, і `RingBuffer
 v1.0 не показував реалізацію. Без mutex — corruption масиву під час dispatch.
 
 **Виправлення v2.0:** `removeTransport()` показаний повністю, обов'язково під mutex.
+
+---
+
+## ⚠️ Виправлення відносно v2.1.0 (Tier 1 аудит, LA-1..LA-10)
+
+### LA-4: sizeof(LogEntry) = 220, не 217
+`struct LogEntry` має природній розмір 217 байт, але GCC Xtensa ABI додає 3 байти tail padding → `sizeof(LogEntry) = 220 байт`. Виправлено коментар у §7, таблицю пам'яті та stack usage у §9.
+
+### LA-5: відсутнє обґрунтування LOGGER_MAX_TRANSPORTS = 4
+Ліміт 4 = максимальна кількість одночасних транспортів у будь-якій підтримуваній конфігурації. Додано таблицю конфігурацій у §5.
+
+### LA-6: removeTransport() краш без попереднього begin()
+`xSemaphoreTake(nullptr, ...)` → assert/crash на FreeRTOS якщо `Logger::begin()` ще не виконано. Додано `if (!mutex) return;` null-guard у §5.
+
+### LA-7: addTransport() — thread-safety контракт не задокументований
+`transportCount++` є non-atomic. Додано анотацію: MUST be called only from setup(), before xTaskCreate() у §5.
+
+### LA-8: atomicity globalMinLevel не задокументована
+R/W без mutex — безпечно на Xtensa LX7 ISA (байт-атомарність гарантована). Додано примітку у §8 для безпеки при портуванні.
+
+### LA-9: асиметрія mutex timeout 5 мс / 10 мс без обґрунтування
+5 мс = hot path dispatch (drop-on-timeout, NF1 < 100 мкс); 10 мс = admin ops (removeTransport, rotation). Додано таблицю у §8.
+
+### LA-10: LOG_DEBUG() є dead code у всіх builds
+`-DCOINTRACE_DEBUG=1` відсутній в `platformio.ini [env:cointrace-dev]` → `LOG_DEBUG()` завжди no-op. Додано приклад у §10.
+
+### LA-1 (spec): §11 sample code usePsram=true → false
+ESP32-S3FN8 не має зовнішнього PSRAM. Виправлено sample code (§11) та конфіг `logger.json` (§10).
 
 ---
 
@@ -222,6 +250,12 @@ protected:
 #include "LogEntry.h"
 #include <freertos/semphr.h>
 
+// LOGGER_MAX_TRANSPORTS = 4: максимальна кількість одночасних транспортів
+// у будь-якій підтримуваній конфігурації (LA-5):
+//   Production:  Serial + RingBuffer + SDTransport + LittleFSTransport = 4
+//   Development: Serial + RingBuffer + WebSocket   + LittleFSTransport = 4
+//   BLE mode:    Serial + RingBuffer + BLE                             = 3
+// 5-й транспорт одночасно не використовується в жодному режимі.
 #define LOGGER_MAX_TRANSPORTS      4
 #define LOGGER_FORMAT_BUFFER_SIZE  256  // Stack-local — не член класу
 
@@ -235,6 +269,8 @@ public:
     // Logger НЕ бере ownership transport*. Caller управляє lifetime.
     // Якщо transport->begin() повертає false — транспорт додається
     // але позначається inactive (isActive() == false).
+    // ⚠️ THREAD SAFETY: MUST be called from setup() only, before any xTaskCreate().
+    //   transportCount++ є non-atomic; concurrent calls → data race (LA-7).
     bool addTransport(ILogTransport* transport);
 
     // Thread-safe: може викликатись з будь-якого task.
@@ -280,12 +316,6 @@ void Logger::dispatch(LogLevel level, const char* component,
     char localBuf[LOGGER_FORMAT_BUFFER_SIZE];
     int written = vsnprintf(localBuf, sizeof(localBuf), fmt, args);
 
-    // Якщо повідомлення обрізане — позначити явно
-    if (written >= (int)sizeof(localBuf)) {
-        // Замінити останні 4 символи на "..." щоб читач побачив обрізання
-        memcpy(localBuf + sizeof(localBuf) - 5, "...", 4);
-    }
-
     // 3. LogEntry будується на стеку — без heap allocation
     LogEntry entry;
     entry.timestampMs = millis();
@@ -294,6 +324,13 @@ void Logger::dispatch(LogLevel level, const char* component,
     entry.component[sizeof(entry.component) - 1] = '\0';
     strncpy(entry.message, localBuf, sizeof(entry.message) - 1);
     entry.message[sizeof(entry.message) - 1] = '\0';
+
+    // LA-2: маркер обрізання на рівні entry.message, а не localBuf.
+    // localBuf[256] → entry.message[192]: стара логіка memcpy до localBuf[251] ніколи
+    // не досягала entry.message (strncpy копіює лише 191 символ).
+    if (written >= (int)sizeof(entry.message)) {
+        memcpy(entry.message + sizeof(entry.message) - 4, "...", 4);
+    }
 
     // 4. Mutex тільки навколо dispatch loop
     //    Timeout 5 мс: якщо система перевантажена — drop запису, не блокування.
@@ -324,6 +361,7 @@ void Logger::dispatch(LogLevel level, const char* component,
 
 ```cpp
 void Logger::removeTransport(ILogTransport* transport) {
+    if (!mutex) return;  // begin() ще не викликано — mutex не ініціалізований (LA-6)
     if (xSemaphoreTake(mutex, pdMS_TO_TICKS(10)) != pdTRUE) return;
 
     for (uint8_t i = 0; i < transportCount; i++) {
@@ -811,10 +849,15 @@ struct LogEntry {
                                  // Максимум 19 символів + null terminator
     char     message[192];       // Форматоване повідомлення (якщо довше — "...")
 
-    // Розмір: 4 + 1 + 20 + 192 = 217 байт
-    // RingBuffer(100) = ~21 KB — рекомендовано в PSRAM
+    // sizeof(LogEntry) = 220 байт:
+    //   4 (timestampMs) + 1 (level) + 20 (component) + 192 (message) = 217 природній
+    //   + 3 tail padding (GCC Xtensa ABI вирівнює struct до 4 байт) = 220 байт (LA-4)
+    // RingBuffer(100) = 220 × 100 = 22 000 байт ≈ 21.5 KB
 
     void toText(char* buf, uint16_t bufSize) const;
+    // ⚠️ LA-3: component і message мають бути JSON-escaped перед вставкою.
+    //   Символи " а \ у тексті логу зламлюють валідність JSON.
+    //   Реалізація: jsonEscape(src, dst, dstLen) перед snprintf (LogEntry.cpp).
     void toJSON(char* buf, uint16_t bufSize) const;
     void toBLECompact(char* buf, uint16_t bufSize) const;
 
@@ -901,6 +944,21 @@ API закладено але без реалізації:
 void Logger::errorFromISR(const char* component, const char* msg);
 ```
 
+### Атомарність globalMinLevel (LA-8)
+
+`globalMinLevel` має тип `uint8_t`. Читання в `dispatch()` та запис у `setGlobalMinLevel()` виконуються **без mutex**.
+На **Xtensa LX7** (ESP32-S3) байт-операції атомарні на рівні ISA — race condition відсутній.
+
+> **⚠️ Портування:** перед портом на RISC-V, Cortex-M або x86 — перевірити байт-атомарність
+> цільової ISA. За необхідності використати `std::atomic<uint8_t> globalMinLevel`.
+
+### Обґрунтування асиметрії mutex timeout (LA-9)
+
+| Операція | Timeout | Обґрунтування |
+|---|---|---|
+| `dispatch()` | **5 мс** | Гарячий шлях (hot path). Drop-on-timeout прийнятний — NF1 < 100 мкс. |
+| `removeTransport()`, `getEntries()`, `clear()` | **10 мс** | Адміністративні операції (не hot path). Подовжений timeout знижує false-drop під час SD rotation. |
+
 ---
 
 ## 9. Управління пам'яттю
@@ -924,12 +982,12 @@ Logger об'єкт:                ~112 байт
 
 Stack per log->info() call:    256 байт   (localBuf, тимчасово)
 
-RingBufferTransport(100):      ~21 KB     (PSRAM: 8 MB доступно)
+RingBufferTransport(100):      ~21.5 KB   (22 000 B = 220 B × 100; SRAM при usePsram=false)
 WebSocketTransport queue(64):  ~14 KB     (PSRAM або heap)
 SDTransport queue(32):          ~7 KB
 BLETransport queue(32):         ~7 KB
 ──────────────────────────────────────
-ВСЬОГО (4 транспорти):         ~49 KB
+ВСЬОГО (4 транспорти):         ~49.5 KB
 Якщо ring + WS + SD в PSRAM:  SRAM < 1 KB (тільки mutex і pointers)
 ```
 
@@ -938,7 +996,7 @@ BLETransport queue(32):         ~7 KB
 ```cpp
 // На стеку при кожному виклику log->info():
 char localBuf[256];    // 256 байт
-LogEntry entry;        // 217 байт
+LogEntry entry;        // 220 байт (sizeof з padding, LA-4)
 va_list args;          //   4 байт
 ──────────────────────
 Всього на call stack:  ~480 байт
@@ -975,7 +1033,7 @@ va_list args;          //   4 байт
     "ring_buffer": {
       "enabled": true,
       "capacity": 100,
-      "use_psram": true,
+      "use_psram": false,
       "min_level": "DEBUG"
     },
     "sd": {
@@ -993,6 +1051,22 @@ va_list args;          //   4 байт
 ```
 entry.level >= globalMinLevel  AND  entry.level >= transport.min_level
 ```
+
+### platformio.ini — активація LOG_DEBUG() (LA-10)
+
+`LOG_DEBUG()` є no-op за замовчуванням (`#ifdef COINTRACE_DEBUG`). Для активації у dev середовищі:
+
+```ini
+; platformio.ini
+[env:cointrace-dev]
+; ... базові параметри наслідуються від [env] ...
+build_flags =
+    ${env.build_flags}
+    -DCOINTRACE_DEBUG=1    ; LOG_DEBUG() компілюється — debug statements активні
+```
+
+> **⚠️ НЕ додавати** `-DCOINTRACE_DEBUG=1` до `[env:production]` — debug log збільшує
+> розмір прошивки та може містити чутливу діагностичну інформацію.
 
 ---
 
@@ -1012,7 +1086,7 @@ entry.level >= globalMinLevel  AND  entry.level >= transport.min_level
 // Глобальні об'єкти (Logger живе весь час роботи пристрою)
 static Logger              gLogger;
 static SerialTransport     gSerialTransport(Serial, SerialTransport::Format::TEXT);
-static RingBufferTransport gRingTransport(100, /*usePsram=*/true);
+static RingBufferTransport gRingTransport(100, /*usePsram=*/false);  // ESP32-S3FN8: NO PSRAM (LA-1)
 static AsyncWebSocket      gWsSocket("/logs");
 static WebSocketTransport  gWsTransport(gWsSocket, 64);
 static SDTransport         gSdTransport("/logs/cointrace.log", 512, 32);
