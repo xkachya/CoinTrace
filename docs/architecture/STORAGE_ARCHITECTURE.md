@@ -1,8 +1,8 @@
-# Storage Architecture — CoinTrace
+# Storage Architecture — CoinTrace™
 
-**Статус:** ✅ Accepted v1.3.0 — [PRE-1]..[PRE-8] вирішено; Variant A (2×200KB logs), ID validation, mutex scope, GPIO0 boot, Soft Reset semantics, coredump filename, open-once pattern
-**Версія:** 1.3.0
-**Дата:** 2026-03-12
+**Статус:** ✅ Accepted v1.3.0 — [PRE-1]..[PRE-8] вирішено; Variant A (2×200KB logs), ID validation, mutex scope, GPIO0 boot, Soft Reset semantics, coredump filename, open-once pattern  
+**Версія:** 1.3.0  
+**Дата:** 2026-03-12  
 **Автор:** Yuriy Kachmaryk
 
 > ⚠️ **КРИТИЧНО:** Рішення щодо partition layout та NVS namespace structure неможливо змінити після
