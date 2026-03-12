@@ -1,8 +1,8 @@
 # Fingerprint Database Architecture — CoinTrace
 
 **Статус:** 📐 Запроектовано, очікує імплементації  
-**Версія:** 1.4.0  
-**Дата:** 2026-03-11  
+**Версія:** 1.5.0  
+**Дата:** 2026-03-12  
 **Автор:** Yuriy Kachmaryk
 
 > ⚠️ **КРИТИЧНО:** Рішення в цьому документі не можна змінити після появи першого зовнішнього contributor (першого PR від сторонньої людини). Прочитати і погодити до початку будь-якого збору даних.
@@ -136,7 +136,7 @@ Slope чого, в яких одиницях, яким методом? Не сп
     "rp2":  10514.8,
     "rp3":  10430.5,
     "l0":   1204.3,
-    "l1":   1928.4
+    "l1":   1186.5   // [R-02 ВІДКРИТО] теоретичне значення; |l0-l1|≈18 µH для Ag
   },
 
   "vector": {
@@ -144,7 +144,7 @@ Slope чого, в яких одиницях, яким методом? Не сп
     "k1":                 0.856,
     "k2":                 0.587,
     "slope_rp_per_mm_lr": -0.137,
-    "dL1":                724.1
+    "dL1":                18.0    // [R-02 ВІДКРИТО] теоретичне значення (Ag: dL1 ≈ 0–50 µH)
   },
 
   "metadata": {
@@ -232,6 +232,11 @@ algo_ver = 1:
   dL1              = l1 - l0
 ```
 
+> **Поведінка firmware при `dRp1 ≤ 0` (FDB-06):** Якщо виміряний `dRp1 ≤ 0` (монета відсутня або непровідний матеріал), firmware:
+> - Не обчислює k1/k2 (уникає ділення на нуль)
+> - Повертає `confidence = 0.0`, `match = null`, error code `"NO_RESPONSE"`
+> - Не записує `"complete": true` в `m_XXX.json` → вимір вважається failed та відкидається
+
 **Зверніть увагу:** `slope_rp_per_mm_lr` — Variant C, 3 точки:
 - вісь X: відстані зі `steps_mm` в мм: `[0, 1, 3]`
 - вісь Y: нормалізований ΔRp/ΔRp1: `[1.0, k1, k2]` — Y(0mm) = **1.0**, не 0
@@ -274,7 +279,7 @@ dist = √(w₁·(dRp1_n - ref_dRp1_n)² + w₂·(k1-ref_k1)² + w₃·(k2-ref_k
           + w₄·(slope-ref_slope)² + w₅·(dL1_n-ref_dL1_n)²)
 
 де:
-  dRp1_n  = dRp1 / dRp1_MAX   (нормалізований до [0..1], dRp1_MAX = 600 Ohm — §3.3)
+  dRp1_n  = dRp1 / dRp1_MAX   (нормалізований до [0..1], dRp1_MAX = 800 Ohm — §3.3)
   dL1_n   = dL1 / dL1_MAX     (нормалізований аналогічно)
   w₁..w₅  = ваги, підбираються емпірично на validation set
 ```
@@ -282,7 +287,7 @@ dist = √(w₁·(dRp1_n - ref_dRp1_n)² + w₂·(k1-ref_k1)² + w₃·(k2-ref_k
 **Альтернатива для v1.1 — Mahalanobis distance**, якщо з'явиться достатньо записів для оцінки covariance matrix per-class. Не для v1.
 
 > **`dRp1_MAX` та `dL1_MAX` — звідки ці числа:**
-> - `dRp1_MAX = 600 Ohm` — фізичний максимум ΔRp для MIKROE-3240 при 1 MHz (велика срібна монета ~40 мм). Значення ≥500 Ohm реальні. Уточнюється після validation set (**R-01**).
+> - `dRp1_MAX = 800 Ohm` — верхня межа BOUNDS для будь-якого металу (MIKROE-3240 при 1 MHz); узгоджено з `BOUNDS dRp1 (10.0, 800.0)` у §6.1. Уточнюється після validation set (**R-01**).
 > - `dL1_MAX = 2000 µH` — верхня межа ΔL для феромагнітного матеріалу (сталь, нікель). Кольорові метали (Ag, Cu, Au, Al): ΔL ≈ 0–50 µH. Магнітні (Fe, Ni): 200–2000 µH. Уточнюється аналогічно.
 
 ---
@@ -450,6 +455,13 @@ def validate(record):
         val = record["vector"][field]
         if not (lo <= val <= hi):
             errors.append(f"{field}={val} out of range [{lo},{hi}]")
+    # [ADR-DB-003] Auto-recompute vector from raw та порівняти зі збереженим у vector:
+    if "raw" in record and "conditions" in record:
+        recomputed = compute_vector(record["raw"], record["conditions"])
+        for field in ("dRp1", "k1", "k2", "slope_rp_per_mm_lr", "dL1"):
+            delta = abs(recomputed.get(field, 0) - record["vector"].get(field, 0))
+            if delta > 0.001:
+                errors.append(f"{field}: stored={record['vector'][field]:.4f}, recomputed={recomputed[field]:.4f}")
     # + JSON schema validation via jsonschema lib
     return errors
 ```
@@ -493,7 +505,7 @@ Firmware порівнює з centroid, використовує radius для co
 ```python
 # Допоміжна функція відстані — рівноважна Euclidean на нормалізованих координатах
 # (Діє до отримання validation set R-01 і підбору w₁–w₅; §3.3)
-DRPL1_MAX = 600.0   # Ohm  — dRp1_MAX з §3.3
+DRPL1_MAX = 800.0   # Ohm  — dRp1_MAX з §3.3
 DL1_MAX   = 2000.0  # µH   — dL1_MAX з §3.3
 
 def weighted_euclidean(v1, v2):
@@ -543,7 +555,7 @@ def build_aggregate(records):
 ```yaml
 # CI: після merge → rebuild index
 - name: Rebuild index
-  run: python tools/build_index.py database/ > database/index.json
+  run: python tools/build_index.py database/ > database/index.json  # інкрементує "generation" += 1
   
 - name: Commit updated index
   run: |
@@ -558,6 +570,7 @@ def build_aggregate(records):
 {
   "version": 1,
   "generated_at": "2026-03-11T14:00:00Z",
+  "generation":   42,
   "protocols": ["p1_1mhz_013mm"],
   "entries": [
     {
@@ -566,7 +579,7 @@ def build_aggregate(records):
       "metal_code":     "XAG925",
       "coin_name":      "Austrian Maria Theresa Thaler",
       "year":           1780,
-      "centroid":       {"dRp1_n": 0.514, "k1": 0.715, "k2": 0.385,
+      "centroid":       {"dRp1_n": 0.390, "k1": 0.715, "k2": 0.385,
                          "slope": -0.128, "dL1_n": 0.005},
       "radius_95pct":   0.012,
       "records_count":  3
@@ -575,16 +588,18 @@ def build_aggregate(records):
 }
 ```
 
+> **`generation`** (uint32, optional, default=0) — монотонний лічильник, інкрементується `build_index.py` при кожному rebuild. Firmware зберігає в `/data/cache/sd_generation.bin` (4B LE uint32). Boot [7a]: порівняти `generation` SD index із кешованим → якщо відрізняється → кеш застарів → rebuild. `generated_at` залишається для human-readable аудиту, не для machine comparison. Поле backward-compatible: відсутнє = 0.
+
 **RAM бюджет:** `centroid` (5 float) + `radius_95pct` (1 float) + metadata (~60 байт) ≈ **80 байт/запис**.
 - 1000 монет × 80 байт = **80 KB** — безпечно для 337 KB RAM ESP32-S3.
 - `aggregate_path` в index не зберігається — шлях будується динамічно: `samples/{protocol_id}/{metal_code}/{id}/_aggregate.json`.
 
 > **Правило нормалізації при генерації `index.json` (P-03 — обов'язково для `build_index.py`):**
 > CI-скрипт переводить абсолютні значення з `_aggregate.json` (де `centroid.dRp1` — в Ohm) в нормалізовані:
-> - `dRp1_n = centroid.dRp1 / 600`
+> - `dRp1_n = centroid.dRp1 / 800`
 > - `dL1_n  = centroid.dL1  / 2000`
 >
-> де `600` і `2000` — константи `DRPL1_MAX` / `DL1_MAX` з `src/config/fingerprint_config.h` (відповідають `dRp1_MAX` і `dL1_MAX` з §3.3).
+> де `800` і `2000` — константи `DRPL1_MAX` / `DL1_MAX` з `src/config/fingerprint_config.h` (відповідають `dRp1_MAX` і `dL1_MAX` з §3.3).
 > Firmware нормалізує новий вимір аналогічно **перед** порівнянням з `index.json`. Порушення цього правила призведе до того, що `dRp1` (0–600 range) домінує над `k1`, `k2` (0–1 range) і пошук стане некоректним.
 
 **Двофазний пошук:**
@@ -808,4 +823,5 @@ Firmware вибирає папку за `conditions.protocol_id` запису.
 
 ---
 
-*Версія документа: 1.4.0 — 2026-03-11*
+*Версія документа: 1.5.0 — 2026-03-12*  
+*Версія 1.5.0 — [FDB-02] §3.1 canonical: l1=1186.5, dL1=18.0 µH [R-02 теоретичні значення]; [FDB-03] dRp1_MAX 600→800 Ohm (Variant M), DRPL1_MAX=800, норм. /800; [FDB-04] validate_fingerprint.py ADR-DB-003 auto-recompute block; [FDB-05] index.json "generation" counter (Variant G), note + CI; [FDB-06] dRp1≤0 firmware behavior spec.*
