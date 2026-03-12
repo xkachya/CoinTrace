@@ -529,6 +529,12 @@ bool RingBufferTransport::begin() {
 
 ### 6.4 SDTransport — асинхронний, файл на SD карті
 
+> **⚠️ Cardputer-Adv: SDTransport НЕ в Logger dispatch chain (Модель S)**
+> SDTransport є reference implementation для інших платформ.
+> Для Cardputer-Adv SD-архівування виконується через `LittleFSTransport::rotate()` —
+> batch copy `log.1.jsonl` → SD при ротації (spi_vspi_mutex).
+> `SDTransport::startTask()` **не викликається** в Cardputer-Adv setup.
+
 **Критична інтеграційна деталь для Cardputer-Adv:**
 
 На M5Stack Cardputer-Adv SD карта і LDC1101 **ділять одну SPI шину** (G40/G14/G39).
