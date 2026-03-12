@@ -4,7 +4,7 @@
 **Аудитована версія:** STORAGE_ARCHITECTURE.md v1.2.0 (commit `5c32633`)  
 **Дата аудиту:** 2026-03-12  
 **Методологія:** Formal space budget simulation · FreeRTOS concurrency modeling · Boot state machine verification · API invariant analysis  
-**Статус:** ✅ [PRE-1]..[PRE-8] закрито · STORAGE_ARCHITECTURE.md оновлено до v1.3.0 (commit `5973c11`) · Перехід до P-3 розблоковано
+**Статус:** ✅ [PRE-1]..[PRE-8] закрито · STORAGE_ARCHITECTURE.md оновлено до v1.3.0 (commit `5973c11`) · ✅ [PRE-9(SHOULD)] · ✅ [PRE-10, PRE-11] закрито (commit `2b7d9c9`) · Перехід до P-3 розблоковано · Другий незалежний аудит → **STORAGE_AUDIT_v1.3.0.md**
 
 ---
 

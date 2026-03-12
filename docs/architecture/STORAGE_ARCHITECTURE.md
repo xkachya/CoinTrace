@@ -863,7 +863,7 @@ plugin->init(context_with_storage);
 | Метод | Потокобезпечний? | Примітка |
 |---|---|---|
 | `saveCalibration()` / `loadCalibration()` | ✅ Так | NVS Preferences — mutex всередині |
-| `incrementMeasCount()` | ✅ Так | Один atomic NVS write |
+| `incrementMeasCount()` | ✅ Так | Безпечно: тільки MainLoop task; **НЕ atomic** (NVS get+put) ([SA2-1]) |
 | `getMeasSlot()` | ✅ Так | Pure computation |
 | `LittleFSTransport::write()` queue push | ✅ Так | `xQueueSend()` — thread-safe |
 | LittleFS_data file ops (open/write/close) | ⚠️ Потребує `lfs_data_mutex_` | `esp_littlefs` не thread-safe між tasks |
@@ -887,7 +887,10 @@ class LittleFSDataGuard {
     SemaphoreHandle_t& mtx_;
     bool acquired_;
 public:
-    explicit LittleFSDataGuard(SemaphoreHandle_t& mtx, uint32_t timeout_ms = 100)
+    // [SA2-8] timeout=500ms: LittleFS rotation тримає mutex ~150-350ms (rename+SD copy+remove).
+    //         Якщо ok()=false — caller MUST return error response (HTTP 503 або еквівалент).
+    //         НЕ продовжувати file operations без захисту mutex — filesystem corruption!
+    explicit LittleFSDataGuard(SemaphoreHandle_t& mtx, uint32_t timeout_ms = 500)
         : mtx_(mtx),
           acquired_(xSemaphoreTake(mtx, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
         if (!acquired_) LOG_ERROR("lfs_data lock timeout");
@@ -931,7 +934,7 @@ esptool. Буде переглянуто перед production release.
 - Файловий ring (не in-memory) → виміри виживають при reboot та crash
 
 **Наслідки:**
-- **Тільки `meas_count` (UInt32) зберігається в NVS** — один atomic write на вимір. Немає race condition.
+- **Тільки `meas_count` (UInt32) зберігається в NVS.** Write-first invariant: `lfs_file_close()` ПЕРЕД `putUInt`. Безпечно від race condition тому що **тільки MainLoop task** викликає `incrementMeasCount()` — не через атомарність NVS ([SA2-2]).
 - `meas_head` та `meas_size` — **не зберігаються** в NVS (видалено за рішенням R-01)
 - `slot = meas_count % RING_SIZE` обчислюється при кожному read/write
 - Поле **`"complete": true`** присутнє тільки у повністю записаних файлах. При crash під час write поле відсутнє → файл відкидається при читанні як invalid.
@@ -1003,6 +1006,15 @@ GPIO3(RESET), GPIO4(INT), GPIO6(BUSY) — сигнали керування LDC1
   ```
 - `SDCardManager.h/.cpp` та `MeasurementStore.h/.cpp` містять `spi_vspi_mutex` guard перед кожним SPI write.
 
+> ⚠️ **[SA2-6] Lock ordering contract (ОБОВ'ЯЗКОВО дотримуватись у всьому codebase):**
+> Якщо потрібні обидва mutex одночасно — завжди отримувати в порядку:
+> 1. `lfs_data_mutex_`  (LittleFS_data context) — ПЕРШИМ
+> 2. `spi_vspi_mutex`   (VSPI bus context) — ДРУГИМ
+>
+> НІКОЛИ у зворотньому порядку → **deadlock** при співпаданні з `rotate()`.
+> Поточні caller sites що тримають обидва: `LittleFSTransport::rotate()` (lfs → spi).
+> Інші caller sites тримають лише один mutex — не потребують ordering.
+
 ---
 
 ## 12. Integration: Logger, Plugin System, Connectivity
@@ -1044,6 +1056,10 @@ Logger dispatch chain:
 > - **< 50 KB вільно**: примусова ротація незалежно від розміру поточного лог-файлу. LOG_WARN.
 > - **< 20 KB вільно**: зупинити запис логів в LittleFS; виміри продовжують заходитись в RAM тільки (RingBuffer). LOG_ERROR.
 > Обидва пороги: filesystem corruption від write при повному партишні. Сенсор унеможливлює перезапис вимірів.
+>
+> **[SA2-7] Mutex scope:** `esp_littlefs_info()` (→ `lfs_fs_size()`) **не є thread-safe** між FreeRTOS tasks.
+> Виклик **обов'язково** виконувати всередині `lfs_data_mutex_` scope у LittleFSTransport bg task,
+> після `lfs_file_sync()`, перед звільненням mutex. НЕ виконувати з WebServer handler або MainLoop.
 
 ### 12.2 Plugin System ↔ Storage
 
@@ -1120,7 +1136,15 @@ Wear leveling на LittleFS розподіляє writes рівномірно →
 Дешеві SD карти (A1 class) мають 10,000-30,000 P/E cycles при правильному wear leveling.
 288 KB logs/добу = 72 writes × 4 KB sectors → при 10K cycles → ~139 діб до failure!
 
-> ⚠️ **Рекомендація:** Логи на SD писати **не суцільним потоком** а батчами (наприклад, при ротації LittleFS — раз на годину dump). Це зменшує SD writes з 72→1 на добу.
+> ⚠️ **Рекомендація:** Логи на SD писати **не суцільним потоком** а батчами (наприклад, при ротації LittleFS — раз на кілька годин dump). Це зменшує SD writes з ~72→~24 на добу.
+>
+> **[SA2-5] Виправлений SD lifetime розрахунок (post-PRE-8 batch model):**
+> ```
+> Batch writes: ротація ~кожні 2-3 год = ~24 SD writes/добу (не 72 per-entry!)
+> При 10K cycles (дешеві A1 SD): 10,000 / 24 ≈ 417 діб ≈ 1.1 рік — все ще тривожно!
+> При 40K cycles (Samsung PRO Endurance / Sandisk MAX Endurance): ~4 роки — прийнятно.
+> Рекомендація: використовувати high-endurance SD (UHS-I U3/A2 class, наприклад Samsung PRO Endurance).
+> ```
 
 ### 13.2 NVS wear leveling
 
@@ -1162,11 +1186,14 @@ Hard Reset = повне відновлення заводського стану
 
 1. Display: "HARD RESET? Press ENTER to confirm, ESC to cancel"
 2. Якщо підтверджено:
-   a. NVS nvs_flash_erase()           → всі namespaces
-   b. LittleFS_data.format()          → всі дані користувача
-   c. esp_ota_set_boot_partition(app0) → rollback до slot 0
-   d. LOG_WARN("Hard reset executed") → зберігається в Serial тільки (LittleFS вже форматований)
-   e. esp_restart()                   → reboot
+   a0. LittleFSTransport::stop()      → xTaskDelete bg task + lfs_file_close(currentFile_)
+       ; [SA2-4] ОБОВ'ЯЗКОВО до format() — bg task тримає log.0.jsonl відкритим (open-once pattern)
+       ; format() з відкритим lfs_file_t handle = undefined behavior / LittleFS corruption
+   a.  NVS nvs_flash_erase()          → всі namespaces
+   b.  LittleFS_data.format()         → всі дані користувача
+   c.  esp_ota_set_boot_partition(app0) → rollback до slot 0
+   d.  LOG_WARN("Hard reset executed") → зберігається в Serial тільки (LittleFS вже форматований)
+   e.  esp_restart()                  → reboot
 3. Після reboot: пристрій як щойно з коробки
 ```
 
@@ -1239,7 +1266,7 @@ Hard Reset = повне відновлення заводського стану
 | `esp_partition_erase_range()` на LittleFS_data | ✅ | ✅ | ❌ Знищується | ✅ |
 | Power failure під час write | ✅ (NVS atomic) | ✅ (LittleFS atomic) | ✅ (LittleFS atomic) | ⚠️ FAT32 не atomic |
 | SD видалена фізично | ✅ | ✅ | ✅ | ❌ SD data gone |
-| Soft Factory Reset | ❌ WiFi + Settings | ✅ | ⚠️ Measurements optional | ✅ |
+| Soft Factory Reset | ❌ WiFi + Settings | ✅ | ✅ Зберігаються (ring overflow = cleanup, [PRE-5]) | ✅ |
 | Hard Factory Reset | ❌ Все | ❌ | ❌ | ✅ |
 
 ---
@@ -1254,11 +1281,14 @@ Hard Reset = повне відновлення заводського стану
 | **OQ-04** | ~~Де plugin config.json?~~ | ~~Boot dependency~~ | ✅ **Вирішено: /sys/config/device.json** |
 | **OQ-05** | ~~NVS flash encryption до v1 чи після?~~ | ~~Security, one-way decision!~~ | ✅ **Вирішено: без encryption v1 (ADR-ST-005)** |
 | **OQ-06** | ~~Session ID для вимірювань?~~ | ~~Community DB трасованість~~ | ✅ **Вирішено: device_id + "_" + meas_count** |
-| **OQ-07** | ~~LittleFS log rotation — окремий transport чи periodic dump?~~ | ~~Logger architecture~~ | ✅ **Вирішено: 3×300KB LittleFS hot + SD cold archive при ротації (§12.1)** |
+| **OQ-07** | ~~LittleFS log rotation — окремий transport чи periodic dump?~~ | ~~Logger architecture~~ | ✅ **Вирішено: 2×200KB LittleFS hot (Variant A, [PRE-1]) + SD cold archive при ротації (§12.1)** |
 
 ---
 
-*Версія 1.2.0 — shared VSPI bus підтверджено схемою P3 (CS=GPIO5). lfs_data_mutex специфіковано. Coredump boot order виправлено. GPIO0 recovery додано. Write order rationale в ADR-ST-006. OQ-07 закрито.*
+*Версія 1.2.0 — shared VSPI bus підтверджено схемою P3 (CS=GPIO5). lfs_data_mutex специфіковано. Coredump boot order виправлено. GPIO0 recovery додано. Write order rationale в ADR-ST-006. OQ-07 закрито.*  
+*Версія 1.3.0 — [PRE-1]..[PRE-8] закрито: Variant A 2×200KB, ID range validation, mutex scope, GPIO0 TWDT fix, Soft Reset ring semantics, coredump_mc<N>.json, open-once LittleFS.*  
+*Версія 1.3.1 — [PRE-10]: incrementMeasCount THREADING constraint. [PRE-11]: log_gen removed from NVS. Cross-doc sync (LOGGER §6.6, CONNECTIVITY HTTP 404).*  
+*Версія 1.3.2 — [SA2-1..SA2-10]: second audit fixes — atomic claim residues (ADR-ST-005/006), Hard Reset stop bg task, Boot [5] LittleFSTransport conditional, guard timeout 100→500ms + ok()=false contract, SD write model corrected, lock ordering contract, free space check mutex scope, §16/§10 doc sync.*  
 *Наступний крок: реалізувати P-1 (partition table + NVSManager)*
 
 ---
@@ -1305,9 +1335,15 @@ Hard Reset = повне відновлення заводського стану
 [4] LittleFSManager::mountData()             ; монтуємо /data
     → якщо FAIL: DEGRADED MODE — без вимірів/логів, але alive
       опціонально: prompt user to format LittleFS_data
-[5] Logger::init(SerialTransport,
-                 RingBufferTransport,
-                 LittleFSTransport)          ; LittleFSTransport тепер доступний
+[5] ; [SA2-3] LittleFSTransport доступний ТІЛЬКИ якщо mountData() [4] успішний
+    якщо mountData() успіх:
+        Logger::init(SerialTransport,
+                     RingBufferTransport,
+                     LittleFSTransport)      ; повний transport chain
+    інакше (DEGRADED після [4]):
+        Logger::init(SerialTransport,
+                     RingBufferTransport)    ; без LittleFSTransport — FS не змонтована
+        LOG_WARN("LittleFS_data DEGRADED — LittleFSTransport disabled")
 ; [6] навмисно відсутній — esp_core_dump_image_check() перенесено у [7.5]
 ;     (coredump потребує SD mount для збереження; [PRE-6])
 [7] SDCardManager::tryMount()                ; SD — optional, failure = DEGRADED
