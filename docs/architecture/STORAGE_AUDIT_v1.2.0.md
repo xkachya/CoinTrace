@@ -53,7 +53,7 @@
 | **M3-M3** | Boot | Coredump filename `<ts>.json` = epoch timestamp після power cycle → перезапис попереднього файлу | 🟡 MEDIUM | ✅ PRE-7 (v1.3.0) |
 | **M4-M1** | NVS | `log_gen: UInt8` в NVS namespace `storage` — роль не описана, ймовірно артефакт | 🟡 MEDIUM | PRE-11 (SHOULD) |
 | **M5-M1** | Logger | Log rotation (4 rename+delete) тримає `lfs_data_mutex_` до 200 ms > WebServer timeout 100 ms | 🟡 MEDIUM | FUTURE-1 (Backlog) |
-| **M6-M1** | NVS | `incrementMeasCount()` — TOCTOU: два окремі NVS calls, безпечно тільки з одного task | 🟡 MEDIUM | PRE-10 (SHOULD) |
+| **M6-M1** | NVS | `incrementMeasCount()` — TOCTOU: два окремі NVS calls, безпечно тільки з одного task | 🟡 MEDIUM | ✅ PRE-10 (v1.3.1) |
 | **M7-M1** | Misc | Hard Reset: `lfs_data.format()` (крок b) не зупиняє LittleFSTransport bg task → pending writes у відформатований FS | 🟡 MEDIUM | FUTURE-4 (Backlog) |
 | **M6-L1** | NVS | Немає `nvs_keys` partition reserve; додавання NVS encryption post-v1 = breaking change | 🟢 LOW | Backlog |
 | **M7-L1** | Misc | `device_id` з 2 байтів MAC = 65 536 унікальних ID → birthday collision ~68% при 500 пристроях | 🟢 LOW | Backlog |
@@ -621,9 +621,11 @@ lfs_file_close() + nова 0.jsonl тільки при rotation.
 
 ---
 
-#### [PRE-10] 🟡 incrementMeasCount() — задокументувати single-task constraint (M6-M1)
+#### [PRE-10] ✅ Задокументовано: incrementMeasCount() single-task constraint (M6-M1)
 
-У NVSManager.h додати:
+**Вирішено в v1.3.1:** §7.2 `NVSManager` — коментар `incrementMeasCount()` виправлено: видалено некоректне `// Atomic: один NVS write`, додано `// THREADING: MUST be called exclusively from MainLoop task` + пояснення чому Ѧ read+write, а не atomic.
+
+**Оригінальна дія:** У NVSManager.h додати:
 ```cpp
 // THREADING: MUST be called exclusively from MainLoop task.
 // Internally performs two NVS operations (read+write) — not atomic

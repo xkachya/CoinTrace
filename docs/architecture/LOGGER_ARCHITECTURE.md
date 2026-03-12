@@ -649,6 +649,139 @@ private:
 
 ---
 
+### 6.6 LittleFSTransport — асинхронний, hot-log на LittleFS_data
+
+**CoinTrace-specific transport.** Є частиною Storage Architecture (STORAGE_ARCHITECTURE.md §12.1). Реалізує «гарячий» log-шар: останні 400 KB записів доступні без SD карти.
+
+**Ключові проектні рішення:**
+
+| Рішення | Обґрунтування |
+|---|---|
+| **Open-once pattern** | `lfs_file_open()` один раз при старті або після rotation. `lfs_file_sync()` після кожного запису. `lfs_file_close()` тільки при rotation або shutdown. Різниця: 4 flash write/entry (open+write+close+FAT) → 1 write/entry. |
+| **`lfs_data_mutex_`** | Той самий mutex що у `MeasurementStore`. Охоплює весь rotation cycle (rename+copy+delete). WebServer timeout = 500 ms (збільшено від 100 ms через [FUTURE-1]). |
+| **Rotation: 2 файли × 200 KB** | Variant A рішення [PRE-1]. Steady-state: ~100 LittleFS blocks для логів із загальних 448 доступних. |
+| **SD copy при rotation** | При наявності SD: `log.1.jsonl` копіюється на `SD:/CoinTrace/logs/archive/<date>.jsonl` до видалення — cold archive. Якщо SD відсутня: rotation без копіювання (log.1 видаляється). |
+
+```cpp
+// lib/Logger/LittleFSTransport.h
+#include <LittleFS.h>
+#include <freertos/semphr.h>
+
+class LittleFSTransport : public ILogTransport {
+public:
+    explicit LittleFSTransport(SemaphoreHandle_t lfsDataMutex,
+                                uint32_t          maxLogKB   = 200,
+                                uint16_t          queueSize  = 64);
+
+    bool        begin()  override;  // Opens log.0.jsonl (append), keeps it open
+    void        end()    override;  // lfs_file_sync() + lfs_file_close()
+    void        write(const LogEntry& entry) override; // Non-blocking: → queue
+    const char* getName()  const override { return "LittleFS"; }
+    bool        isActive() const override;
+    uint32_t    getDroppedCount() const override { return droppedCount_; }
+
+    // SD-transport для cold-archive при rotation (optional).
+    // Якщо nullptr — rotation виконується без копіювання на SD.
+    void setSdArchive(const char* archivePath, SemaphoreHandle_t spiMutex);
+
+    void startTask(uint8_t coreId = 0, UBaseType_t priority = 2);
+    void stopTask();
+
+    // КОНТРАКТ: write() НЕ ВИКЛИКАЄ Logger::*
+
+private:
+    static constexpr const char* LOG_CURRENT = "/logs/log.0.jsonl";
+    static constexpr const char* LOG_ARCHIVE = "/logs/log.1.jsonl";
+
+    SemaphoreHandle_t lfsDataMutex_;
+    uint32_t          maxLogKB_;
+    QueueHandle_t     queue_       = nullptr;
+    TaskHandle_t      taskHandle_  = nullptr;
+    uint16_t          queueSize_;
+    uint32_t          droppedCount_ = 0;
+
+    lfs_file_t        currentFile_;       // Тримається відкритим між write()
+    bool              fileOpen_  = false;
+    uint32_t          currentSizeBytes_ = 0;
+
+    const char*       sdArchivePath_ = nullptr;
+    SemaphoreHandle_t spiMutex_      = nullptr;
+
+    static void taskFunc(void* param);
+    void processEntry(const LogEntry& entry);
+    void rotate();   // Тримає lfsDataMutex_ на весь цикл rename+copy+delete
+    bool openCurrentFile();
+};
+```
+
+**Task реалізація — open-once з rotation:**
+
+```cpp
+void LittleFSTransport::processEntry(const LogEntry& entry) {
+    if (!fileOpen_ && !openCurrentFile()) {
+        droppedCount_++;
+        return;
+    }
+
+    char line[256];
+    uint16_t len = entry.toJsonLine(line, sizeof(line));  // JSON Lines format
+
+    xSemaphoreTake(lfsDataMutex_, portMAX_DELAY);
+    lfs_file_write(&lfs_data, &currentFile_, line, len);
+    lfs_file_sync(&lfs_data, &currentFile_);  // power-fail safe без close overhead
+    currentSizeBytes_ += len;
+    xSemaphoreGive(lfsDataMutex_);
+
+    if (currentSizeBytes_ >= maxLogKB_ * 1024U) {
+        rotate();
+    }
+}
+
+void LittleFSTransport::rotate() {
+    // Тримаємо mutex на весь цикл — атомарна операція для WebServer
+    xSemaphoreTake(lfsDataMutex_, portMAX_DELAY);
+
+    lfs_file_close(&lfs_data, &currentFile_);  // тільки тут!
+    fileOpen_ = false;
+
+    // Cold archive: copy log.1 → SD перед видаленням (якщо SD доступна)
+    if (sdArchivePath_ && spiMutex_) {
+        // SD copy під spiMutex_ (окремий mutex — немає вкладеності з lfsDataMutex_)
+        // Реалізується через callback щоб не тягнути SD.h до Logger lib
+        copyToSdArchive_();  // user-supplied callback via setSdArchive()
+    }
+
+    lfs_remove(&lfs_data, LOG_ARCHIVE);   // delete log.1 якщо є
+    lfs_rename(&lfs_data, LOG_CURRENT, LOG_ARCHIVE);  // log.0 → log.1
+    // log.0 тепер не існує — openCurrentFile() створить новий
+    currentSizeBytes_ = 0;
+
+    xSemaphoreGive(lfsDataMutex_);
+
+    openCurrentFile();  // відкрити новий log.0.jsonl
+}
+```
+
+> **⚠️ Порядок mutex при rotation з SD copy:**
+> `lfsDataMutex_` береться першим і тримається весь rotation цикл.
+> `spiMutex_` для SD copy береться і звільняється всередині, поки `lfsDataMutex_` утримується.
+> Це не deadlock: жодна інша задача не бере `lfsDataMutex_` поки тримає `spiMutex_`
+> (SDTransport та MeasurementStore беруть лише свій власний mutex).
+
+**Ініціалізація у головному файлі:**
+
+```cpp
+// У StorageManager::init() або main setup():
+static LittleFSTransport lfsTransport(lfs_data_mutex_, /*maxLogKB=*/200, /*queue=*/64);
+lfsTransport.setSdArchive("SD:/CoinTrace/logs/archive", spi_vspi_mutex);
+lfsTransport.startTask(/*core=*/0, /*prio=*/2);
+
+Logger::init(serialTransport, ringTransport, lfsTransport);
+// SDTransport для Logger НЕ використовується — SD archive керується LittleFSTransport при rotation
+```
+
+---
+
 ## 7. Log Entry структура і серіалізація
 
 ```cpp

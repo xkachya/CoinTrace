@@ -448,7 +448,9 @@ public:
     
     uint32_t getMeasCount() const;
     uint8_t  getMeasSlot() const;     // Обчислює: getMeasCount() % RING_SIZE (не зберігається в NVS)
-    void     incrementMeasCount();    // Atomic: один NVS write (meas_count++). Немає race condition.
+    void     incrementMeasCount();    // [PRE-10] THREADING: MUST be called exclusively from MainLoop task.
+                                      // Внутрішньо виконує два NVS calls (read + write) — не атомарно
+                                      // між concurrent callers. Mutex не потрібен якщо constraint дотриманий.
     
     bool factoryResetSettings();      // erase "wifi", "system" — ЗБЕРІГАЄ "sensor"
     bool factoryResetAll();           // erase всі namespaces

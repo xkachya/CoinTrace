@@ -440,8 +440,18 @@ GET  /api/v1/measure/{id}
      або {"id":43,"status":"measuring"}
      або {"id":43,"status":"error","code":"SENSOR_TIMEOUT"}
      або {"id":43,"status":"expired"}  ← після TTL 60 секунд
+     або HTTP 404 {"error":"not_found"}  ← id невалідний (див. нижче)
 
 **TTL результату вимірювання:** firmware зберігає останній job 60 секунд. Після цього буфер звільняється, GET повертає `{"status":"expired"}`. Це запобігає heap leak при тривалій роботі.
+
+**ID range validation (STORAGE_ARCHITECTURE §12.3, [PRE-2]):** firmware повертає HTTP 404 якщо:
+```
+id ≥ meas_count              → вимір ще не існує (майбутній або невалідний)
+meas_count > RING_SIZE
+  AND id < meas_count − 300  → вимір витіснено ring overflow (overwritten)
+meas_count == 0              → жодного виміру ще не зроблено
+```
+Клієнт **зобов'язаний** обробляти 404 як «вимір недоступний» — не як помилку серверу. Silent wrong data при пропущеній перевірці: `slot = id % 300` повертає інший вимір без попередження.
 
 GET  /api/v1/log?n=50&level=DEBUG&since_ms=0
      → {"entries":[{"ms":672,"level":"INFO","comp":"System","msg":"..."},...],
