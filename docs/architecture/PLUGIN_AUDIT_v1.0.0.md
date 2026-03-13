@@ -84,7 +84,7 @@
 | **PA-20** | DIAGNOSTICS §2 | `getStatistics() const` визначення vs non-const side effects у суміжних методах | 🟢 LOW | 🔓 OPEN |
 
 **Разом:** 3 CRITICAL · 5 HIGH · 7 MEDIUM · 5 LOW = **20 знахідок**  
-**Закрито:** PA-1..PA-11 · PA-14 · PA-15 · PA-17 · PA-18 = **15 ✅ CLOSED**  
+**Закрито:** PA-1..PA-11 · PA-14 · PA-15 · PA-17 · PA-18 = **15 ✅ CLOSED** → commit `91f7c16`  
 **Відкрито:** PA-12 · PA-13 · PA-16 · PA-19 · PA-20 = **5 🔓 OPEN**
 
 ---
