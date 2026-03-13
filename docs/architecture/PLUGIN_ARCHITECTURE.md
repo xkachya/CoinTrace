@@ -237,6 +237,11 @@ struct PluginContext {
 
     // Система логування
     Logger*           log;         // Уніфіковане логування з рівнями (DEBUG/INFO/WARNING/ERROR)
+
+    // Система зберігання даних (per STORAGE_ARCHITECTURE §P-5)
+    IStorageManager*  storage      = nullptr;  // Доступ до MeasurementStore, NVS, LittleFS
+                                               // nullptr якщо не передано в begin() — плагіни повинні перевіряти
+                                               // перед використанням: if (ctx->storage) ctx->storage->...
 };
 ```
 
@@ -614,20 +619,21 @@ public:
     SensorType getType() const override { return SensorType::MAGNETIC; }
     
     SensorData read() override {
-        if (!ready) return {0, 0, 0, 0};
+        if (!ready) return {0, 0, 0.0f, millis(), false};
         
         int16_t x = readRegister16(0x00);
         int16_t y = readRegister16(0x02);
         int16_t z = readRegister16(0x04);
         
         // Обчислити напруженість магнітного поля
-        float fieldStrength = sqrt(x*x + y*y + z*z) / 3000.0; // Normalize
+        float fieldStrength = sqrt(x*x + y*y + z*z) / 3000.0f; // Normalize
         
         return {
-            .value1 = fieldStrength,
-            .value2 = 0,  // Не використовується
-            .confidence = (fieldStrength > 0.01) ? 0.9f : 0.0f,
-            .timestamp = millis()
+            .value1     = fieldStrength,
+            .value2     = 0,                                              // Не використовується
+            .confidence = (fieldStrength > 0.01f) ? 0.9f : 0.0f,
+            .timestamp  = millis(),
+            .valid      = (fieldStrength > 0.0f)                         // ✅ CONTRACT: завжди встановлювати .valid
         };
     }
     
@@ -695,9 +701,11 @@ private:
 #include <M5Cardputer.h>
 #include "PluginSystem.h"
 #include "ConfigManager.h"
+#include "Logger.h"
 
 PluginSystem* pluginSystem;
 ConfigManager* config;
+Logger*        logger;
 
 void setup() {
     Serial.begin(115200);
@@ -724,13 +732,18 @@ void setup() {
     // 2. Ініціалізувати систему плагінів
     // ============================================
     pluginSystem = new PluginSystem();
-    
+    // ✅ begin() ініціалізує ctx_ (wire/spi/mutexes/config/log/storage).
+    // ОБОВ'ЯЗКОВО викликати ДО loadFromConfig() та initializeAll()!
+    // Без цього ctx_.wireMutex і ctx_.spiMutex = nullptr → crash у першому async плагіні.
+    logger       = new Logger();
+    pluginSystem->begin(Wire, SPI, *config, *logger);
+
     // ============================================
     // 3. Автоматично завантажити плагіни з конфігу
     // ============================================
     Serial.println("Loading plugins...\n");
     pluginSystem->loadFromConfig(config);
-    
+
     // ============================================
     // 4. Ініціалізувати всі плагіни
     // ============================================
@@ -808,12 +821,13 @@ private:
 
 public:
     // Ініціалізація системних ресурсів — обов'язково викликати перед registerPlugin/loadFromConfig.
-    // Приклад: pluginSystem->begin(Wire, SPI, *config, *logger);
-    void begin(TwoWire& wire, SPIClass& spiInst, ConfigManager& config, Logger& log) {
+    void begin(TwoWire& wire, SPIClass& spiInst, ConfigManager& config, Logger& log,
+               IStorageManager* storage = nullptr) {
         ctx_.wire      = &wire;
         ctx_.spi       = &spiInst;
         ctx_.config    = &config;
         ctx_.log       = &log;
+        ctx_.storage   = storage;
         ctx_.wireMutex = xSemaphoreCreateMutex();
         ctx_.spiMutex  = xSemaphoreCreateMutex();
     }
@@ -981,7 +995,7 @@ private:
   "manufacturer": "M5Stack",
   "mcu": "ESP32-S3FN8",
   "flash": "8MB",
-  "psram": "8MB",
+  "psram": "0MB",                         // ESP32-S3FN8 не має PSRAM — ps_malloc() поверне nullptr
   
   "peripherals": {
     "display": {

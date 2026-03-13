@@ -318,7 +318,7 @@ public:
         // Test 3: Status register
         uint8_t status = readRegister(LDC1101_STATUS);
         if (status & 0x80) {  // Error bit
-            ctx->log->warn(getName(), "Status register error: 0x%02X", status);
+            ctx->log->warning(getName(), "Status register error: 0x%02X", status);
             return false;
         }
         ctx->log->info(getName(), "Status register OK");
@@ -343,7 +343,7 @@ public:
         float stddev = sqrt(variance / 5);
         
         if (stddev > mean * 0.1) {  // >10% розкид
-            ctx->log->warn(getName(), "Readings unstable: stddev=%.2f, mean=%.2f", stddev, mean);
+            ctx->log->warning(getName(), "Readings unstable: stddev=%.2f, mean=%.2f", stddev, mean);
             return false;
         }
         ctx->log->info(getName(), "Stability test passed (stddev=%.2f)", stddev);
@@ -404,7 +404,10 @@ public:
     }
     
     bool checkStability() {
-        // Зчитати 10 разів швидко і перевірити розкид
+        // ⚠️ BLOCKING: 10 × readRP() + 10 × delay(5ms) ≈ 50 ms блокування в поточному task.
+        // НЕ викликати з loop() або update() — порушує CONTRACT §1.1 (гарантія updateAll ≥ 10 Hz).
+        // Дозволено тільки з: setup() при старті, або окремого background diagnostic task
+        // з низьким пріоритетом (наприклад, tskIDLE_PRIORITY + 1).
         const int N = 10;
         float readings[N];
         for (int i = 0; i < N; i++) {
@@ -465,24 +468,33 @@ private:
     float calibrationBaseline = 0;
     
     uint8_t readRegister(uint8_t reg) {
-        if (!ctx || !ctx->spi || csPin < 0) { diagnostics.failedReads++; return 0xFF; }
+        // ✅ CONTRACT §1.5: SPI shared bus (ADR-ST-008) — завжди брати spiMutex.
+        // SD карта (SDTransport Logger) і LDC1101 — одна VSPI шина; без mutex → SPI corruption.
+        if (!ctx || !ctx->spi || !ctx->spiMutex || csPin < 0) { diagnostics.failedReads++; return 0xFF; }
+        if (xSemaphoreTake(ctx->spiMutex, pdMS_TO_TICKS(50)) != pdTRUE) {
+            diagnostics.failedReads++;
+            return 0xFF;  // Mutex timeout — SDTransport тримає шину, пропустити читання
+        }
         ctx->spi->beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
         digitalWrite(csPin, LOW);
         ctx->spi->transfer(reg | 0x80);  // R/W bit = 1 (read)
         uint8_t val = ctx->spi->transfer(0x00);
         digitalWrite(csPin, HIGH);
         ctx->spi->endTransaction();
+        xSemaphoreGive(ctx->spiMutex);
         return val;
     }
     
     void writeRegister(uint8_t reg, uint8_t value) {
-        if (!ctx || !ctx->spi || csPin < 0) return;
+        if (!ctx || !ctx->spi || !ctx->spiMutex || csPin < 0) return;
+        if (xSemaphoreTake(ctx->spiMutex, pdMS_TO_TICKS(50)) != pdTRUE) return;  // Mutex timeout
         ctx->spi->beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
         digitalWrite(csPin, LOW);
         ctx->spi->transfer(reg & 0x7F);  // R/W bit = 0 (write)
         ctx->spi->transfer(value);
         digitalWrite(csPin, HIGH);
         ctx->spi->endTransaction();
+        xSemaphoreGive(ctx->spiMutex);
     }
     
     float readRP() {
@@ -618,7 +630,11 @@ void loop() {
                     
                     // PluginSystem зберігає ctx_ для всіх плагінів. Викликаємо attemptRecovery:
                     if (pluginSystem->attemptRecovery(plugin)) {
-                        // attemptRecovery: plugin->shutdown(); delay(100); plugin->initialize(&ctx_);
+                        // attemptRecovery послідовність (per CONTRACT §1.1):
+                        //   plugin->shutdown();
+                        //   vTaskDelay(pdMS_TO_TICKS(100));
+                        //   if (plugin->canInitialize()) plugin->initialize(&ctx_);  // ← guard!
+                        //   без canInitialize() — infinite retry кожні 10 сек якщо hardware відсутнє
                         ctx->log->info(plugin->getName(), "Recovery successful");
                     }
                 }

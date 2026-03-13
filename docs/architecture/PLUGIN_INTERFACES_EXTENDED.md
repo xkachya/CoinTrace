@@ -398,12 +398,14 @@ public:
 ```cpp
 // ✅ Отримуємо плагіни через PluginSystem (не глобальні змінні)
 class CoinAnalyzer {
-    PluginSystem& plugins;
-    CoinDatabase& db;
+    PluginSystem&     plugins;
+    CoinDatabase&     db;
+    MeasurementStore& store;  // ✅ Пряма залежність (STORAGE_ARCHITECTURE §3) — не IStoragePlugin
 
 public:
-    explicit CoinAnalyzer(PluginSystem& ps, CoinDatabase& coinDb)
-        : plugins(ps), db(coinDb) {}
+    // measureStore: інстанція MeasurementStore, ініціалізована в main.cpp
+    explicit CoinAnalyzer(PluginSystem& ps, CoinDatabase& coinDb, MeasurementStore& measureStore)
+        : plugins(ps), db(coinDb), store(measureStore) {}
 
     void analyzeCoin() {
         // 1. Отримати всі активні сенсори
@@ -413,7 +415,9 @@ public:
         auto diameterSensor  = plugins.getPlugin<ISensorPlugin>("Caliper");
         auto display         = plugins.getPlugin<IDisplayPlugin>("ST7789V2");
         auto audio           = plugins.getPlugin<IAudioPlugin>("Buzzer");
-        auto storage         = plugins.getPlugin<IStoragePlugin>("SPIFFS");
+        // ❌ НЕ робити: plugins.getPlugin<IStoragePlugin>("SPIFFS") — поверне nullptr!
+        //    SPIFFS замінено LittleFS (ADR-ST-001); LittleFSManager/NVSManager/MeasurementStore
+        //    — standalone класи, не реалізують IStoragePlugin (STORAGE_ARCHITECTURE §P-5 boundary).
 
         // 2. Перевірити рівень (IMU)
         auto imu = plugins.getPlugin<IIMUPlugin>("BMI270");
@@ -444,7 +448,7 @@ public:
         }
         
         // 7. Зберегти вимірювання
-        storage->save("last_measurement", &coin, sizeof(coin));
+        store.save(coin);  // ✅ Через MeasurementStore (STORAGE_ARCHITECTURE §3), не IStoragePlugin
     }
 };
 ```

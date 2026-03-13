@@ -451,12 +451,18 @@ public:
         auto data1 = sensor1->read();
         auto data2 = sensor2->read();
         
-        // Об'єднати дані
+        // ✅ Перевірити .valid обох джерел перед злиттям.
+        // Invalid сенсор повертає value1=0.0f — виглядає як валідний вимір, але є artifacts.
+        if (!data1.valid || !data2.valid) {
+            return {0, 0, 0.0f, millis(), false};
+        }
+        
         return {
-            .value1 = (data1.value1 + data2.value1) / 2.0f,
-            .value2 = 0,
+            .value1     = (data1.value1 + data2.value1) / 2.0f,
+            .value2     = 0,
             .confidence = min(data1.confidence, data2.confidence),
-            .timestamp = millis()
+            .timestamp  = millis(),
+            .valid      = true
         };
     }
 };

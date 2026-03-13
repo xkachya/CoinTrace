@@ -41,6 +41,7 @@
 23. [Що архітектура зробила ПРАВИЛЬНО](#23-що-архітектура-зробила-правильно)
 24. [Pre-implementation Checklist — перед P-2](#24-pre-implementation-checklist--перед-p-2)
 25. [Backlog та залежності](#25-backlog-та-залежності)
+26. [Зовнішній аудит 2026-03-13 — cross-reference та нові знахідки](#26-зовнішній-аудит-2026-03-13--cross-reference-та-нові-знахідки)
 
 ---
 
@@ -82,10 +83,22 @@
 | **PA-18** | DIAGNOSTICS §"Додаткові фічі" | `WiFiClient HTTP POST` суперечить Connectivity Architecture (BLE+WS) | 🟢 LOW | ✅ CLOSED |
 | **PA-19** | ARCH §"data/", CREATING §Checklist | `lib/<Plugin>/plugin.json` vs `data/plugins/name.json` — overlap не пояснено | 🟢 LOW | 🔓 OPEN |
 | **PA-20** | DIAGNOSTICS §2 | `getStatistics() const` визначення vs non-const side effects у суміжних методах | 🟢 LOW | 🔓 OPEN |
+| | | | | |
+| **PA-21** | DIAGNOSTICS §2 | ⚠️ РЕГРЕСІЯ PA-9: `ctx->log->warn()` — Logger API має `warning()`, не `warn()` — compile error | 🔴 CRITICAL | ✅ CLOSED |
+| **PA-22** | DIAGNOSTICS §2 | `readRegister/writeRegister` — SPI без `xSemaphoreTake(spiMutex)` — race condition на VSPI | 🔴 CRITICAL | ✅ CLOSED |
+| **PA-23** | ARCH §QMC5883LPlugin | PA-1 виправив struct, але `QMC5883LPlugin::read()` досі без `.valid` і `{0,0,0,0}` | 🔴 CRITICAL | ✅ CLOSED |
+| **PA-24** | ARCH §main.cpp | `setup()` не викликає `pluginSystem->begin()` → `ctx_.wireMutex` = nullptr → crash | 🟠 HIGH | ✅ CLOSED |
+| **PA-25** | ARCH §PluginContext | `struct PluginContext` без `IStorageManager* storage` (STORAGE_ARCH §P-5 вимагає) | 🟠 HIGH | ✅ CLOSED |
+| **PA-26** | CREATING §FusionSensor | `FusionSensorPlugin::read()` не перевіряє `.valid` вхідних + не встановлює `.valid` в результаті | 🟠 HIGH | ✅ CLOSED |
+| **PA-27** | INTERFACES §CoinAnalyzer | `getPlugin<IStoragePlugin>("SPIFFS")` → nullptr crash; SPIFFS замінено LittleFS (ADR-ST-001) | 🟠 HIGH | ✅ CLOSED |
+| **PA-28** | DIAGNOSTICS §checkStability | `checkStability()` = 10×`delay(5ms)` = 50 ms blocking у main task → 9.1 Hz, CONTRACT §1.1 порушено | 🟠 HIGH | ✅ CLOSED |
+| **PA-29** | ARCH §976-990 | Документований hardware profile приклад: `"psram": "8MB"` на ESP32-S3FN8 (no PSRAM) | 🟠 HIGH | ✅ CLOSED |
+| **PA-30** | DIAGNOSTICS §4 | `attemptRecovery`: `shutdown→delay→initialize` пропускає `canInitialize()` — infinite retry | 🟡 MEDIUM | ✅ CLOSED |
 
-**Разом:** 3 CRITICAL · 5 HIGH · 7 MEDIUM · 5 LOW = **20 знахідок**  
-**Закрито:** PA-1..PA-11 · PA-14 · PA-15 · PA-17 · PA-18 = **15 ✅ CLOSED** → commit `91f7c16`  
-**Відкрито:** PA-12 · PA-13 · PA-16 · PA-19 · PA-20 = **5 🔓 OPEN**
+**Разом:** 6 CRITICAL · 10 HIGH · 8 MEDIUM · 5 LOW = **30 знахідок** (20 початкових + 10 нових після зовнішнього аудиту)  
+**Закрито:** PA-1..PA-11 · PA-14 · PA-15 · PA-17 · PA-18 · **PA-21..PA-30** = **25 ✅ CLOSED** → commits `91f7c16`, `822614a`, [cross-audit fix]  
+**Відкрито:** PA-12 · PA-13 · PA-16 · PA-19 · PA-20 = **5 🔓 OPEN**  
+**✅ Регресія PA-21 виправлена.**
 
 ---
 
@@ -904,26 +917,41 @@ bool checkStability() {  // ← non-const, викликає readRegister() і de
 Перед початком реалізації `lib/PluginSystem/` всі P-1 та P-2 знахідки повинні бути закриті в документах.
 
 ### Обов'язкові (блокують компіляцію):
-- [ ] **PA-1** — `SensorData` уніфікована в `PLUGIN_INTERFACES_EXTENDED.md` §1 (5 полів, canonical)
-- [ ] **PA-2** — `PluginSystem::initializeAll()` передає `PluginContext*`; документ показує `PluginSystem::begin()`
-- [ ] **PA-3** — `IDiagnosticPlugin` оголошений як опційний mixin; `IPlugin` містить тільки `getHealthStatus()` + `getLastError()`
-- [ ] **PA-10** — `ConfigManager` мінімальний API визначений в `PLUGIN_CONTRACT.md`
+- [x] **PA-1** — `SensorData` уніфікована в `PLUGIN_INTERFACES_EXTENDED.md` §1 (5 полів, canonical) → commit `91f7c16`
+- [x] **PA-2** — `PluginSystem::initializeAll()` передає `PluginContext*`; документ показує `PluginSystem::begin()` → commit `91f7c16`
+- [x] **PA-3** — `IDiagnosticPlugin` оголошений як опційний mixin; `IPlugin` містить тільки `getHealthStatus()` + `getLastError()` → commit `91f7c16`
+- [x] **PA-10** — `ConfigManager` мінімальний API визначений в `PLUGIN_CONTRACT.md` → commit `91f7c16`
 
 ### Обов'язкові (запобігають hardware/runtime багам):
-- [ ] **PA-4** — приклад LDC1101 в DIAGNOSTICS замінений на посилання до LDC1101_ARCH §8
-- [ ] **PA-5** — всі `portMAX_DELAY` замінені на `pdMS_TO_TICKS(50)` у всіх 5 місцях
-- [ ] **PA-6** — бюджет пам'яті переписаний з реальними числами (~337 KB, no PSRAM)
-- [ ] **PA-7** — рішення RTTI зафіксоване (`-frtti` або type-tag enum)
-- [ ] **PA-8** — recovery приклад виправлений (ctx зберігається в PluginManager)
-- [ ] **PA-11** — `writeRegister(0x0B, 0x15)` виправлений
+- [x] **PA-4** — приклад LDC1101 в DIAGNOSTICS замінений на посилання до LDC1101_ARCH §8 → commit `91f7c16`
+- [x] **PA-5** — всі `portMAX_DELAY` замінені на `pdMS_TO_TICKS(50)` у всіх 5 місцях → commit `91f7c16`
+- [x] **PA-6** — бюджет пам'яті переписаний з реальними числами (~337 KB, no PSRAM) → commit `91f7c16`
+- [x] **PA-7** — рішення RTTI зафіксоване (`-frtti` або type-tag enum) → commit `91f7c16`
+- [x] **PA-8** — recovery приклад виправлений (ctx зберігається в PluginManager) → commit `91f7c16`
+- [x] **PA-11** — `writeRegister(0x0B, 0x15)` виправлений → commit `91f7c16`
 
 ### Рекомендовані (до P-3):
-- [ ] **PA-9** — `Serial.println` → `ctx->log->info` в DIAGNOSTICS prикладах
+- [x] **PA-9** — `Serial.println` → `ctx->log->warn` в DIAGNOSTICS прикладах → commit `91f7c16` ⚠️ АЛЕ: `warn()` має бути `warning()` — зафіксовано як PA-21
+- [x] **PA-15** — CONTRACT §3.4 для `calibrate()` написаний → commit `91f7c16`
+- [x] **PA-14** — межа `IStoragePlugin` vs `StorageManager` визначена → commit `91f7c16`
+- [x] **PA-17** — `millis()` overflow + NVS note → commit `91f7c16`
+- [x] **PA-18** — WiFi HTTP приклад замінений → commit `91f7c16`
 - [ ] **PA-13** — canonical конфіг підхід задокументований
-- [ ] **PA-15** — CONTRACT §3.4 для `calibrate()` написаний
+
+### Нові знахідки після зовнішнього аудиту (PA-21..PA-30):
+- [x] **PA-21** 🔴 — `ctx->log->warn()` → `ctx->log->warning()` в DIAGNOSTICS (lines 321, 346) → [cross-audit fix]
+- [x] **PA-22** 🔴 — `xSemaphoreTake(ctx->spiMutex)` в `readRegister/writeRegister` в DIAGNOSTICS → [cross-audit fix]
+- [x] **PA-23** 🔴 — `QMC5883LPlugin::read()`: `.valid`, `{0,0,0.0f,millis(),false}` → PLUGIN_ARCHITECTURE.md → [cross-audit fix]
+- [x] **PA-24** 🟠 — `setup()`: `pluginSystem->begin(Wire, SPI, *config, *logger)` + Logger global → [cross-audit fix]
+- [x] **PA-25** 🟠 — `IStorageManager* storage` в `struct PluginContext` + `begin()` signature → [cross-audit fix]
+- [x] **PA-26** 🟠 — `FusionSensorPlugin::read()`: `.valid` перевірка + встановлення → CREATING_PLUGINS.md → [cross-audit fix]
+- [x] **PA-27** 🟠 — `CoinAnalyzer`: `MeasurementStore& store` замість IStoragePlugin/SPIFFS → [cross-audit fix]
+- [x] **PA-28** 🟠 — `checkStability()`: ⚠️ BLOCKING warning (50ms, не loop!) → DIAGNOSTICS → [cross-audit fix]
+- [x] **PA-29** 🟠 — `"psram": "8MB"` → `"0MB"` в hardware profile прикладі → PLUGIN_ARCHITECTURE.md → [cross-audit fix]
+- [x] **PA-30** 🟡 — `attemptRecovery`: `canInitialize()` guard в comment → DIAGNOSTICS → [cross-audit fix]
 
 ### Backlog (до production):
-- [ ] PA-12, PA-14, PA-16, PA-17, PA-18, PA-19, PA-20
+- [ ] PA-12, PA-16, PA-19, PA-20
 
 ---
 
@@ -970,3 +998,59 @@ PA-13 (canonical config)
 *Аудитор: GitHub Copilot (Claude Sonnet 4.6) — незалежний embedded архітектор*  
 *Дата: 2026-03-13*  
 *Наступний крок: закрити PA-1..PA-3, PA-10 (4 блокери P-2) → commit → починати `lib/PluginSystem/`*
+
+---
+
+## 26. Зовнішній аудит 2026-03-13 — cross-reference та нові знахідки
+
+**Джерело:** `docs/external/PLUGIN_ARCHITECTURE_AUDIT_2026-03-13.md` v1.0.0  
+**Метод:** незалежний аудит тих самих 5 документів з timing simulation та memory budget simulation  
+**Загальна оцінка зовнішнього аудиту:** 7/10 (якісний, добре структурований, є timing simulation)
+
+### Overlap — зовнішній підтвердив наші знахідки (і вже закриті)
+
+| Зовн. ID | Severity | Наш PA | Статус наших змін | Примітка |
+|---|---|---|---|---|
+| D-2 | 🟡 MEDIUM | PA-6 | ✅ CLOSED commit `91f7c16` | ps_malloc приклад видалений |
+| D-3 | 🟡 MEDIUM | PA-6 | ✅ CLOSED commit `91f7c16` | Бюджет 0 KB → ~130 KB (реальна симуляція) |
+| F-2 | 🟢 LOW | PA-17 | ✅ CLOSED commit `91f7c16` | millis() overflow + NVS timestamp note |
+| F-4 | ℹ️ INFO | PA-7 | ✅ CLOSED commit `91f7c16` | RTTI note + type-tag альтернатива |
+| A-2 | 🟡 MEDIUM | PA-12 | 🔓 OPEN | Factory hardcoding — складна рефактора |
+| F-3 | ℹ️ INFO | PA-12 | 🔓 OPEN | std::map heap fragmentation |
+
+### Нові знахідки зовнішнього аудиту → наші PA-21..PA-30
+
+| Зовн. ID | Severity | Наш PA | Причина пропуску |
+|---|---|---|---|
+| B-1 | 🔴 CRITICAL | PA-22 | Перевіряли logic bugs, не перевіряли mutex coverage в кожному SPI-виклику |
+| B-2 | 🔴 CRITICAL | PA-23 | PA-1 виправив struct definition — не перевірили, чи всі приклади оновлені |
+| A-3 | 🟠 HIGH | PA-24 | PA-2 додав метод `begin()` — не перевірили, чи приклад main.cpp його викликає |
+| A-1 | 🟠 HIGH | PA-25 | Не проводили cross-doc перевірку з STORAGE_ARCHITECTURE §P-5 |
+| D-1 | 🟠 HIGH | PA-29 | PA-6 виправив текст — не перевіряли ілюстративний JSON приклад у §976-990 |
+| E-2 | 🟠 HIGH | PA-27 | PA-14 додав текстову примітку — не виправив сам приклад CoinAnalyzer |
+| C-1 | 🟠 HIGH | PA-28 | Фокусувались на correctness, не моделювали timing impact викликів у main loop |
+| B-3 | 🟠 HIGH | PA-26 | FusionSensor розглядався як simple example, не аналізувався на thread-safety/validity |
+| E-3 | 🟡 MEDIUM | PA-30 | PA-8 змінив getContext() → attemptRecovery(), не перевіряв lifecycle sequence |
+
+### Регресія, внесена нашим PA-9 fix → PA-21
+
+PA-9 замінив `Serial.println/printf` на `ctx->log->warn(...)`. `LOGGER_ARCHITECTURE.md §7` визначає метод як `warning()`, не `warn()`. В результаті PLUGIN_DIAGNOSTICS.md отримав compile error, якого не існувало до нашого fix.
+
+**Висновок:** PA-9 частково виконано некоректно. Виправлення: `warn(` → `warning(` в DIAGNOSTICS lines 321 і 346.
+
+### Що зовнішній аудит зробив краще
+
+- **Timing simulation** — змоделював 5 сценаріїв з реальними мілісекундами. Виявив C-1: `checkStability()` → 9.1 Hz vs 10 Hz contract. Ми не рахували timing budget.
+- **Cross-doc перевірка**: A-1 — знайшов невідповідність між `PluginContext` і `STORAGE_ARCHITECTURE §P-5`. Ми не верифікували cross-doc consistency на рівні field-by-field.
+- **Фокус на прикладах коду**: більшість CRITICAL/HIGH знахідок — у прикладах, що порушують той самий контракт який документ правильно описує. Правильний пріоритет для embedded.
+
+### Підсумок після зовнішнього аудиту
+
+| | Кількість |
+|---|---|
+| Наші PA знахідки (всього) | 30 (20 початкових + 10 нових) |
+| Закрито нашою роботою | 15 (commits `91f7c16`, `822614a`) |
+| Відкрито після cross-аналізу | 15 |
+| з них CRITICAL | 3 (PA-21, PA-22, PA-23) |
+| з них регресія (ми внесли) | 1 (PA-21) |
+| Підтверджено зовнішнім аудитором | 6 (D-2, D-3, F-2, F-4 = closed; A-2, F-3 = open) |
