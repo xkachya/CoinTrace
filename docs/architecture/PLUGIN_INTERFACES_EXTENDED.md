@@ -374,7 +374,10 @@ public:
 | **IDisplayPlugin** | Екрани виводу | ST7789V2, SSD1306, ILI9341 |
 | **IInputPlugin** | Пристрої введення | TCA8418 keyboard, FT6336 touch |
 | **IAudioPlugin** | Аудіо пристрої | ES8311 codec, buzzer |
-| **IStoragePlugin** | Сховища даних | SD card, EEPROM, LittleFS |
+| **IStoragePlugin** | Сховища даних | SD card, EEPROM, зовнішній Flash |
+
+> ⚠️ **Межа відповідальності:** `IStoragePlugin` призначений виключно для **зовнішніх** storage-модулів, підключених як плагін.  
+> `LittleFSManager`, `NVSManager`, `MeasurementStore`, `SDCardManager` — це **standalone класи** (STORAGE_ARCHITECTURE.md) і **не реалізують** `IStoragePlugin`.
 | **IIMUPlugin** | Інерційні датчики | BMI270, MPU6050, LSM6DS3 |
 
 ### Розширена екосистема

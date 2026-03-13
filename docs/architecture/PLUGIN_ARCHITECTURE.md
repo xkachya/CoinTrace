@@ -170,13 +170,16 @@ public:
     
     virtual SensorType getType() const = 0;
     
-    // Універсальний інтерфейс зчитування
-    struct SensorData {
-        float value1;        // RP для LDC1101, field strength для QMC5883L
-        float value2;        // L для LDC1101
-        float confidence;    // 0.0-1.0
-        uint32_t timestamp;
-    };
+    // Canonical (5-field) SensorData — визначення та семантика полів:
+    // → PLUGIN_INTERFACES_EXTENDED.md §1 "ISensorPlugin - Розширений"
+    // struct SensorData {
+    //     float value1;       // Основне значення (sensor-specific)
+    //     float value2;       // Додаткове значення (sensor-specific)
+    //     float confidence;   // 0.0–1.0 (якість вимірювання)
+    //     uint32_t timestamp; // millis() під час зчитування
+    //     bool valid;         // false → дані недійсні, не використовувати
+    // };
+    // ⚠️ Завжди перевіряй .valid перед використанням .value1/.value2
     
     virtual SensorData read() = 0;
     virtual bool calibrate() = 0;
@@ -361,15 +364,18 @@ public:
         // Core 0: Читаємо з sensor
         float newValue = readFromSensor();
         
-        // Thread-safe запис
-        xSemaphoreTake(mutex, portMAX_DELAY);
-        cachedValue = newValue;
-        xSemaphoreGive(mutex);
+        // Thread-safe запис (ADR-ST-008: portMAX_DELAY заборонено)
+        if (xSemaphoreTake(mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            cachedValue = newValue;
+            xSemaphoreGive(mutex);
+        }
     }
     
     SensorData read() override {
         // Core 1: Thread-safe читання (може викликатись одночасно з update())
-        xSemaphoreTake(mutex, portMAX_DELAY);
+        if (xSemaphoreTake(mutex, pdMS_TO_TICKS(50)) != pdTRUE) {
+            return {0, 0, 0.0f, millis(), false};  // ADR-ST-008: timeout
+        }
         float value = cachedValue;
         xSemaphoreGive(mutex);
         
@@ -393,15 +399,17 @@ public:
 
 ### Обмеження пам'яті для embedded систем
 
-**ESP32-S3 має:**
-- 512 KB SRAM (основна пам'ять)
-- 8 MB PSRAM (опційно, повільніша)
-- 8 MB Flash (для коду)
+**M5Stack Cardputer-ADV (ESP32-S3FN8):**
+- ~337 KB вільного heap (типово; залежить від конфігурації стеків)
+- **PSRAM: відсутній** — ESP32-S3**FN**8 = вбудований Flash без PSRAM
+- 8 MB Flash (для коду та LittleFS)
 
-**Стратегія розподілу RAM:**
-- 350 KB — система (PluginSystem, ConfigManager, Logger, FreeRTOS)
-- 160 KB — плагіни (20 плагінів × 8 KB кожен)
-- 2 KB — резерв для stack overflow захисту
+> ⚠️ `ps_malloc()` недоступний. Не використовуй PSRAM API в плагінах.
+
+**Стратегія розподілу heap:**
+- ~177 KB — система (PluginSystem, ConfigManager, Logger, FreeRTOS stacks)
+- ~160 KB — плагіни (20 плагінів × 8 KB кожен)
+- ~0 KB — залишок (критичний резерв для heap-фрагментації)
 
 ### Memory контракт
 
@@ -417,8 +425,8 @@ private:
     // ❌ Великі буфери НЕ допустимі
     // float bigBuffer[10000];   // 40 KB — ПОРУШЕННЯ!
     
-    // ✅ Для великих даних використовувати PSRAM або SD карту
-    float* psramBuffer;       // Виділяти через ps_malloc()
+    // ✅ Для великих даних використовувати SD карту (PSRAM відсутній на ESP32-S3FN8)
+    // float* psramBuffer;    // ❌ ps_malloc() ЗАБОРОНЕНО — PSRAM недоступний
 };
 ```
 
@@ -796,8 +804,20 @@ class PluginSystem {
 private:
     std::vector<IPlugin*> plugins;
     std::map<std::string, IPlugin*> pluginMap;
-    
+    PluginContext ctx_;  // Системний контекст; передається всім плагінам в initialize()
+
 public:
+    // Ініціалізація системних ресурсів — обов'язково викликати перед registerPlugin/loadFromConfig.
+    // Приклад: pluginSystem->begin(Wire, SPI, *config, *logger);
+    void begin(TwoWire& wire, SPIClass& spiInst, ConfigManager& config, Logger& log) {
+        ctx_.wire      = &wire;
+        ctx_.spi       = &spiInst;
+        ctx_.config    = &config;
+        ctx_.log       = &log;
+        ctx_.wireMutex = xSemaphoreCreateMutex();
+        ctx_.spiMutex  = xSemaphoreCreateMutex();
+    }
+
     // Завантажити плагіни з конфігурації
     void loadFromConfig(ConfigManager* config) {
         auto pluginConfigs = config->getPlugins();
@@ -831,7 +851,7 @@ public:
             Serial.printf("Init %s... ", plugin->getName());
             
             if (plugin->canInitialize()) {
-                if (plugin->initialize()) {
+                if (plugin->initialize(&ctx_)) {  // ← PluginContext* обов'язковий (PA-2)
                     Serial.println("✅");
                 } else {
                     Serial.println("❌ Init failed");
@@ -858,11 +878,14 @@ public:
     }
     
     // Отримати всі плагіни певного типу (template!)
+    // ⚠️ Потребує RTTI (dynamic_cast). Додай до platformio.ini:
+    //    build_flags = -frtti
+    // Альтернатива без RTTI: type-tag через virtual uint32_t getTypeId() const.
     template<typename T>
     std::vector<T*> getPluginsByType() {
         std::vector<T*> result;
         for (auto* plugin : plugins) {
-            T* typed = dynamic_cast<T*>(plugin);
+            T* typed = dynamic_cast<T*>(plugin);  // Потребує -frtti
             if (typed && typed->isReady()) {
                 result.push_back(typed);
             }

@@ -88,38 +88,48 @@ public:
         } stats;
     };
     
-    // === Базові методи (як раніше) ===
+    // === Базові методи (lifecycle) ===
     virtual bool canInitialize() = 0;
-    virtual bool initialize(PluginContext* ctx) = 0;  // Актуальна сигнатура
+    virtual bool initialize(PluginContext* ctx) = 0;
     virtual void update() = 0;
     virtual void shutdown() = 0;
     
     virtual bool isEnabled() const = 0;
     virtual bool isReady() const = 0;
     
-    // === НОВІ методи діагностики ===
+    // === Базова діагностика (мінімально обов'язкова для всіх плагінів) ===
     
-    // Швидка перевірка статусу (викликається часто, має бути швидкою)
+    // Швидка перевірка статусу (викликається часто, має бути швидкою — без I2C/SPI)
     virtual HealthStatus getHealthStatus() const = 0;
-    
-    // Повна діагностика (може бути повільною, викликається рідко)
-    virtual DiagnosticResult runDiagnostics() = 0;
     
     // Отримати останню помилку
     virtual ErrorCode getLastError() const = 0;
+    
+    virtual ~IPlugin() = default;
+};
+
+// include/IDiagnosticPlugin.h
+//
+// Опціональний mixin для плагінів із повною діагностикою.
+// Використання: class LDC1101Plugin : public ISensorPlugin, public IDiagnosticPlugin {}
+//
+class IDiagnosticPlugin {
+public:
+    // Повна діагностика (може бути повільною, викликається рідко)
+    virtual IPlugin::DiagnosticResult runDiagnostics() = 0;
     
     // Self-test (викликається при запуску або за вимогою)
     virtual bool runSelfTest() = 0;
     
     // Статистика роботи
-    virtual DiagnosticResult getStatistics() const = 0;
+    virtual IPlugin::DiagnosticResult getStatistics() const = 0;
     
     // Hardware capabilities check
     virtual bool checkHardwarePresence() = 0;  // Чи hardware підключено?
     virtual bool checkCommunication() = 0;     // Чи працює зв'язок?
     virtual bool checkCalibration() = 0;       // Чи актуальне калібрування?
     
-    virtual ~IPlugin() = default;
+    virtual ~IDiagnosticPlugin() = default;
 };
 ```
 
@@ -130,7 +140,7 @@ public:
 ```cpp
 // lib/LDC1101Plugin/LDC1101Plugin.h
 
-class LDC1101Plugin : public ISensorPlugin {
+class LDC1101Plugin : public ISensorPlugin, public IDiagnosticPlugin {
 private:
     PluginContext* ctx = nullptr;  // ✅ Контекст системи
     int csPin = -1;                // SPI CS пін (з конфіг ldc1101.spi_cs_pin)
@@ -185,12 +195,12 @@ public:
         }
         
         // Конфігурація
-        writeRegister(LDC1101_CONFIG, 0x15);
+        writeRegister(LDC1101_CONFIG, 0x01);  // FUNC_MODE_SLEEP (0x01) — конфігурація лише в sleep режимі
         delay(10);
         
         // Перевірка чи конфігурація застосувалась
         uint8_t readBack = readRegister(LDC1101_CONFIG);
-        if (readBack != 0x15) {
+        if (readBack != 0x01) {
             diagnostics.currentStatus = HealthStatus::INITIALIZATION_FAILED;
             diagnostics.lastError = {4, "Configuration write failed"};
             ctx->log->error(getName(), "Config write failed");
@@ -284,33 +294,34 @@ public:
     }
     
     bool runSelfTest() override {
-        Serial.println("[LDC1101] Running self-test...");
+        if (!ctx) return false;
+        ctx->log->info(getName(), "Self-test start");
         
         // Test 1: Device ID
         uint8_t id = readRegister(LDC1101_DEVICE_ID);
         if (id != 0xD4) {
-            Serial.printf("  ❌ Device ID mismatch: 0x%02X (expected 0xD4)\n", id);
+            ctx->log->error(getName(), "CHIP_ID mismatch: expected 0xD4, got 0x%02X", id);
             return false;
         }
-        Serial.println("  ✅ Device ID correct");
+        ctx->log->info(getName(), "CHIP_ID OK (0xD4)");
         
-        // Test 2: Read/Write register
+        // Test 2: Read/Write register (DIG_CONFIG 0x04 — R/W доступний)
         uint8_t testValue = 0xAA;
         writeRegister(LDC1101_TEST_REG, testValue);
         uint8_t readBack = readRegister(LDC1101_TEST_REG);
         if (readBack != testValue) {
-            Serial.printf("  ❌ R/W test failed: wrote 0x%02X, read 0x%02X\n", testValue, readBack);
+            ctx->log->error(getName(), "R/W test failed: wrote 0x%02X, read 0x%02X", testValue, readBack);
             return false;
         }
-        Serial.println("  ✅ Read/Write test passed");
+        ctx->log->info(getName(), "R/W test passed");
         
         // Test 3: Status register
         uint8_t status = readRegister(LDC1101_STATUS);
         if (status & 0x80) {  // Error bit
-            Serial.printf("  ⚠️ Status register shows error: 0x%02X\n", status);
+            ctx->log->warn(getName(), "Status register error: 0x%02X", status);
             return false;
         }
-        Serial.println("  ✅ Status register OK");
+        ctx->log->info(getName(), "Status register OK");
         
         // Test 4: Multiple reads consistency
         float readings[5];
@@ -332,12 +343,12 @@ public:
         float stddev = sqrt(variance / 5);
         
         if (stddev > mean * 0.1) {  // >10% розкид
-            Serial.printf("  ⚠️ Readings unstable: stddev=%.2f, mean=%.2f\n", stddev, mean);
+            ctx->log->warn(getName(), "Readings unstable: stddev=%.2f, mean=%.2f", stddev, mean);
             return false;
         }
-        Serial.printf("  ✅ Stability test passed (stddev=%.2f)\n", stddev);
+        ctx->log->info(getName(), "Stability test passed (stddev=%.2f)", stddev);
         
-        Serial.println("[LDC1101] ✅ Self-test PASSED");
+        ctx->log->info(getName(), "Self-test PASSED");
         diagnostics.currentStatus = HealthStatus::OK;
         return true;
     }
@@ -375,7 +386,10 @@ public:
     }
     
     bool checkCalibration() override {
-        // Перевірка чи калібрування не застаріле (приклад: 30 днів)
+        // ⚠️ millis() скидається після перезавантаження — не зберігається між сеансами.
+        // Цей приклад підходить лише для перевірки в межах поточного сеансу.
+        // Для постійного зберігання терміну калібрування — зберігай в NVS/SD
+        // (epoch timestamp або лічильник millis після повернення з NVS при старті).
         uint32_t calibrationAge = millis() - lastCalibrationTime;
         if (calibrationAge > 30UL * 24 * 60 * 60 * 1000) {  // 30 днів
             return false;
@@ -472,7 +486,11 @@ private:
     }
     
     float readRP() {
-        // Реальне зчитування RP
+        // ⚠️ Цей приклад читає MSB першим через два окремі SPI-обміни — це НЕПРАВИЛЬНО!
+        // LDC1101 вимагає: REG_RP_DATA_LSB (0x21) обов'язково читати ПЕРШИМ,
+        // в єдиній burst-транзакції (CS незмінно low протягом усього читання).
+        // Коректна реалізація: LDC1101_ARCHITECTURE.md §3 і §8.
+        // ❌ Код нижче — лише для демонстрації структури, НЕ для виробничого використання:
         uint16_t raw = (readRegister(LDC1101_RP_MSB) << 8) | readRegister(LDC1101_RP_LSB);
         return raw * 0.1;  // Convert to Ohm
     }
@@ -598,14 +616,10 @@ void loop() {
                 if (status == IPlugin::HealthStatus::TIMEOUT ||
                     status == IPlugin::HealthStatus::COMMUNICATION_ERROR) {
                     
-                    Serial.printf("  🔄 Attempting recovery...\n");
-                    plugin->shutdown();
-                    delay(100);
-                    // ✅ Система зберігає PluginContext при першій ініціалізації
-                    // і повертає його для повторного initialize()
-                    PluginContext* savedCtx = pluginSystem->getContext(plugin);
-                    if (plugin->initialize(savedCtx)) {
-                        Serial.printf("  ✅ Recovery successful!\n");
+                    // PluginSystem зберігає ctx_ для всіх плагінів. Викликаємо attemptRecovery:
+                    if (pluginSystem->attemptRecovery(plugin)) {
+                        // attemptRecovery: plugin->shutdown(); delay(100); plugin->initialize(&ctx_);
+                        ctx->log->info(plugin->getName(), "Recovery successful");
                     }
                 }
             }
@@ -673,13 +687,22 @@ if (plugin->getStatistics().stats.successRate < 80) {
 ```
 
 ### 2. Remote Diagnostics
+
+> ⚠️ WiFi HTTP у фоновому режимі заборонений в embedded plugin context (блокує CPU, порушує TWDT, вимагає WiFi stack).  
+> Для зовнішньої передачі діагностики — використовуй BLE notifications через `IConnectivityPlugin`:
+
 ```cpp
-// Відправка діагностики на сервер (приклад)
-void sendDiagnosticsToCloud() {
-    String json = diagnosticsToJSON();
-    WiFiClient client;
-    // TODO: implement your API endpoint
-    client.post("https://your-server.com/api/diagnostics", json);
+// ✅ Безпечний варіант: відправка через BLE notification (неблокуючий)
+void notifyDiagnosticsViaBLE(IConnectivityPlugin* ble,
+                             const IPlugin::DiagnosticResult& result) {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%s:%d:%lu/%lu",
+        result.error.message,
+        (int)result.status,
+        result.stats.failedReads,
+        result.stats.totalReads
+    );
+    ble->sendNotification("DIAG", buf);  // Неблокуючий, максимум 20 байт
 }
 ```
 

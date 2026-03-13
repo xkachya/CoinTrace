@@ -109,11 +109,11 @@ public:
     
     // Зчитування даних
     SensorData read() override {
-        if (!ready) return {0, 0, 0, 0};
+        if (!ready) return {0, 0, 0.0f, millis(), false};
         
         ctx->wire->requestFrom(I2C_ADDR, (uint8_t)2);
         if (ctx->wire->available() != 2) {
-            return {0, 0, 0, 0};
+            return {0, 0, 0.0f, millis(), false};
         }
         
         uint16_t raw = (ctx->wire->read() << 8) | ctx->wire->read();
@@ -123,7 +123,8 @@ public:
             .value1 = lux,
             .value2 = 0,
             .confidence = (lux > 0) ? 0.95f : 0.0f,
-            .timestamp = millis()
+            .timestamp = millis(),
+            .valid = (lux > 0)
         };
     }
     
@@ -257,9 +258,9 @@ public:
     SensorType getType() const override { return SensorType::CUSTOM; }
     
     SensorData read() override {
-        if (!ready) return {0, 0, 0, 0};
+        if (!ready) return {0, 0, 0.0f, millis(), false};
         // TODO: Прочитати дані з датчика
-        return {0, 0, 1.0f, millis()};
+        return {0, 0, 1.0f, millis(), true};
     }
     
     bool calibrate() override { return true; }
@@ -294,14 +295,14 @@ public:
     }
     
     SensorData read() override {
-        if (!ready) return {0, 0, 0, 0};
+        if (!ready) return {0, 0, 0.0f, millis(), false};
         
         digitalWrite(csPin, LOW);
         // TODO: SPI транзакція
         uint16_t data = spi->transfer16(0x0000);
         digitalWrite(csPin, HIGH);
         
-        return {(float)data, 0, 1.0f, millis()};
+        return {(float)data, 0, 1.0f, millis(), true};
     }
     
     // ... решта методів
@@ -396,9 +397,10 @@ private:
                 auto data = self->readFromHardware();
                 xSemaphoreGive(self->ctx->spiMutex);
                 
-                xSemaphoreTake(self->dataMutex, portMAX_DELAY);
-                self->latestData = data;
-                xSemaphoreGive(self->dataMutex);
+                if (xSemaphoreTake(self->dataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+                    self->latestData = data;  // ADR-ST-008: pdMS_TO_TICKS(50), не portMAX_DELAY
+                    xSemaphoreGive(self->dataMutex);
+                }
             }
             
             vTaskDelay(pdMS_TO_TICKS(100));
@@ -420,9 +422,12 @@ public:
     
     SensorData read() override {
         SensorData data;
-        xSemaphoreTake(dataMutex, portMAX_DELAY);
-        data = latestData;
-        xSemaphoreGive(dataMutex);
+        if (xSemaphoreTake(dataMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            data = latestData;
+            xSemaphoreGive(dataMutex);
+        } else {
+            data = {0, 0, 0.0f, millis(), false};  // ADR-ST-008: timeout
+        }
         return data;
     }
 };
@@ -631,7 +636,7 @@ bool initialize(PluginContext* context) override {
 SensorData read() override {
     if (!ready) {
         // Поверни нульові дані, не crash!
-        return {0, 0, 0, 0};
+        return {0, 0, 0.0f, millis(), false};
     }
     // ... читання
 }

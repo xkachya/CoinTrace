@@ -148,6 +148,26 @@ struct PluginContext {
 
 ---
 
+### 1.3б ConfigManager — API доступних методів
+
+**Гарантія:** `ctx->config` ніколи не `nullptr`. Ключі читаються з `data/plugins/<plugin_name>.json`.
+
+```cpp
+class ConfigManager {
+public:
+    int32_t     getInt    (const char* key, int32_t defaultVal)       const;
+    uint8_t     getUInt8  (const char* key, uint8_t defaultVal)       const;
+    uint32_t    getUInt32 (const char* key, uint32_t defaultVal)      const;
+    float       getFloat  (const char* key, float defaultVal)         const;
+    bool        getBool   (const char* key, bool defaultVal)          const;
+    const char* getString (const char* key, const char* defaultVal)   const;
+    // формат ключа: "plugin_name.param"
+    // приклад: ctx->config->getInt("ldc1101.spi_cs_pin", 5)
+};
+```
+
+---
+
 ### 1.4 Thread Safety з боку системи
 
 **Гарантія:** `update()` завжди викликається з одного і того ж task (Core 0, main task).
@@ -320,13 +340,16 @@ class SafePlugin : public ISensorPlugin {
     
     void update() override {
         float newValue = readFromSensor();
-        xSemaphoreTake(mutex, portMAX_DELAY);
-        cachedValue = newValue;  // ✅ Захищено
-        xSemaphoreGive(mutex);
+        if (xSemaphoreTake(mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            cachedValue = newValue;  // ✅ Захищено (ADR-ST-008)
+            xSemaphoreGive(mutex);
+        }
     }
     
     SensorData read() override {
-        xSemaphoreTake(mutex, portMAX_DELAY);
+        if (xSemaphoreTake(mutex, pdMS_TO_TICKS(50)) != pdTRUE) {
+            return {0, 0, 0.0f, millis(), false};  // ADR-ST-008: timeout
+        }
         float value = cachedValue;  // ✅ Захищено
         xSemaphoreGive(mutex);
         return {value, 0, 1.0f, millis(), true};
@@ -426,9 +449,9 @@ class RobustPlugin : public ISensorPlugin {
 
 **Контракт:** Плагін не повинен виділяти більше **8 KB RAM** для своїх потреб (буфери, структури даних).
 
-**ESP32-S3 має 512 KB SRAM**, але система підтримує до 20 плагінів одночасно. 8 KB на плагін = 160 KB загалом, залишається 350 KB для системи.
+**ESP32-S3FN8 має ~337 KB вільного heap** (PSRAM відсутній). Система підтримує до 20 плагінів одночасно. 8 KB на плагін = 160 KB загалом, залишається ~177 KB для системи.
 
-**Для великих буферів:** Використовуйте PSRAM (якщо доступно) або SD карту.
+**Для великих буферів:** Використовуйте SD карту. `ps_malloc()` НЕДОСТУПНИЙ на M5Stack Cardputer-ADV.
 
 ---
 
@@ -531,6 +554,16 @@ class IInputPlugin : public IPlugin {
 
 ---
 
+### 3.4 ISensorPlugin — контракт calibrate()
+
+**Контракт:**
+- `calibrate()` — блокуюча операція, `delay()` дозволено
+- **Не викликати з `update()`!** — обов'язково з коду застосунку, поза основного циклу
+- Тривалість калібрування має бути задокументована в коментарі імплементації
+- При перерванні не повинна залишати сенсор в невизначеному стані
+
+---
+
 ## Частина 4: Санкції за порушення контракту
 
 ### Що станеться якщо плагін порушить контракт?
@@ -623,10 +656,11 @@ public:
         // ✅ Швидка операція (<10ms)
         float newValue = readFromSensor();
         
-        // ✅ Thread-safe запис
-        xSemaphoreTake(mutex, portMAX_DELAY);
-        cachedValue = newValue;
-        xSemaphoreGive(mutex);
+        // ✅ Thread-safe запис (ADR-ST-008: portMAX_DELAY заборонено)
+        if (xSemaphoreTake(mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            cachedValue = newValue;
+            xSemaphoreGive(mutex);
+        }
     }
     
     void shutdown() override {
@@ -645,8 +679,10 @@ public:
     // === SENSOR INTERFACE ===
     
     SensorData read() override {
-        // ✅ Thread-safe читання
-        xSemaphoreTake(mutex, portMAX_DELAY);
+        // ✅ Thread-safe читання (ADR-ST-008: portMAX_DELAY заборонено)
+        if (xSemaphoreTake(mutex, pdMS_TO_TICKS(50)) != pdTRUE) {
+            return {0, 0, 0.0f, millis(), false};  // Timeout — дані недоступні
+        }
         float value = cachedValue;
         xSemaphoreGive(mutex);
         
