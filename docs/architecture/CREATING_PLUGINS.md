@@ -104,8 +104,21 @@ public:
     bool isEnabled() const override { return ready; }
     bool isReady() const override { return ready; }
     
-    // Тип сенсора
-    SensorType getType() const override { return SensorType::CUSTOM; }
+    // Тип сенсора (PA3-9 fix: CUSTOM→LIGHT — BH1750FVI є optical ambient light sensor)
+    SensorType getType() const override { return SensorType::LIGHT; }
+
+    // Метадані (PA3-4 fix: ISensorPlugin::getMetadata() pure virtual — обо’язкова реалізація)
+    SensorMetadata getMetadata() const override {
+        return {
+            .sensorType   = SensorType::LIGHT,
+            .manufacturer = "ROHM Semiconductor",
+            .model        = "BH1750FVI",
+            .resolution   = 1.0f,    // lux
+            .minValue     = 0.0f,
+            .maxValue     = 65535.0f,
+            .updateRateHz = 10
+        };
+    }
     
     // Зчитування даних
     SensorData read() override {
@@ -255,12 +268,20 @@ public:
     bool isEnabled() const override { return ready; }
     bool isReady() const override { return ready; }
     
-    SensorType getType() const override { return SensorType::CUSTOM; }
-    
+    SensorType getType() const override { return SensorType::CUSTOM; }  // TODO: замінити на потрібний тип
+
+    // PA3-4 fix: ISensorPlugin::getMetadata() pure virtual — обо’язкова реалізація, інакше compile error
+    SensorMetadata getMetadata() const override {
+        // TODO: заповнити як відповідає ваш датчик
+        return {.sensorType = SensorType::CUSTOM, .manufacturer = "Unknown",
+                .model = "MyI2CSensor", .resolution = 1.0f, .updateRateHz = 10};
+    }
+
     SensorData read() override {
         if (!ready) return {0, 0, 0.0f, millis(), false};
         // TODO: Прочитати дані з датчика
-        return {0, 0, 1.0f, millis(), true};
+        // PA3-13 fix: valid=false до реальної реалізації (було true — false success!)
+        return {0, 0, 0.0f, millis(), false};
     }
     
     bool calibrate() override { return true; }

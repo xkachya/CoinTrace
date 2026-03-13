@@ -115,8 +115,9 @@ public:
 class HX711Plugin : public ISensorPlugin {
 private:
     PluginContext* ctx = nullptr;
-    const uint8_t DOUT_PIN = 5;
-    const uint8_t SCK_PIN = 6;
+    // PA3-7 fix: GPIO pins з ConfigManager, а не hardcoded константи
+    uint8_t DOUT_PIN = 5;  // default, перезаписується з config у initialize()
+    uint8_t SCK_PIN  = 6;  // default, перезаписується з config у initialize()
     HX711 scale;
     float calibrationFactor = 2280.0; // Калібрування
     
@@ -142,6 +143,9 @@ public:
     
     bool initialize(PluginContext* context) override {
         ctx = context;
+        // PA3-7 fix: GPIO pins з ConfigManager, а не hardcoded константи
+        DOUT_PIN = ctx->config->getInt("hx711.dout_pin", 5);
+        SCK_PIN  = ctx->config->getInt("hx711.sck_pin",  6);
         scale.begin(DOUT_PIN, SCK_PIN);  // Налаштування GPIO пінів
         scale.set_scale(calibrationFactor);
         scale.tare();  // Скинути вагу
@@ -158,7 +162,10 @@ public:
             return {0, 0, 0, millis(), false};
         }
         
-        float weight = scale.get_units(5);  // Середнє з 5 зчитувань
+        float weight = scale.get_units(1);  // PA3-2: зменшено з 5→1 (менше blocking)
+        // ⚠️ CONTRACT §2.1: update() ≤ 10 ms. Навіть get_units(1) на 10 Hz = 100 ms — порушення!
+        // Правильне рішення для production: AsyncSensorPlugin (зчитування у FreeRTOS task).
+        // Поки HX711 не async — не використовуйте цей plugin з контрактом ≥10 Hz.
         
         return {
             .value1 = weight,
@@ -322,9 +329,10 @@ public:
     };
     
     virtual InputType getType() const = 0;
-    virtual bool hasEvent() = 0;
-    virtual InputEvent getEvent() = 0;
-    virtual void clearEvents() = 0;
+    // PA3-5 fix: CONTRACT §3.3 вимагає атомарний pop. hasEvent()+getEvent() = TOCTOU race condition.
+    // pollEvent() = атомарний pop — thread-safe в multi-core середовищі.
+    // Реалізація повинна використовувати mutex або lock-free queue.
+    virtual std::optional<InputEvent> pollEvent() = 0;  // CONTRACT §3.3
 };
 ```
 

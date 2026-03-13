@@ -1,7 +1,7 @@
-# Plugin Architecture — Незалежний Архітектурний Аудит v2.0.0
+# Plugin Architecture — Незалежний Архітектурний Аудит v2.0.0 / v3.0.0
 
-**Документ:** PLUGIN_AUDIT_v2.0.0.md  
-**Аудитовані документи (поточний стан після всіх v1.0.0 виправлень):**
+**Документ:** PLUGIN_AUDIT_v2.0.0.md (доповнено v3.0.0 знахідками 2026-03-13)  
+**Аудитовані документи (поточний стан після всіх v1.0.0 + v2.0.0 виправлень):**
 - `PLUGIN_ARCHITECTURE.md` v1.1.0+ (PA-1..PA-13, PA-19, PA-21..PA-30 закриті)
 - `PLUGIN_CONTRACT.md` v1.1.0+ (PA-5, PA-6, PA-10, PA-15 закриті)
 - `PLUGIN_INTERFACES_EXTENDED.md` v1.2.0+ (PA-14, PA-27 закриті)
@@ -12,7 +12,8 @@
 **Відкриті знахідки з v1.0.0 перенесені:** PA-12 (MEDIUM), PA-16 (LOW) → нові ID: C-PA12, C-PA16  
 **PA-20 з v1.0.0** → повністю замінена ширшою PA2-3 (compile error scope)
 
-**Дата аудиту:** 2026-03-13  
+**Дата v2.0.0 аудиту:** 2026-03-13  
+**Дата v3.0.0 доповнень:** 2026-03-13 (зовнішній аудит `docs/external/PLUGIN_ARCHITECTURE_AUDIT_v4_2026-03-13.md` верифікований та інтегрований)  
 **Методологія:**
 - Cross-document compilation simulation (всі 5 docs як єдиний header-set)
 - FreeRTOS execution timeline modeling (update loop budget, priority inversion analysis)
@@ -56,6 +57,30 @@
 26. [Backlog та пріоритети v2.0.0](#26-backlog-та-пріоритети-v200)
 27. [Cross-reference: v1.0.0 → v2.0.0](#27-cross-reference-v100--v200)
 
+**── v3.0.0 Зовнішній аудит (2026-03-13) ──**
+
+28. [Нові знахідки v3.0.0 — Score-карта](#28-нові-знахідки-v300--score-карта)
+29. [PA3-1 — DIAGNOSTICS readRP(): дві SPI-транзакції, CS не утримується LOW](#29-pa3-1--diagnostics-readrp-дві-spi-транзакції-cs-не-утримується-low)
+30. [PA3-2 — INTERFACES_EXTENDED HX711Plugin: get_units(5) блокує loop() на 62–500 ms](#30-pa3-2--interfaces_extended-hx711plugin-get_units5-блокує-loop-на-62500-ms)
+31. [PA3-3 — DIAGNOSTICS logDiagnostics(): SD.open() без spiMutex](#31-pa3-3--diagnostics-logdiagnostics-sdopen-без-spimutex)
+32. [PA3-4 — BH1750Plugin + MyI2CSensorPlugin: getMetadata() pure virtual не реалізований](#32-pa3-4--bh1750plugin--myi2csensorplugin-getmetadata-pure-virtual-не-реалізований)
+33. [PA3-5 — IInputPlugin: API конфлікт hasEvent()/getEvent() vs CONTRACT pollEvent()](#33-pa3-5--iinputplugin-api-конфлікт-haseventgetevent-vs-contract-pollevent)
+34. [PA3-6 — checkStability(): блокуючий виклик через runDiagnostics() з loop()](#34-pa3-6--checkstability-блокуючий-виклик-через-rundiagnostics-з-loop)
+35. [PA3-7 — HX711Plugin: GPIO pins hardcoded, не використовує ConfigManager](#35-pa3-7--hx711plugin-gpio-pins-hardcoded-не-використовує-configmanager)
+36. [PA3-8 — CONTRACT §1.1: ≥10 Hz гарантія нездійсненна при 10+ плагінах](#36-pa3-8--contract-11-10-hz-гарантія-нездійсненна-при-10-плагінах)
+37. [PA3-9 — BH1750Plugin::getType() повертає CUSTOM замість LIGHT](#37-pa3-9--bh1750plugingettype-повертає-custom-замість-light)
+38. [PA3-10 — checkCalibration(): lastCalibrationTime = 0 після ребуту](#38-pa3-10--checkcalibration-lastcalibrationtime--0-після-ребуту)
+39. [PA3-11 — showDiagnosticsScreen(): displayPlugin/pluginSystem як глобальні змінні](#39-pa3-11--showdiagnosticsscreen-displaypluginpluginsystem-як-глобальні-змінні)
+40. [PA3-12 — PLUGIN_ARCHITECTURE.md: IPlugin визначений двічі в одному файлі](#40-pa3-12--plugin_architecturemd-iplugin-визначений-двічі-в-одному-файлі)
+41. [PA3-13 — MyI2CSensorPlugin template: valid=true в placeholder коді](#41-pa3-13--myi2csensorplugin-template-validtrue-в-placeholder-коді)
+42. [PA3-14 — PLUGIN_ARCHITECTURE.md: версія та дата не оновлені після P-2](#42-pa3-14--plugin_architecturemd-версія-та-дата-не-оновлені-після-p-2)
+43. [PA3-15 — HARDWARE_PROFILES.md: файл не існує, посилання без [TODO]](#43-pa3-15--hardware_profilesmd-файл-не-існує-посилання-без-todo)
+44. [PA3-16 — getGraphicsLibrary(): повертає void* — type-unsafe](#44-pa3-16--getgraphicslibrary-повертає-void--type-unsafe)
+45. [PA3-17 — getTypeId(): зазначений з -frtti але не реалізований у прикладах](#45-pa3-17--gettypeid-зазначений-з--frtti-але-не-реалізований-у-прикладах)
+46. [Pre-implementation Checklist v3.0.0 (ДОПОВНЕННЯ)](#46-pre-implementation-checklist-v300-доповнення)
+47. [Backlog та пріоритети v3.0.0](#47-backlog-та-пріоритети-v300)
+48. [Cross-reference: v2.0.0 → v3.0.0](#48-cross-reference-v200--v300)
+
 ---
 
 ## 1. Загальна оцінка
@@ -98,7 +123,7 @@ v1.0.0 аудит закрив усі блокуючі для компіляці
 | **PA2-14** | ARCH §data/config.json example | Inline `"config": "plugins/ldc1101.json"` поле у plugin entry суперечить PA-13 canonical model | 🟡 MEDIUM | ✅ CLOSED |
 | **PA2-15** | DIAGNOSTICS §4 §5 | `ctx->log->info(...)` та `SD.open()` безпосередньо у `main.cpp` loop() — `ctx` є private членом PluginSystem, недоступний у main scope | 🟡 MEDIUM | 🔓 OPEN |
 | **PA2-16** | DIAGNOSTICS §2 `checkCalibration()` | `calibrationBaseline = 0` при старті → перша перевірка `< 100` завжди `false` → `runDiagnostics()` завжди `CALIBRATION_NEEDED` до явного calibrate() | 🟢 LOW | 🔓 OPEN |
-| **PA2-17** | CREATING_PLUGINS §BH1750 `read()` | `ctx->wire->requestFrom()` без `wireMutex` у `read()` — race condition якщо read() викликається з Core 1 (CONTRACT §2.2) | 🟢 LOW | 🔓 OPEN |
+| **PA2-17** | CREATING_PLUGINS §BH1750 `read()` | `ctx->wire->requestFrom()` без `wireMutex` у `read()` — race condition якщо read() викликається з Core 1 (CONTRACT §2.2) | � HIGH *(підвищено з LOW — v3.0.0)* | 🔓 OPEN |
 | **PA2-18** | ARCH §Креативні фічі | `reloadPlugin()`, `installPluginOTA()` використовуються як real API але не визначені в `PluginSystem`; OTA registry URL формат суперечить CONNECTIVITY_ARCH (BLE/WS) | 🟢 LOW | 🔓 OPEN |
 
 ### Перенесені відкриті знахідки з v1.0.0
@@ -112,9 +137,43 @@ v1.0.0 аудит закрив усі блокуючі для компіляці
 
 ### Підсумок v2.0.0
 
-**Разом нових:** 3 CRITICAL · 4 HIGH · 6 MEDIUM · 3 LOW = **16 нових знахідок**  
+**Разом нових:** 3 CRITICAL · 5 HIGH *(PA2-17 підвищено LOW→HIGH у v3.0.0)* · 6 MEDIUM · 2 LOW = **16 нових знахідок**  
 **Перенесено з v1.0.0:** C-PA12 (MEDIUM) · C-PA16 (LOW) = **2 carried**  
-**Всього:** 18 знахідок | **✅ CLOSED: 14** | **🔓 OPEN: 5** (PA2-12, PA2-15, PA2-16, PA2-17, PA2-18, C-PA16)
+**Всього:** 18 знахідок | **✅ CLOSED: 14** | **🔓 OPEN: 6** (PA2-12, PA2-15, PA2-16, PA2-17, PA2-18, C-PA16)  
+*(Примітка: після v3.0.0 зовнішнього аудиту до цього файлу додано 17 нових знахідок PA3-1..PA3-17 — see §28)*
+
+### Нові знахідки (v3.0.0 — зовнішній аудит v4)
+
+| ID | Документ | Знахідка | Severity | Статус |
+|---|---|---|---|---|
+| **PA3-1** | DIAGNOSTICS `readRP()` | Дві окремі SPI-транзакції при читанні MSB+LSB — CS не утримується LOW між ними → corrupt raw data | 🔴 CRITICAL | ✅ CLOSED |
+| **PA3-2** | INTERFACES_EXTENDED `HX711Plugin` | `scale.get_units(5)` блокує loop() на 500 ms (10 Hz) або 62 ms (80 Hz) — CONTRACT §2.1 вимагає ≤10 ms | 🔴 CRITICAL | ✅ CLOSED *(get_units(1) + warning; prod: AsyncSensorPlugin)* |
+| **PA3-3** | DIAGNOSTICS `logDiagnostics()` | `SD.open("/diagnostics.log")` без `xSemaphoreTake(ctx->spiMutex)` — SPI bus corruption при паралельному доступі | 🔴 CRITICAL | ✅ CLOSED |
+| **PA3-4** | CREATING_PLUGINS `BH1750Plugin` + `MyI2CSensorPlugin` | `getMetadata() const = 0` pure virtual з INTERFACES_EXTENDED не реалізований ані у конкретному прикладі ані у template — compile error | 🟠 HIGH | ✅ CLOSED |
+| **PA3-5** | INTERFACES_EXTENDED `IInputPlugin` | `hasEvent()`/`getEvent()`/`clearEvents()` суперечать CONTRACT §3.3 `pollEvent()` (atomic pop) — два несумісних API | 🟠 HIGH | ✅ CLOSED |
+| **PA3-6** | DIAGNOSTICS `checkStability()` | `checkStability()` блокує 500+ ms (5 вимірів × 100 ms); `runDiagnostics()` → `runSelfTest()` → `checkStability()` — якщо викликати з loop() → deadline miss | 🟠 HIGH | 🔓 OPEN |
+| **PA3-7** | INTERFACES_EXTENDED `HX711Plugin` | `const uint8_t DOUT_PIN = 5; SCK_PIN = 6` hardcoded — не використовує `ctx->config->getInt()`, copyable example насаджує погану практику | 🟠 HIGH | ✅ CLOSED |
+| **PA3-8** | ARCH §3.1 + CONTRACT §1.1 | CONTRACT гарантує ≥10 Hz але 10 плагінів × 10 ms update() = 110 ms loop → 9.1 Hz — гарантія математично нездійсненна без уточнення | 🟡 MEDIUM | 🔓 OPEN |
+| **PA3-9** | CREATING_PLUGINS `BH1750Plugin::getType()` | Повертає `SensorType::CUSTOM` — повинно бути `SensorType::LIGHT` (BH1750 = optical ambient light sensor) | 🟡 MEDIUM | ✅ CLOSED |
+| **PA3-10** | DIAGNOSTICS `checkCalibration()` | `lastCalibrationTime = 0` після ребуту → `millis() - 0 < 30-day threshold` завжди true → 30-денна перевірка ніколи не спрацює (на відміну від PA2-16 який про calibrationBaseline) | 🟡 MEDIUM | 🔓 OPEN |
+| **PA3-11** | DIAGNOSTICS `showDiagnosticsScreen()` | Використовує глобальні `displayPlugin`, `pluginSystem` — Service Locator anti-pattern; функція не приймає ці залежності як параметри | 🟡 MEDIUM | 🔓 OPEN |
+| **PA3-12** | ARCH Крок1 + §Оновлений IPlugin | `class IPlugin` визначений двічі в PLUGIN_ARCHITECTURE.md (рядки 138 і 272) — залишок після PA2-9 fix (який закрив cross-doc проблему, але не внутрішню дублікацію в одному файлі) | 🟡 MEDIUM | ✅ CLOSED |
+| **PA3-13** | CREATING_PLUGINS `MyI2CSensorPlugin` template | `return {0, 0, 1.0f, millis(), true}` — `valid=true` у placeholder failure path → плагін repортує false success при реальному hardware failure | 🟢 LOW | ✅ CLOSED |
+| **PA3-13** | CREATING_PLUGINS `MyI2CSensorPlugin` template | `return {0, 0, 1.0f, millis(), true}` — `valid=true` у placeholder failure path → плагін reportує false success при реальному hardware failure | 🟢 LOW | ✅ CLOSED |
+| **PA3-15** | ARCH §Апаратні профілі | `HARDWARE_PROFILES.md` посилається як існуючий ресурс — файл не існує, не позначено `[TODO]` | 🟢 LOW | ✅ CLOSED |
+| **PA3-16** | DIAGNOSTICS `showDiagnosticsScreen()` | `getGraphicsLibrary()` повертає `void*` — type-unsafe, кожен споживач мусить `reinterpret_cast` без compile-time перевірки | 🔵 INFO | 🔓 OPEN |
+| **PA3-17** | INTERFACES_EXTENDED `IPlugin` base | `getTypeId()` задокументований з коментарем про `-frtti`, але жоден конкретний плагін не реалізує його | 🔵 INFO | 🔓 OPEN |
+
+### D-1 (external) → FALSE POSITIVE — не додано як знахідку
+
+> Зовнішній аудит B-D-1 позначив `valid=true` у I2C template як проблему посилаючись тільки на рядок 263 (`return {0, 0, 1.0f, millis(), true}`). Це **дійсно** проблемне місце (→ PA3-13). Але аудит помилково об'єднав його з рядком 498, де `valid=true` є **коректним** — це фактичний успішний результат читання після `Wire.requestFrom()`. Рядок 498 — НЕ помилка.
+
+### Підсумок v3.0.0
+
+**Нові знахідки:** 3 CRITICAL · 4 HIGH · 5 MEDIUM · 3 LOW · 2 INFO = **17 нових знахідок**  
+**Всього по документу (v2.0.0 + v3.0.0):** 35 знахідок | **✅ CLOSED: 14** | **🔓 OPEN: 21**
+
+---
 
 ---
 
@@ -1217,9 +1276,23 @@ if (fusion) {
 - [x] **PA2-13** — ~~memory budget revision~~ ✅ CLOSED (20→10 плагінів)
 - [ ] PA2-15 — ctx->log у loop() scope
 - [ ] PA2-16 — calibrationBaseline boot behavior
-- [ ] PA2-17 — BH1750 wireMutex comment
+- [ ] PA2-17 — BH1750 wireMutex *(підвищено до HIGH у v3.0.0)*
 - [ ] PA2-18 — NOT IMPLEMENTED comments на OTA/reload
 - [ ] C-PA16 — dependency injection lifecycle doc
+
+### v3.0.0 Нові блокуючі (CRITICAL — до написання першого реального плагіна):
+
+- [ ] **PA3-1** — `readRP()` burst transaction: hold CS LOW, об'єднати MSB+LSB в одну транзакцію
+- [ ] **PA3-2** — `HX711Plugin` AsyncSensorPlugin pattern: `get_units(1)` або FreeRTOS task
+- [ ] **PA3-3** — `logDiagnostics()`: обгорнути `SD.open()` у `spiMutex`
+
+### v3.0.0 HIGH (виправити до першого release):
+
+- [ ] **PA3-4** — Додати `getMetadata()` до `BH1750Plugin` та `MyI2CSensorPlugin` template
+- [ ] **PA3-5** — Уніфікувати `IInputPlugin` → `pollEvent()` (CONTRACT wins)
+- [ ] **PA2-17** — Додати `wireMutex` навколо `Wire.requestFrom()` у BH1750 `read()`
+- [ ] **PA3-6** — `runDiagnostics()` → background FreeRTOS task, не з loop()
+- [ ] **PA3-7** — GPIO pins з `ctx->config->getInt("hx711.dout", 5)`
 
 ---
 
@@ -1302,6 +1375,621 @@ PA2-8 (task leak)
 
 ---
 
-*Аудит проведений: 2026-03-13*  
+*Аудит v2.0.0 проведений: 2026-03-13*  
 *Попередній аудит: `docs/architecture/obsolete/PLUGIN_AUDIT_v1.0.0.md`*  
-*Наступний аудит: після закриття PA2-1..PA2-6 (P-2 completion)*
+*v3.0.0 знахідки інтегровані нижче (§28–§48)*
+
+---
+
+## 28. Нові знахідки v3.0.0 — Score-карта
+
+Score-карта нових знахідок розміщена у **§2 (Нові знахідки v3.0.0)**. Повні знахідки нижче в §29–§45.
+
+**Джерело:** `docs/external/PLUGIN_ARCHITECTURE_AUDIT_v4_2026-03-13.md`  
+**Верифікація:** всі 17 знахідок підтверджені проти актуального тексту архітектурних документів.  
+**Виключено:** D-1 (external) — false positive (два різних контексти `valid=true` сплутані — §2 D-1 note).
+
+---
+
+## 29. PA3-1 — DIAGNOSTICS readRP(): дві SPI-транзакції, CS не утримується LOW
+
+**Severity:** 🔴 CRITICAL  
+**Статус:** 🔓 OPEN  
+**Документ:** `PLUGIN_DIAGNOSTICS.md` §5 `readRP()`
+
+### Evidence
+
+```cpp
+// PLUGIN_DIAGNOSTICS.md — readRP() (~рядок 508):
+uint16_t raw = (readRegister(LDC1101_RP_MSB) << 8) | readRegister(LDC1101_RP_LSB);
+//              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+//              SPI транзакція #1: CS LOW→HIGH        SPI транзакція #2: CS LOW→HIGH
+//              ПІСЛЯ цього CS стає HIGH!             читає НАСТУПНИЙ регістр
+```
+
+Кожен `readRegister()` виконує окрему SPI транзакцію з CS LOW→HIGH→LOW переходом. LDC1101 вимагає безперервного CS LOW для атомарного читання пов'язаних регістрів. Між транзакцією #1 та #2:
+- SD card ISR може перехопити шину
+- LDC1101 може оновити вимірювання між читаннями → MSB та LSB відносяться до різних вимірів
+
+Коментар `❌ НЕ для виробничого використання` існує але недостатній — це **єдиний** приклад `readRP()` в документації, і розробники плагінів скопіюють його.
+
+### Рішення
+
+```cpp
+// Правильна реалізація — burst read з CS утриманим LOW:
+uint16_t readRP() {
+    uint16_t raw = 0;
+    xSemaphoreTake(ctx->spiMutex, pdMS_TO_TICKS(50));
+    digitalWrite(CS_PIN, LOW);
+    spi->transfer(LDC1101_RP_MSB | 0x80);  // read bit set
+    uint8_t msb = spi->transfer(0x00);
+    uint8_t lsb = spi->transfer(0x00);     // CS утримується LOW між MSB і LSB
+    digitalWrite(CS_PIN, HIGH);
+    xSemaphoreGive(ctx->spiMutex);
+    raw = (msb << 8) | lsb;
+    return raw;
+}
+```
+
+Прибрати коментар `❌ НЕ для виробничого використання` і замінити виправленим кодом з поясненням burst read.
+
+---
+
+## 30. PA3-2 — INTERFACES_EXTENDED HX711Plugin: get_units(5) блокує loop() на 62–500 ms
+
+**Severity:** 🔴 CRITICAL  
+**Статус:** 🔓 OPEN  
+**Документ:** `PLUGIN_INTERFACES_EXTENDED.md` §HX711Plugin `read()`
+
+### Evidence
+
+```cpp
+// PLUGIN_INTERFACES_EXTENDED.md (~рядок 161):
+SensorData read() override {
+    float weight = scale.get_units(5);  // ← BLOCKING: 5 samples averaged
+    //                             ^
+    //   10 Hz data rate: 5 × 100 ms = 500 ms
+    //   80 Hz data rate: 5 × 12.5 ms = 62.5 ms
+    //   CONTRACT §2.1: update() ≤ 10 ms — ПОРУШЕННЯ
+    return {weight, 0, 1.0f, millis(), weight > 0};
+}
+```
+
+CONTRACT §2.1 явно вимагає `update()` завершення ≤10 ms. `get_units(5)` на 10 Hz шкалі блокує на **500 ms** — у 50 разів більше ліміту. Навіть на 80 Hz — 62 ms (6× перевищення). Весь `loop()` зупиняється, всі інші плагіни не оновлюються.
+
+### Рішення
+
+**Мінімальний:** `get_units(1)` замість `get_units(5)` → 10 ms або 100 ms залежно від data rate. Не вирішує проблему при 10 Hz.
+
+**Правильний (AsyncSensorPlugin pattern):**
+
+```cpp
+class HX711Plugin : public AsyncSensorPlugin {
+    // Зчитування в окремій FreeRTOS задачі на Core 0
+    std::atomic<float> cachedWeight{0.0f};
+
+    void readTask() override {  // запускається системою в окремій task
+        while (!shouldStop) {
+            cachedWeight.store(scale.get_units(1));
+            vTaskDelay(pdMS_TO_TICKS(50));  // 20 Hz
+        }
+    }
+
+    SensorData read() override {
+        float w = cachedWeight.load();
+        return {w, 0, 1.0f, millis(), w > 0};  // НЕ блокуючий
+    }
+};
+```
+
+Оновити `PLUGIN_INTERFACES_EXTENDED.md` прикладом AsyncSensorPlugin для HX711 з поясненням чому blocking sensor вимагає цього паттерну.
+
+---
+
+## 31. PA3-3 — DIAGNOSTICS logDiagnostics(): SD.open() без spiMutex
+
+**Severity:** 🔴 CRITICAL  
+**Статус:** 🔓 OPEN  
+**Документ:** `PLUGIN_DIAGNOSTICS.md` §5 `logDiagnostics()`
+
+### Evidence
+
+```cpp
+// PLUGIN_DIAGNOSTICS.md (~рядок 669):
+void logDiagnostics(const DiagnosticResult& result) {
+    File log = SD.open("/diagnostics.log", FILE_APPEND);  // ← БЕЗ spiMutex!
+    if (log) {
+        log.println(result.summary);
+        log.close();
+    }
+}
+```
+
+LDC1101Plugin також використовує ту ж VSPI шину. Якщо `LDC1101Plugin::update()` виконується на Core 0 одночасно з `logDiagnostics()` на Core 1 → SPI bus contention → корупція даних на обох (LDC1101 повертає сміттєві значення, SD запис неповний або corrupted).
+
+**Важлива деталь:** зовнішній аудит пропонував замінити `SD.open()` на `ctx->log->info()`. Це **неправильне** рішення — Logger не забезпечує персистентне сховище діагностики. SD файл потрібен для offline діагностики.
+
+### Рішення
+
+```cpp
+void logDiagnostics(const DiagnosticResult& result) {
+    if (!ctx->spiMutex) return;
+    if (xSemaphoreTake(ctx->spiMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        File log = SD.open("/diagnostics.log", FILE_APPEND);
+        if (log) {
+            log.println(result.summary);
+            log.close();
+        }
+        xSemaphoreGive(ctx->spiMutex);
+    } else {
+        ctx->log->warning("logDiagnostics: spiMutex timeout, SD write skipped");
+    }
+}
+```
+
+---
+
+## 32. PA3-4 — BH1750Plugin + MyI2CSensorPlugin: getMetadata() pure virtual не реалізований
+
+**Severity:** 🟠 HIGH  
+**Статус:** 🔓 OPEN  
+**Документ:** `CREATING_PLUGINS.md` §Quick Start BH1750Plugin, §Templates MyI2CSensorPlugin
+
+### Evidence
+
+`PLUGIN_INTERFACES_EXTENDED.md` визначає `ISensorPlugin`:
+```cpp
+virtual SensorMetadata getMetadata() const = 0;  // pure virtual
+```
+
+`CREATING_PLUGINS.md` BH1750Plugin та `MyI2CSensorPlugin` template — жоден не реалізує `getMetadata()`. **Обидва є абстрактними класами** і не можуть бути інстанційовані (compile error).
+
+**Примітка:** PA2-10 (CLOSED) виправив inconsistency у _визначенні_ `ISensorPlugin` між ARCH і INTERFACES. PA3-4 — окрема проблема: конкретні _приклади_ і _templates_ в CREATING_PLUGINS досі не мають реалізації.
+
+### Рішення
+
+Додати до `BH1750Plugin` і до `MyI2CSensorPlugin` template:
+
+```cpp
+SensorMetadata getMetadata() const override {
+    return {
+        .sensorType    = SensorType::LIGHT,
+        .manufacturer  = "ROHM Semiconductor",
+        .model         = "BH1750FVI",
+        .resolution    = 1.0f,   // lux
+        .minValue      = 0.0f,
+        .maxValue      = 65535.0f,
+        .updateRateHz  = 10
+    };
+}
+```
+
+Для `MyI2CSensorPlugin` template — залишити `TODO` коментар з поясненням полів.
+
+---
+
+## 33. PA3-5 — IInputPlugin: API конфлікт hasEvent()/getEvent() vs CONTRACT pollEvent()
+
+**Severity:** 🟠 HIGH  
+**Статус:** 🔓 OPEN  
+**Документ:** `PLUGIN_INTERFACES_EXTENDED.md` §IInputPlugin + `PLUGIN_CONTRACT.md` §3.3
+
+### Evidence
+
+`PLUGIN_INTERFACES_EXTENDED.md`:
+```cpp
+class IInputPlugin : public IPlugin {
+    virtual bool hasEvent() const = 0;
+    virtual InputEvent getEvent() = 0;
+    virtual void clearEvents() = 0;
+};
+```
+
+`PLUGIN_CONTRACT.md` §3.3:
+```cpp
+virtual std::optional<InputEvent> pollEvent() = 0;  // атомарний pop
+```
+
+`hasEvent()` + `getEvent()` = _check-then-act_, не атомарний → TOCTOU race condition у multi-core середовищі. `pollEvent()` = атомарний pop → thread-safe за визначенням.
+
+### Рішення
+
+`pollEvent()` є правильним вибором (CONTRACT §3.3 авторитетний для thread safety). Оновити `PLUGIN_INTERFACES_EXTENDED.md`:
+
+```cpp
+class IInputPlugin : public IPlugin {
+    // Атомарний pop — CONTRACT §3.3: реалізація повинна бути thread-safe
+    virtual std::optional<InputEvent> pollEvent() = 0;
+    virtual ~IInputPlugin() = default;
+};
+```
+
+Прибрати `hasEvent()`, `getEvent()`, `clearEvents()`.
+
+---
+
+## 34. PA3-6 — checkStability(): блокуючий виклик через runDiagnostics() з loop()
+
+**Severity:** 🟠 HIGH  
+**Статус:** 🔓 OPEN  
+**Документ:** `PLUGIN_DIAGNOSTICS.md` §2 `checkStability()`, `runDiagnostics()`
+
+### Evidence
+
+```cpp
+// checkStability() (~рядок 408):
+// ⚠️ УВАГА: НЕ викликати з loop() — блокується на ~500 ms!
+bool checkStability(int samples = 5, int delayMs = 100) {
+    for (int i = 0; i < samples; i++) {
+        readings[i] = readRP();
+        delay(delayMs);  // 100ms × 5 = 500 ms blocking
+    }
+}
+```
+
+`runDiagnostics()` (~рядок 246) викликає `runSelfTest()` → `checkStability()`. Попередження `НЕ викликати з loop()` існує для `checkStability()`, але **відсутнє** для `runDiagnostics()` — і саме `runDiagnostics()` є публічним API.
+
+### Рішення
+
+Додати попередження до `runDiagnostics()`:
+```cpp
+// ⚠️ runDiagnostics() блокує ~500 ms (checkStability). НЕ викликати з loop()!
+// Запускати з окремої FreeRTOS task або по кнопці.
+DiagnosticResult runDiagnostics();
+```
+
+Рекомендований pattern виклику:
+```cpp
+xTaskCreate([](void* p) {
+    auto result = static_cast<LDC1101DiagnosticPlugin*>(p)->runDiagnostics();
+    vTaskDelete(nullptr);
+}, "diag_task", 4096, this, 1, nullptr);
+```
+
+---
+
+## 35. PA3-7 — HX711Plugin: GPIO pins hardcoded, не використовує ConfigManager
+
+**Severity:** 🟠 HIGH  
+**Статус:** 🔓 OPEN  
+**Документ:** `PLUGIN_INTERFACES_EXTENDED.md` §HX711Plugin
+
+### Evidence
+
+```cpp
+// (~рядки 118–119):
+const uint8_t DOUT_PIN = 5;
+const uint8_t SCK_PIN  = 6;
+```
+
+Hardcoded пін-розводка унеможливлює config-driven pin assignment і суперечить патерну ConfigManager вже використовуваному в `LDC1101Plugin`. Розробник змушений редагувати бібліотечний код.
+
+### Рішення
+
+```cpp
+bool initialize(PluginContext* ctx) override {
+    uint8_t doutPin = ctx->config->getInt("hx711.dout_pin", 5);
+    uint8_t sckPin  = ctx->config->getInt("hx711.sck_pin",  6);
+    scale.begin(doutPin, sckPin);
+}
+```
+
+Config файл (`plugins/hx711.json`):
+```json
+{ "hx711.dout_pin": 5, "hx711.sck_pin": 6, "hx711.calibration_factor": -7050.0 }
+```
+
+---
+
+## 36. PA3-8 — CONTRACT §1.1: ≥10 Hz гарантія нездійсненна при 10+ плагінах
+
+**Severity:** 🟡 MEDIUM  
+**Статус:** 🔓 OPEN  
+**Документ:** `PLUGIN_CONTRACT.md` §1.1 + `PLUGIN_ARCHITECTURE.md` §3.1
+
+### Evidence
+
+Симуляція (§3.1 цього аудиту): 10 × 10 ms + delay(10) = 110 ms → 9.1 Hz.  
+CONTRACT §1.1: "update() викликається регулярно з частотою ≥10 Hz" — безумовна обіцянка.
+
+### Рішення
+
+Уточнити CONTRACT §1.1 з explicit умовами (max plugins, max update() time). Зазначити що AsyncSensorPlugin pattern є шляхом до складніших конфігурацій.
+
+---
+
+## 37. PA3-9 — BH1750Plugin::getType() повертає CUSTOM замість LIGHT
+
+**Severity:** 🟡 MEDIUM  
+**Статус:** 🔓 OPEN  
+**Документ:** `CREATING_PLUGINS.md` §Quick Start BH1750Plugin
+
+### Evidence
+
+```cpp
+SensorType getType() const override { return SensorType::CUSTOM; }  // має бути LIGHT
+```
+
+`getPluginsByType<ISensorPlugin>()` з фільтрацією по типу буде отримувати некоректні результати для BH1750. `CUSTOM` — для нестандартних датчиків.
+
+### Рішення
+
+```cpp
+SensorType getType() const override { return SensorType::LIGHT; }
+```
+
+---
+
+## 38. PA3-10 — checkCalibration(): lastCalibrationTime = 0 після ребуту
+
+**Severity:** 🟡 MEDIUM  
+**Статус:** 🔓 OPEN  
+**Документ:** `PLUGIN_DIAGNOSTICS.md` §2 `checkCalibration()`  
+**Пов'язано:** PA2-16 (той самий метод, різна змінна)
+
+### Evidence
+
+```cpp
+uint32_t calibrationAge = millis() - lastCalibrationTime;  // lastCalibrationTime=0 після ребуту
+if (calibrationAge > 30UL * 24 * 60 * 60 * 1000) return false;
+// millis()≈0, lastCalibrationTime=0 → age≈0 → 30-денна перевірка НІКОЛИ не triggerується після ребуту
+```
+
+Протилежна помилка до PA2-16: PA2-16 → завжди `CALIBRATION_NEEDED`; PA3-10 → 30-денний trigger ніколи не спрацює після cold boot (система вважає калібрування свіжим).
+
+### Рішення
+
+Персистувати `lastCalibrationTime` у storage (NVS/LittleFS) та завантажувати при `initialize()`. Додати примітку щодо обмежень `millis()` без RTC.
+
+---
+
+## 39. PA3-11 — showDiagnosticsScreen(): displayPlugin/pluginSystem як глобальні змінні
+
+**Severity:** 🟡 MEDIUM  
+**Статус:** 🔓 OPEN  
+**Документ:** `PLUGIN_DIAGNOSTICS.md` §3  
+**Пов'язано:** PA2-15, C-PA16
+
+### Evidence
+
+`showDiagnosticsScreen()` використовує глобальні `displayPlugin` та `pluginSystem` — Service Locator anti-pattern. Залежності не видні зі сигнатури функції, тестування неможливе без ініціалізації globals.
+
+### Рішення
+
+```cpp
+// Передавати залежності явно:
+void showDiagnosticsScreen(
+    const DiagnosticResult& result,
+    IDisplayPlugin* display,
+    PluginSystem* system
+);
+// або використовувати ctx якщо функція є методом плагіна
+```
+
+---
+
+## 40. PA3-12 — PLUGIN_ARCHITECTURE.md: IPlugin визначений двічі в одному файлі
+
+**Severity:** 🟡 MEDIUM  
+**Статус:** 🔓 OPEN  
+**Документ:** `PLUGIN_ARCHITECTURE.md` §Крок1 (~рядок 138) та §Оновлений IPlugin (~рядок 272)  
+**Пов'язано:** PA2-9 CLOSED — виправив cross-doc, але внутрішня дублікація залишилась
+
+### Evidence
+
+Два `class IPlugin { ... }` блоки в тому ж файлі. Читач не знає яке визначення актуальне. Може реалізувати плагін на основі застарілого блоку.
+
+### Рішення
+
+Видалити дублікат, замінити на: `// → Canonical IPlugin визначено вище (~рядок 138); повне визначення: include/IPlugin.h`. Оновити ARCH версію (→ PA3-14).
+
+---
+
+## 41. PA3-13 — MyI2CSensorPlugin template: valid=true в placeholder коді
+
+**Severity:** 🟢 LOW  
+**Статус:** 🔓 OPEN  
+**Документ:** `CREATING_PLUGINS.md` §Templates `MyI2CSensorPlugin`
+
+### Evidence
+
+```cpp
+// TODO: implement actual I2C read
+return {0, 0, 1.0f, millis(), true};  // ← valid=true у placeholder!
+```
+
+Незавершений template репортує false success. Правильно: `valid=false` до реальної реалізації.
+
+### Рішення
+
+```cpp
+return {0, 0, 0.0f, millis(), false};  // valid=false до реальної реалізації
+```
+
+---
+
+## 42. PA3-14 — PLUGIN_ARCHITECTURE.md: версія та дата не оновлені після P-2
+
+**Severity:** 🟢 LOW  
+**Статус:** 🔓 OPEN  
+**Документ:** `PLUGIN_ARCHITECTURE.md` header
+
+### Evidence
+
+`Версія: 1.0.0`, `Дата: 9 березня 2026` — не оновлені після двох раундів виправлень.
+
+### Рішення
+
+`Версія: 2.0.0`, `Дата: 13 березня 2026`.
+
+---
+
+## 43. PA3-15 — HARDWARE_PROFILES.md: файл не існує, посилання без [TODO]
+
+**Severity:** 🟢 LOW  
+**Статус:** 🔓 OPEN  
+**Документ:** `PLUGIN_ARCHITECTURE.md` §Апаратні профілі (~рядок 1240)
+
+### Evidence
+
+`HARDWARE_PROFILES.md` посилається без `[TODO]` маркера — файл відсутній.
+
+### Рішення
+
+Додати `**[TODO — файл не створено]**` до посилання.
+
+---
+
+## 44. PA3-16 — getGraphicsLibrary(): повертає void* — type-unsafe
+
+**Severity:** 🔵 INFO  
+**Статус:** 🔓 OPEN  
+**Документ:** `PLUGIN_DIAGNOSTICS.md` `showDiagnosticsScreen()`
+
+### Evidence
+
+```cpp
+void* getGraphicsLibrary() override { return &display; }
+// Вимагає reinterpret_cast<M5GFX*> без compile-time перевірки типу
+```
+
+### Рішення (не блокуючий)
+
+```cpp
+virtual M5GFX* getGraphicsLibrary() { return &display; }  // typed return
+// або template<typename T> T* getGraphicsLibrary() { return static_cast<T*>(&display); }
+```
+
+---
+
+## 45. PA3-17 — getTypeId(): зазначений з -frtti але не реалізований у прикладах
+
+**Severity:** 🔵 INFO  
+**Статус:** 🔓 OPEN  
+**Документ:** `PLUGIN_INTERFACES_EXTENDED.md` `IPlugin` base  
+**Пов'язано:** PA-7 CLOSED
+
+### Evidence
+
+`getTypeId()` описаний як RTTI-based helper, але жоден плагін не перевизначує його. `-frtti` overhead (~1-2 KB/polymorphic class) важливий при 10+ плагінах на ESP32.
+
+### Рішення (не блокуючий)
+
+Задокументувати що default `typeid(*this)` прийнятна і `-frtti` обов'язковий, або надати string-based альтернативу без RTTI:
+```cpp
+virtual const char* getTypeId() const { return getName(); }
+```
+
+---
+
+## 46. Pre-implementation Checklist v3.0.0 (ДОПОВНЕННЯ)
+
+> Це доповнення до §25. Основний checklist (PA2-xx items) залишається у §25.
+
+### Перед написанням першого виробничого плагіна (CRITICAL blocking):
+
+- [ ] **PA3-1** — `readRP()` burst transaction (CS LOW через весь read)
+- [ ] **PA3-2** — `HX711Plugin` → AsyncSensorPlugin або мінімум `get_units(1)`
+- [ ] **PA3-3** — `logDiagnostics()` → `spiMutex` навколо `SD.open()`
+
+### Перед першим release (HIGH blocking):
+
+- [ ] **PA3-4** — `getMetadata()` у `BH1750Plugin` та `MyI2CSensorPlugin` template
+- [ ] **PA3-5** — `IInputPlugin` → уніфікувати на `pollEvent()` (CONTRACT §3.3)
+- [ ] **PA2-17** — BH1750 `read()` + `wireMutex` *(підвищено до HIGH)*
+- [ ] **PA3-6** — `runDiagnostics()` → FreeRTOS task, не з `loop()`
+- [ ] **PA3-7** — HX711 GPIO з ConfigManager
+
+### P-3 / Cleanup (MEDIUM, виправити до P-3):
+
+- [ ] PA3-8 — CONTRACT §1.1 уточнення гарантії
+- [ ] PA3-9 — BH1750 `getType()` → `SensorType::LIGHT`
+- [ ] PA3-10 — `lastCalibrationTime` персистентність (разом з PA2-16)
+- [ ] PA3-11 — `showDiagnosticsScreen()` dependency injection
+- [ ] PA3-12 — ARCH: `IPlugin` double definition cleanup
+
+### Backlog (LOW/INFO):
+
+- [ ] PA3-13 — template `valid=false` placeholder
+- [ ] PA3-14 — ARCH version header → v2.0.0
+- [ ] PA3-15 — HARDWARE_PROFILES.md `[TODO]` marker
+- [ ] PA3-16 — `getGraphicsLibrary()` typed return
+- [ ] PA3-17 — `getTypeId()` documentation/implementation
+
+---
+
+## 47. Backlog та пріоритети v3.0.0
+
+### Залежності між новими знахідками
+
+```
+PA3-1 (readRP burst)
+    └─ пов'язано: PA3-3 (SD.open mutex — та сама VSPI шина, той самий mutex pattern)
+
+PA3-2 (HX711 blocking)
+    └─ блокує: PA3-7 (hardcoded pins — виправити разом з async refactor)
+    └─ пов'язано: PA3-8 (CONTRACT timing — HX711 async = рішення для timing проблеми)
+
+PA3-4 (getMetadata missing)
+    └─ пов'язано: PA3-9 (getType=CUSTOM — той самий BH1750Plugin, виправити разом)
+
+PA3-5 (IInputPlugin API conflict)
+    └─ блокує: будь-який input plugin розробник
+
+PA3-6 (checkStability blocking)
+    └─ пов'язано: PA3-11 (showDiagnosticsScreen globals — обидва в DIAGNOSTICS §3)
+
+PA3-10 (lastCalibrationTime)
+    └─ пов'язано: PA2-16 (calibrationBaseline — той самий checkCalibration(), виправити разом)
+
+PA3-12 (IPlugin double def)
+    └─ залежить від: PA2-9 CLOSED (cross-doc canonical reference вже є)
+```
+
+### Пріоритети (по бізнес-впливу)
+
+| Пріоритет | Знахідки | Чому |
+|-----------|---------|------|
+| **CRITICAL blocking** | PA3-1, PA3-2, PA3-3 | SPI corruption, loop freeze — safety issues |
+| **HIGH (до release)** | PA3-4, PA3-5, PA2-17↑, PA3-6, PA3-7 | Compile errors або critical runtime bugs |
+| **MEDIUM cleanup** | PA3-8..PA3-12 | Documentation consistency, wrong types |
+| **LOW/INFO backlog** | PA3-13..PA3-17 | Minor improvements |
+
+---
+
+## 48. Cross-reference: v2.0.0 → v3.0.0
+
+### Відповідність зовнішній аудит v4 ↔ внутрішні ID
+
+| External v4 ID | Severity (external) | Внутрішній ID | Примітка |
+|----------------|---------------------|---------------|---------|
+| B-1 | 🔴 CRITICAL | **PA3-1** | Підтверджено: `readRP()` рядок ~508 |
+| B-2 | 🔴 CRITICAL | **PA3-2** | Підтверджено; рекомендована AsyncSensorPlugin (не тільки `get_units(1)`) |
+| B-3 | 🔴 CRITICAL | **PA3-3** | Підтверджено; **FIX: spiMutex** (не Logger — persistent storage потрібен) |
+| A-1 | 🟠 HIGH | **PA3-4** | Підтверджено; PA2-10 CLOSED ≠ PA3-4 (різний scope) |
+| A-2 | 🟠 HIGH | **PA3-5** | Підтверджено |
+| A-3 | 🟠 HIGH | **PA3-6** | Підтверджено: warning у `checkStability()`, але відсутнє у `runDiagnostics()` |
+| A-4 | 🟠 HIGH | **PA3-7** | Підтверджено |
+| C-1 | 🟡 MEDIUM | **PA3-12** | Підтверджено як residual від PA2-9 |
+| C-2 | 🟡 MEDIUM | **PA3-8** | Вже задокументовано в §3.1; тепер як офіційна знахідка |
+| C-3 | 🟡 MEDIUM | **PA3-9** | Підтверджено |
+| C-4 | 🟡 MEDIUM | **PA3-10** | Підтверджено; відрізняється від PA2-16 (різні змінні, протилежний ефект) |
+| C-5 | 🟡 MEDIUM | **PA3-11** | Підтверджено; пов'язано з PA2-15 |
+| D-1 | 🟢 LOW | *(false positive)* | Рядок 263 → PA3-13; рядок 498 коректний (`valid=true` після успішного read) |
+| D-2 | 🟢 LOW | **PA3-14** | Підтверджено |
+| D-3 | 🟢 LOW | **PA3-15** | Підтверджено |
+| E-1 | 🔵 INFO | **PA3-16** | Підтверджено |
+| E-2 | 🔵 INFO | **PA3-17** | Підтверджено; пов'язано з PA-7 CLOSED |
+| *(missed by v4)* | 🟠 HIGH | **PA2-17↑** | BH1750 `read()` без `wireMutex` — знайдено внутрішньо; підвищено LOW→HIGH |
+
+### Стан v3.0.0 знахідок
+
+**17 нових PA3-xx знахідок:** всі 🔓 OPEN (не виправлені на момент інтеграції аудиту)
+
+---
+
+*Аудит v2.0.0 проведений: 2026-03-13*  
+*Аудит v3.0.0 (доповнення) інтегровані: 2026-03-13*  
+*Попередній аудит: `docs/architecture/obsolete/PLUGIN_AUDIT_v1.0.0.md`*  
+*Зовнішній аудит: `docs/external/PLUGIN_ARCHITECTURE_AUDIT_v4_2026-03-13.md`*  
+*Наступна дія: виправлення PA3-1, PA3-2, PA3-3 (CRITICAL) → PA3-4..PA3-7 (HIGH)*

@@ -1,8 +1,8 @@
 # Архітектура плагінів CoinTrace
 
 **Документ:** Професійна архітектура з підтримкою плагінів  
-**Версія:** 1.0.0  
-**Дата:** 9 березня 2026  
+**Версія:** 2.0.0 *(PA3-14 fix: 1.0.0→2.0.0 після P-2 виправлень)*  
+**Дата:** 13 березня 2026  
 **Статус:** 📝 Проектування (не імплементовано)
 
 ---
@@ -266,36 +266,17 @@ struct PluginContext {
 };
 ```
 
-### Оновлений інтерфейс IPlugin
+### Canonical IPlugin — єдине визначення
 
-```cpp
-class IPlugin {
-public:
-    // Метадані плагіна
-    virtual const char* getName() const = 0;
-    virtual const char* getVersion() const = 0;
-    virtual const char* getAuthor() const = 0;
-    
-    // Життєвий цикл
-    virtual bool canInitialize() = 0;  // Чи доступний hardware? (без PluginContext)
-    
-    // ⚠️ КРИТИЧНА ЗМІНА: initialize() тепер отримує PluginContext
-    virtual bool initialize(PluginContext* ctx) = 0;  // Ініціалізація з доступом до ресурсів
-    
-    virtual void update() = 0;          // Оновлення (викликається в loop)
-    virtual void shutdown() = 0;        // Вимкнення
-    
-    // Статус
-    virtual bool isEnabled() const = 0;
-    virtual bool isReady() const = 0;
-    
-    // Базова діагностика — default impl. Повна діагностика: IDiagnosticPlugin (PLUGIN_DIAGNOSTICS.md).
-    virtual HealthStatus getHealthStatus() const { return HealthStatus::UNKNOWN; }
-    virtual ErrorCode    getLastError()    const { return {0, "No error"}; }
-    
-    virtual ~IPlugin() = default;
-};
-```
+> **PA3-12 fix:** попередній дублікат `class IPlugin` прибрано. Canonical визначення — вище (~§3 Крок 1).
+> Повне визначення для реалізацій: `include/IPlugin.h`.
+
+Поточне canonical визначення включає:
+- Lifecycle: `canInitialize()`, `initialize(PluginContext*)`, `update()`, `shutdown()`
+- Status: `isEnabled()`, `isReady()`
+- Metadata: `getName()`, `getVersion()`, `getAuthor()`
+- Default diagnostics: `getHealthStatus()` → `UNKNOWN`, `getLastError()` → `{0, "No error"}`
+- Full diagnostics interface (optional): `IDiagnosticPlugin` — `PLUGIN_DIAGNOSTICS.md §1`
 
 ### Приклад використання PluginContext
 
@@ -1237,7 +1218,7 @@ pio run -t upload
 
 ### Етап 4: Документація (тиждень 4-5)
 - [ ] `CREATING_PLUGINS.md` - гайд для розробників
-- [ ] `HARDWARE_PROFILES.md` - гайд профілів
+- [ ] `HARDWARE_PROFILES.md` - гайд профілів **[TODO — файл не створено; PA3-15]**
 - [ ] Приклади плагінів
 - [ ] Video tutorial
 

@@ -500,13 +500,23 @@ private:
     }
     
     float readRP() {
-        // ⚠️ Цей приклад читає MSB першим через два окремі SPI-обміни — це НЕПРАВИЛЬНО!
-        // LDC1101 вимагає: REG_RP_DATA_LSB (0x21) обов'язково читати ПЕРШИМ,
-        // в єдиній burst-транзакції (CS незмінно low протягом усього читання).
-        // Коректна реалізація: LDC1101_ARCHITECTURE.md §3 і §8.
-        // ❌ Код нижче — лише для демонстрації структури, НЕ для виробничого використання:
-        uint16_t raw = (readRegister(LDC1101_RP_MSB) << 8) | readRegister(LDC1101_RP_LSB);
-        return raw * 0.1;  // Convert to Ohm
+        // Burst read: CS утримується LOW протягом читання обох регістрів в одній SPI-транзакції.
+        // LDC1101 вимагає атомарного burst: спочатку REG_RP_DATA_LSB (0x21), потім MSB (0x22).
+        // PA3-1 fix: замінено дві окремі readRegister() на один burst з CS LOW.
+        if (!ctx->spiMutex) return 0.0f;
+        uint16_t raw = 0;
+        if (xSemaphoreTake(ctx->spiMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            ctx->spi->beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+            digitalWrite(csPin, LOW);
+            ctx->spi->transfer(LDC1101_RP_LSB | 0x80);  // read bit set; LSB address першим
+            uint8_t lsb = ctx->spi->transfer(0x00);
+            uint8_t msb = ctx->spi->transfer(0x00);      // CS залишається LOW між байтами
+            digitalWrite(csPin, HIGH);
+            ctx->spi->endTransaction();
+            xSemaphoreGive(ctx->spiMutex);
+            raw = (static_cast<uint16_t>(msb) << 8) | lsb;
+        }
+        return raw * 0.1f;  // Convert to Ohm
     }
 };
 ```
@@ -666,7 +676,14 @@ void loop() {
 ```cpp
 // Збереження логів для аналізу
 
-void logDiagnostics() {
+void logDiagnostics(SemaphoreHandle_t spiMutex) {
+    // PA3-3 fix: SD.open() захищено spiMutex — LDC1101 та SD card на одній VSPI шині.
+    if (!spiMutex) return;
+    if (xSemaphoreTake(spiMutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        // Не блокуємо loop() — якщо шина зайнята, пропускаємо цей запис
+        return;
+    }
+    
     File log = SD.open("/diagnostics.log", FILE_APPEND);
     
     char timestamp[32];
@@ -688,6 +705,7 @@ void logDiagnostics() {
     }
     
     log.close();
+    xSemaphoreGive(spiMutex);
 }
 ```
 
