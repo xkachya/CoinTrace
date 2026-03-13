@@ -100,8 +100,8 @@ CoinTrace/
 │   │   ├── m5cores3.json         # M5Stack CoreS3
 │   │   ├── custom-board.json     # Користувацька плата
 │   │   └── esp32-devkit.json     # Generic ESP32
-│   └── plugins/                  # Конфігурації плагінів (опціонально)
-│       ├── ldc1101.json          # Параметри LDC1101
+│   └── plugins/                  # Конфігурації плагінів (runtime параметри)
+│       ├── ldc1101.json          # Параметри LDC1101 (cs_pin, thresholds…)
 │       └── bmi270.json           # Параметри BMI270
 │
 └── docs/
@@ -113,6 +113,17 @@ CoinTrace/
         ├── PLUGIN_INTERFACES_EXTENDED.md  # Розширені інтерфейси
         └── COMPARISON.md              # Економічне обґрунтування
 ```
+
+### 📋 Три рівні конфігурації: канонічна модель
+
+| Файл | Роль | Хто читає | Коли |
+|------|------|-----------|------|
+| `lib/<Plugin>/plugin.json` | Build-time метадані: версія, hw_requirements | IDE / CI / PlatformIO — **не завантажується у flash** | Час компіляції |
+| `data/plugins/<name>.json` | ✅ Runtime параметри: cs_pin, порогові значення, калібрування | `ConfigManager` з LittleFS — `ctx->config->getInt("name.key", default)` | В `initialize()` |
+| `data/config.json` | ✅ Список активних плагінів + hardware profile | `PluginSystem::loadFromConfig()` | При завантаженні |
+
+> ⚠️ **`lib/<Plugin>/plugin.json` не монтується в LittleFS і не читається ESP32 в runtime.**  
+> Плагін отримує runtime параметри виключно через `ctx->config` (читає з `data/plugins/<name>.json`).
 
 ---
 
@@ -685,11 +696,15 @@ private:
 ### 5. **ГОТОВО!** ✅
 
 **Жодного редагування `main.cpp`!**  
-Система автоматично:
-- Знайде плагін в `lib/QMC5883LPlugin/`
-- Прочитає метадані з `plugin.json`
-- Побачить `enabled: true` в конфігурації
-- Завантажить та ініціалізує плагін
+Як це працює насправді:
+1. Фірмвер вже **містить** клас `QMC5883LPlugin` — скомпільовано з `lib/QMC5883LPlugin/` на хост-машині
+2. `loadFromConfig()` читає `data/config.json` → знаходить `"name": "QMC5883L"` + `"enabled": true`
+3. `PluginFactory` інстанціює `QMC5883LPlugin` за іменем
+4. Система викликає `canInitialize()` → `initialize(ctx)`
+5. Плагін сам читає свої runtime параметри з `data/plugins/qmc5883l.json` через `ctx->config`
+
+> ⚠️ **`lib/QMC5883LPlugin/plugin.json` НЕ читається в runtime** — це build-time метадані для IDE та CI.  
+> Runtime параметри — у `data/plugins/qmc5883l.json`. Список активних плагінів — у `data/config.json`.
 
 ---
 
@@ -1196,9 +1211,16 @@ pio run -t upload
 ## 💡 Креативні фічі (бонус)
 
 ### 1. Auto-Discovery плагінів
+
+> ⚠️ **НЕ РЕАЛІЗОВАНО — зарезервована концепція для майбутніх архітектур.**  
+> **Причина:** `lib/` — це директорія компілятора на хост-машині. LittleFS на ESP32 монтує лише `/data/`.  
+> ESP32 **не може** читати `lib/` в runtime — ця директорія відсутня у flash-пам'яті пристрою.  
+> Поточна реалізація: `PluginSystem::loadFromConfig()` читає список плагінів із `data/config.json`.
+
 ```cpp
-// Система сканує lib/ і автоматично знаходить plugin.json
-pluginSystem->scanForPlugins("lib/");
+// TODO (future): потребує іншої архітектури — наприклад, registry в data/config.json
+// НЕМОЖЛИВО В ПОТОЧНІЙ РЕАЛІЗАЦІЇ: lib/ — compile-time директорія, не LittleFS
+// pluginSystem->scanForPlugins("lib/");
 ```
 
 ### 2. Hot-Reload плагінів

@@ -75,13 +75,13 @@
 | **PA-10** | ARCH §PluginContext, CREATING §"Конфіг" | `ConfigManager` API (getInt, getUInt8, getFloat...) ніде не визначено | 🟡 MEDIUM | ✅ CLOSED |
 | **PA-11** | DIAGNOSTICS §2 | `writeRegister(LDC1101_CONFIG, 0x15)` — значення 0x15 не існує в register map | 🟡 MEDIUM | ✅ CLOSED |
 | **PA-12** | ARCH §"createPlugin" | Factory hardcoding (`if name == "LDC1101"`) суперечить extensibility promise | 🟡 MEDIUM | 🔓 OPEN |
-| **PA-13** | ARCH §"data/", LDC1101_ARCH §7, CREATING | Три різних підходи до конфігурації плагінів без canonical рішення | 🟡 MEDIUM | 🔓 OPEN |
+| **PA-13** | ARCH §"data/", LDC1101_ARCH §7, CREATING | Три різних підходи до конфігурації плагінів без canonical рішення | 🟡 MEDIUM | ✅ CLOSED |
 | **PA-14** | INTERFACES §5 | `IStoragePlugin` vs `STORAGE_ARCHITECTURE` standalone — межа не визначена | 🟡 MEDIUM | ✅ CLOSED |
 | **PA-15** | CONTRACT §2.1 | `calibrate()` може блокуватись (delay 2–5 сек) — не задокументовано в CONTRACT | 🟡 MEDIUM | ✅ CLOSED |
 | **PA-16** | CREATING §"Складні випадки" | Plugin dependency injection — механізм не визначено | 🟢 LOW | 🔓 OPEN |
 | **PA-17** | DIAGNOSTICS §2 | `millis() - lastCalibrationTime > 30 days` — millis() overflow + non-persistent | 🟢 LOW | ✅ CLOSED |
 | **PA-18** | DIAGNOSTICS §"Додаткові фічі" | `WiFiClient HTTP POST` суперечить Connectivity Architecture (BLE+WS) | 🟢 LOW | ✅ CLOSED |
-| **PA-19** | ARCH §"data/", CREATING §Checklist | `lib/<Plugin>/plugin.json` vs `data/plugins/name.json` — overlap не пояснено | 🟢 LOW | 🔓 OPEN |
+| **PA-19** | ARCH §"data/", CREATING §Checklist | `lib/<Plugin>/plugin.json` vs `data/plugins/name.json` — overlap не пояснено | 🟢 LOW | ✅ CLOSED |
 | **PA-20** | DIAGNOSTICS §2 | `getStatistics() const` визначення vs non-const side effects у суміжних методах | 🟢 LOW | 🔓 OPEN |
 | | | | | |
 | **PA-21** | DIAGNOSTICS §2 | ⚠️ РЕГРЕСІЯ PA-9: `ctx->log->warn()` — Logger API має `warning()`, не `warn()` — compile error | 🔴 CRITICAL | ✅ CLOSED |
@@ -96,8 +96,8 @@
 | **PA-30** | DIAGNOSTICS §4 | `attemptRecovery`: `shutdown→delay→initialize` пропускає `canInitialize()` — infinite retry | 🟡 MEDIUM | ✅ CLOSED |
 
 **Разом:** 6 CRITICAL · 10 HIGH · 8 MEDIUM · 5 LOW = **30 знахідок** (20 початкових + 10 нових після зовнішнього аудиту)  
-**Закрито:** PA-1..PA-11 · PA-14 · PA-15 · PA-17 · PA-18 · **PA-21..PA-30** = **25 ✅ CLOSED** → commits `91f7c16`, `822614a`, [cross-audit fix]  
-**Відкрито:** PA-12 · PA-13 · PA-16 · PA-19 · PA-20 = **5 🔓 OPEN**  
+**Закрито:** PA-1..PA-11 · PA-13 · PA-14 · PA-15 · PA-17 · PA-18 · PA-19 · **PA-21..PA-30** = **27 ✅ CLOSED** → commits `91f7c16`, `822614a`, [cross-audit fix], [PA-13 canonical config]  
+**Відкрито:** PA-12 · PA-16 · PA-20 = **3 🔓 OPEN**  
 **✅ Регресія PA-21 виправлена.**
 
 ---
@@ -654,8 +654,14 @@ REGISTER_PLUGIN(LDC1101Plugin, "LDC1101")
 ## 15. PA-13 — Два підходи до конфігурації плагінів: не узгоджені
 
 **Severity:** 🟡 MEDIUM  
-**Статус:** 🔓 OPEN  
+**Статус:** ✅ CLOSED — `docs(plugins): PA-13 canonical three-JSON config model`  
 **Документи:** `PLUGIN_ARCHITECTURE.md`, `LDC1101_ARCHITECTURE.md` §7, `CREATING_PLUGINS.md`
+
+**Виправлення:**
+- `PLUGIN_ARCHITECTURE.md` §"Структура проекту": додано таблицю трьох рівнів конфігурації після дерева директорій
+- `PLUGIN_ARCHITECTURE.md` §5 "ГОТОВО!": виправлено хибне твердження "система прочитає `plugin.json`" — описано реальний flow через `loadFromConfig()` + `ctx->config`
+- `PLUGIN_ARCHITECTURE.md` §"Auto-Discovery": `scanForPlugins("lib/")` позначено як нереалізовану концепцію з поясненням архітектурної причини (lib/ = compile-time, не LittleFS)
+- `CREATING_PLUGINS.md` §"Складні випадки" §1: додано таблицю трьох рівнів перед прикладом `ctx->config->getInt()`
 
 ### Evidence
 
@@ -839,7 +845,7 @@ void sendDiagnosticsToCloud() {
 ## 21. PA-19 — plugin.json у lib/ vs data/plugins/: дублювання не пояснено
 
 **Severity:** 🟢 LOW  
-**Статус:** 🔓 OPEN  
+**Статус:** ✅ CLOSED — закрито разом з PA-13 (canonical three-JSON model)  
 **Документи:** `CREATING_PLUGINS.md` §Checklist, `LDC1101_ARCHITECTURE.md` §7
 
 ### Evidence
@@ -936,7 +942,7 @@ bool checkStability() {  // ← non-const, викликає readRegister() і de
 - [x] **PA-14** — межа `IStoragePlugin` vs `StorageManager` визначена → commit `91f7c16`
 - [x] **PA-17** — `millis()` overflow + NVS note → commit `91f7c16`
 - [x] **PA-18** — WiFi HTTP приклад замінений → commit `91f7c16`
-- [ ] **PA-13** — canonical конфіг підхід задокументований
+- [x] **PA-13** — canonical three-JSON config model задокументовано: PLUGIN_ARCHITECTURE.md (таблиця, §5-fix, scanForPlugins), CREATING_PLUGINS.md (§Складні випадки §1) → [PA-13 canonical config]
 
 ### Нові знахідки після зовнішнього аудиту (PA-21..PA-30):
 - [x] **PA-21** 🔴 — `ctx->log->warn()` → `ctx->log->warning()` в DIAGNOSTICS (lines 321, 346) → [cross-audit fix]
@@ -951,7 +957,8 @@ bool checkStability() {  // ← non-const, викликає readRegister() і de
 - [x] **PA-30** 🟡 — `attemptRecovery`: `canInitialize()` guard в comment → DIAGNOSTICS → [cross-audit fix]
 
 ### Backlog (до production):
-- [ ] PA-12, PA-16, PA-19, PA-20
+- [ ] PA-12, PA-16, PA-20
+- [x] **PA-19** — закрито як side-effect PA-13 → [PA-13 canonical config]
 
 ---
 

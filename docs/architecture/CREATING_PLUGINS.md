@@ -347,6 +347,17 @@ public:
 
 ### 1. Плагін з конфігурацією
 
+**📁 Три рівні конфігурації плагіна (канонічна модель):**
+
+| Файл | Роль | Хто читає |
+|------|------|-----------|
+| `lib/<Plugin>/plugin.json` | Build-time метадані для IDE/CI — **не у flash** | PlatformIO / IDE |
+| `data/plugins/<name>.json` | ✅ Runtime параметри: cs_pin, threshold, calibration | `ctx->config->getInt("name.key", default)` |
+| `data/config.json` | ✅ Список активних плагінів + hardware profile | `PluginSystem::loadFromConfig()` |
+
+> `ctx->config->getInt("mysensor.sampleRate", 100)` — читає ключ `mysensor.sampleRate`  
+> з файлу **`data/plugins/mysensor.json`** (монтується в LittleFS, не `lib/`).
+
 ```cpp
 class ConfigurableSensorPlugin : public ISensorPlugin {
 private:
