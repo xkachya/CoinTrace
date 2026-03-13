@@ -185,14 +185,14 @@ dRp1_n = dRp1 / dRp1_MAX
 
 ## Таблиця знахідок
 
-| ID | Серйозність | Секція | Суть | Блокує |
-|----|-------------|--------|------|--------|
-| FDB-01 | 🔴 CRITICAL | cross-doc CONNECTIVITY §5.2 | RING_SIZE жорстко = 300 (має бути 250) | silent wrong data в ID range check |
-| FDB-02 | 🟠 HIGH | §3.1, §3.3, CONNECTIVITY §5.4 | dL1 = 724.1 µH для Ag925 (фізично неможливо); BLE dl:2u overflow для магнітних металів | некоректний canonical приклад; BLE encoding для Fe/Ni |
-| FDB-03 | 🟡 MEDIUM | §3.3 vs §6.1 BOUNDS | dRp1_MAX=600 < BOUNDS upper=800 → dRp1_n > 1.0 | нормалізаційний інваріант [0..1] порушено |
-| FDB-04 | 🟡 MEDIUM | §6.1, ADR-DB-003, §10 | validate_fingerprint.py не переобчислює vector з raw | ADR-DB-003 не виконано в коді |
-| FDB-05 | 🟡 MEDIUM | §8.2 (STORAGE), boot [7a] | index_crc32.bin = integrity check, не staleness check | оновлення SD бази непомітне |
-| FDB-06 | 🔵 LOW | §3.2 | dRp1=0 firmware behavior не специфіковано | невизначена поведінка |
+| ID | Серйозність | Секція | Суть | Блокує | Статус |
+|----|-------------|--------|------|--------|--------|
+| FDB-01 | 🔴 CRITICAL | cross-doc CONNECTIVITY §5.2 | RING_SIZE жорстко = 300 (має бути 250) | silent wrong data в ID range check | ✅ Виправлено v1.4.0 |
+| FDB-02 | 🟠 HIGH | §3.1, §3.3, CONNECTIVITY §5.4 | dL1 = 724.1 µH для Ag925 (фізично неможливо); BLE dl:2u overflow для магнітних металів | некоректний canonical приклад; BLE encoding для Fe/Ni | ✅ Виправлено v1.5.0 |
+| FDB-03 | 🟡 MEDIUM | §3.3 vs §6.1 BOUNDS | dRp1_MAX=600 < BOUNDS upper=800 → dRp1_n > 1.0 | нормалізаційний інваріант [0..1] порушено | ✅ Виправлено v1.5.0 |
+| FDB-04 | 🟡 MEDIUM | §6.1, ADR-DB-003, §10 | validate_fingerprint.py не переобчислює vector з raw | ADR-DB-003 не виконано в коді | 🔓 Відкрита |
+| FDB-05 | 🟡 MEDIUM | §8.2 (STORAGE), boot [7a] | index_crc32.bin = integrity check, не staleness check | оновлення SD бази непомітне | 🔓 Відкрита |
+| FDB-06 | 🔵 LOW | §3.2 | dRp1=0 firmware behavior не специфіковано | невизначена поведінка | 🔓 Відкрита |
 
 ---
 

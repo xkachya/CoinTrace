@@ -454,7 +454,7 @@ meas_count > RING_SIZE
   AND id < meas_count − RING_SIZE  → вимір витіснено ring overflow (overwritten)
 meas_count == 0              → жодного виміру ще не зроблено
 ```
-Клієнт **зобов'язаний** обробляти 404 як «вимір недоступний» — не як помилку серверу. Silent wrong data при пропущеній перевірці: `slot = id % 300` повертає інший вимір без попередження.
+Клієнт **зобов'язаний** обробляти 404 як «вимір недоступний» — не як помилку серверу. Silent wrong data при пропущеній перевірці: `slot = id % RING_SIZE` (=250) повертає інший вимір без попередження.
 
 GET  /api/v1/log?n=50&level=DEBUG&since_ms=0
      → {"entries":[{"ms":672,"level":"INFO","comp":"System","msg":"..."},...],

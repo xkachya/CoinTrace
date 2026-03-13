@@ -66,6 +66,15 @@ R/W без mutex — безпечно на Xtensa LX7 ISA (байт-атомар
 ### LA-1 (spec): §11 sample code usePsram=true → false
 ESP32-S3FN8 не має зовнішнього PSRAM. Виправлено sample code (§11) та конфіг `logger.json` (§10).
 
+### LA-1 (api): §6.3 constructor default usePsram=true → false
+Default parameter у `RingBufferTransport(uint16_t, bool usePsram)` виправлено з `true` на `false`. Гарантує безпечну поведінку при виклику без явного аргументу на ESP32-S3FN8. Без цієї правки `RingBufferTransport(100)` (без другого аргументу) викликав би `ps_malloc()` → `nullptr` → silent fallback.
+
+### LA-2: dispatch() truncation marker перенесено на рівень entry.message
+`memcpy(entry.message + sizeof(entry.message) - 4, "...", 4)` якщо `written >= sizeof(entry.message)`. Раніше маркер ставився у `localBuf[251]` і фізично ніколи не досягав `entry.message` (strncpy зупинялась на 191 байті). Повідомлення 192–255 символів обрізались мовчки — без `"..."`.
+
+### LA-3 (spec): toJSON() JSON escaping contract задокументовано
+Додано `⚠️ LA-3` анотацію у §7: реалізація `toJSON()` зобов'язана escape-ити `"` → `\"`, `\` → `\\` та control chars U+0000–U+001F (RFC 8259 §7) перед вставкою рядків у JSON. Implementor obligation: `jsonEscape(src, dst, dstLen)` перед `snprintf`. Повна реалізація — Phase 2 (WebSocketTransport).
+
 ---
 
 ## Зміст
@@ -509,7 +518,7 @@ private:
 class RingBufferTransport : public ILogTransport {
 public:
     explicit RingBufferTransport(uint16_t capacity = 100,
-                                 bool     usePsram  = true);
+                                 bool     usePsram  = false);  // ESP32-S3FN8: no PSRAM (LA-1)
     ~RingBufferTransport();
 
     bool        begin()  override;

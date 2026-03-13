@@ -44,16 +44,16 @@ Logger Phase 1 (SerialTransport + RingBufferTransport) реалізований 
 
 | ID | Модуль | Знахідка | Severity | Статус |
 |---|---|---|---|---|
-| **LA-1** | LOGGER_ARCH §11 / main.cpp | B-01 `usePsram=true` propagates from sample code into main.cpp | 🔴 CRITICAL | 🔓 Відкрита |
-| **LA-2** | `dispatch()` / `LogEntry.h` | Truncation marker `"..."` ніколи не потрапляє в `entry.message[]` | 🟠 HIGH | 🔓 Відкрита |
-| **LA-3** | `LogEntry::toJSON()` | JSON injection — `"` та `\` в message/component не escape-яться | 🟠 HIGH | 🔓 Відкрита |
-| **LA-4** | `LogEntry.h` / §9 Memory | `sizeof(LogEntry) = 220`, специфікація каже 217 (tail padding проігнорований) | 🟡 MEDIUM | 🔓 Відкрита |
-| **LA-5** | `Logger.h` / вся spec | `LOGGER_MAX_TRANSPORTS = 4`, spec описує 6 транспортів — обґрунтування відсутнє | 🟡 MEDIUM | 🔓 Відкрита |
-| **LA-6** | `removeTransport()` | Null-guard `mutex_` відсутній — crash якщо викликати до `begin()` | 🟡 MEDIUM | 🔓 Відкрита |
-| **LA-7** | `addTransport()` | Non-thread-safe без mutex, контракт "тільки з setup()" не задокументований | 🟡 MEDIUM | 🔓 Відкрита |
-| **LA-8** | `setGlobalMinLevel()` | Atomic dependency на Xtensa LX7 byte ops — не задокументована | 🟢 LOW | 🔓 Відкрита |
-| **LA-9** | mutex timeouts | Асиметрія 5 ms / 10 ms без пояснення в специфікації | 🟢 LOW | 🔓 Відкрита |
-| **LA-10** | `platformio.ini` | `-DCOINTRACE_DEBUG` відсутній → `LOG_DEBUG()` по-op в **усіх** builds | 🟢 LOW | 🔓 Відкрита |
+| **LA-1** | LOGGER_ARCH §11 / main.cpp | B-01 `usePsram=true` propagates from sample code into main.cpp | 🔴 CRITICAL | ✅ Виправлено v2.1.1 |
+| **LA-2** | `dispatch()` / `LogEntry.h` | Truncation marker `"..."` ніколи не потрапляє в `entry.message[]` | 🟠 HIGH | ✅ Виправлено v2.1.1 |
+| **LA-3** | `LogEntry::toJSON()` | JSON injection — `"` та `\` в message/component не escape-яться | 🟠 HIGH | ⚠️ Spec контракт задокументовано; impl Phase 2 |
+| **LA-4** | `LogEntry.h` / §9 Memory | `sizeof(LogEntry) = 220`, специфікація каже 217 (tail padding проігнорований) | 🟡 MEDIUM | ✅ Виправлено v2.1.1 |
+| **LA-5** | `Logger.h` / вся spec | `LOGGER_MAX_TRANSPORTS = 4`, spec описує 6 транспортів — обґрунтування відсутнє | 🟡 MEDIUM | ✅ Виправлено v2.1.1 |
+| **LA-6** | `removeTransport()` | Null-guard `mutex_` відсутній — crash якщо викликати до `begin()` | 🟡 MEDIUM | ✅ Виправлено v2.1.1 |
+| **LA-7** | `addTransport()` | Non-thread-safe без mutex, контракт "тільки з setup()" не задокументований | 🟡 MEDIUM | ✅ Виправлено v2.1.1 |
+| **LA-8** | `setGlobalMinLevel()` | Atomic dependency на Xtensa LX7 byte ops — не задокументована | 🟢 LOW | ✅ Виправлено v2.1.1 |
+| **LA-9** | mutex timeouts | Асиметрія 5 ms / 10 ms без пояснення в специфікації | 🟢 LOW | ✅ Виправлено v2.1.1 |
+| **LA-10** | `platformio.ini` | `-DCOINTRACE_DEBUG` відсутній → `LOG_DEBUG()` по-op в **усіх** builds | 🟢 LOW | ✅ Виправлено v2.1.1 |
 
 ---
 

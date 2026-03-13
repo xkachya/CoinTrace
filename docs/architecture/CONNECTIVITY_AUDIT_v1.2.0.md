@@ -196,15 +196,15 @@ Firmware: esp_ota_handle_t + CRC32 per ESP-IDF rollback mechanism ← вже є,
 
 ## Таблиця знахідок
 
-| ID | Серйозність | Секція | Суть | Блокує |
-|----|-------------|--------|------|--------|
-| CO-01 | 🔴 CRITICAL | §5.2 | ID range hardcodes 300 (RING_SIZE→250) | silent wrong data |
-| CO-02 | 🟠 HIGH | §5.4 BLE RESULT | dl:2u uint16 overflow для Fe/Ni (dL1 2000 µH) | некоректні match для магнітних монет |
-| CO-03 | 🟠 HIGH | §5.1 COBS | rp_i32/l_i32 integer, scale не специфіковано | fractional precision loss у stream |
-| CO-04 | 🟡 MEDIUM | §5.2 REST | measure/start re-entrancy HTTP response не spec | undefined firmware поведінка |
-| CO-05 | 🟡 MEDIUM | §5.2 REST | database/match validation error responses відсутні | несумісна поведінка між firmware vers. |
-| CO-06 | 🟡 MEDIUM | ADR-007 OTA | firmware integrity check не spec (прийнятний ризик v1) | tampered binary при публ. демо |
-| CO-07 | 🔵 LOW | §5.3 WS | ping/pong naming конфліктує RFC 6455 | developer confusion |
+| ID | Серйозність | Секція | Суть | Блокує | Статус |
+|----|-------------|--------|------|--------|--------|
+| CO-01 | 🔴 CRITICAL | §5.2 | ID range hardcodes 300 (RING_SIZE→250) | silent wrong data | ✅ Виправлено v1.4.0 |
+| CO-02 | 🟠 HIGH | §5.4 BLE RESULT | dl:2u uint16 overflow для Fe/Ni (dL1 2000 µH) | некоректні match для магнітних монет | ✅ Виправлено v1.4.0 |
+| CO-03 | 🟠 HIGH | §5.1 COBS | rp_i32/l_i32 integer, scale не специфіковано | fractional precision loss у stream | ✅ Виправлено v1.4.0 |
+| CO-04 | 🟡 MEDIUM | §5.2 REST | measure/start re-entrancy HTTP response не spec | undefined firmware поведінка | 🔓 Відкрита |
+| CO-05 | 🟡 MEDIUM | §5.2 REST | database/match validation error responses відсутні | несумісна поведінка між firmware vers. | 🔓 Відкрита |
+| CO-06 | 🟡 MEDIUM | ADR-007 OTA | firmware integrity check не spec (прийнятний ризик v1) | tampered binary при публ. демо | 🔓 Відкрита |
+| CO-07 | 🔵 LOW | §5.3 WS | ping/pong naming конфліктує RFC 6455 | developer confusion | 🔓 Відкрита |
 
 ---
 
