@@ -657,11 +657,11 @@ SD:/CoinTrace/                      # Root для всіх даних CoinTrace
 ```
 Функціонал        | SD є    | SD немає
 ─────────────────────────────────────────────
-Вимірювання       | ✅ Full  | ✅ Full (ring buffer 300)
+Вимірювання       | ✅ Full  | ✅ Full (ring buffer 250)
 Матчинг (Quick)   | ✅ Full  | ⚠️ Тільки якщо index.json у /data/cache/
 Матчинг (Deep)    | ✅ Full  | ❌ Недоступно
 Зображення монет  | ✅ Full  | ❌ Показується placeholder
-Архів вимірів     | ✅ Full  | ❌ Тільки останні 300
+Архів вимірів     | ✅ Full  | ❌ Тільки останні 250
 Логи (архів)      | ✅ Full  | ⚠️ Тільки 3 файли ротації в LittleFS
 Fingerprint DB    | ✅ Full  | ⚠️ Стара версія з cache/ (якщо є)
 ```
@@ -1243,7 +1243,7 @@ Soft Reset = відновлення до "щойно налаштованого"
 3. **Виміри НЕ видаляються ([PRE-5])** — вони залишаються в LittleFS_data і будуть
    природньо перезаписані новими вимірами через ring overflow semantics.
    Причина: якщо видалити файли, але залишити `meas_count` (namespace `storage` не стирається
-   при Soft Reset) — `ring_used = min(meas_count, 300)` показує 300, реально файлів 0 → API 404.
+   при Soft Reset) — `ring_used = min(meas_count, 250)` показує 250, реально файлів 0 → API 404.
    Ring overwrite є коректним механізмом «очищення» без inconsistency.
 4. ЗБЕРІГАЮТЬСЯ: "sensor" (calibration!), "ota", "storage" (meas_count для continuity)
 5. Restart → boot у AP provisioning mode
@@ -1303,7 +1303,7 @@ Hard Reset = повне відновлення заводського стану
 | Артефакт | Що робить |
 |---|---|
 | `src/storage/LittleFSManager.h/.cpp` | Mount sys + data partitions, dir creation, error handling |
-| `src/storage/MeasurementStore.h/.cpp` | Ring buffer 300 × m_XXX.json, versioned format |
+| `src/storage/MeasurementStore.h/.cpp` | Ring buffer 250 × m_XXX.json, versioned format |
 | `src/storage/LittleFSTransport.h/.cpp` | Async Logger transport (FreeRTOS queue + log rotation) |
 | `data/config/device.json` | Default plugin config (для uploadfs) |
 | `data/web/` | Web UI placeholder (для uploadfs) |
