@@ -107,16 +107,16 @@ public:
     // Тип сенсора (PA3-9 fix: CUSTOM→LIGHT — BH1750FVI є optical ambient light sensor)
     SensorType getType() const override { return SensorType::LIGHT; }
 
-    // Метадані (PA3-4 fix: ISensorPlugin::getMetadata() pure virtual — обо’язкова реалізація)
+    // N-1 fix: поля struct SensorMetadata визначені в INTERFACES_EXTENDED §1:
+    // {typeName, unit, minValue, maxValue, resolution, sampleRate}
     SensorMetadata getMetadata() const override {
         return {
-            .sensorType   = SensorType::LIGHT,
-            .manufacturer = "ROHM Semiconductor",
-            .model        = "BH1750FVI",
-            .resolution   = 1.0f,    // lux
-            .minValue     = 0.0f,
-            .maxValue     = 65535.0f,
-            .updateRateHz = 10
+            .typeName   = "Light Sensor",
+            .unit       = "lux",
+            .minValue   = 0.0f,
+            .maxValue   = 65535.0f,
+            .resolution = 1.0f,
+            .sampleRate = 10
         };
     }
     
@@ -124,13 +124,19 @@ public:
     SensorData read() override {
         if (!ready) return {0, 0, 0.0f, millis(), false};
         
-        ctx->wire->requestFrom(I2C_ADDR, (uint8_t)2);
-        if (ctx->wire->available() != 2) {
+        // PA2-17 fix: wireMutex обов'язковий — read() може викликатись з будь-якого task (CONTRACT §2.2)
+        if (xSemaphoreTake(ctx->wireMutex, pdMS_TO_TICKS(50)) != pdTRUE) {
             return {0, 0, 0.0f, millis(), false};
         }
+        ctx->wire->requestFrom(I2C_ADDR, (uint8_t)2);
+        uint16_t raw = 0;
+        if (ctx->wire->available() == 2) {
+            raw = (ctx->wire->read() << 8) | ctx->wire->read();
+        }
+        xSemaphoreGive(ctx->wireMutex);
+        if (raw == 0) return {0, 0, 0.0f, millis(), false};
         
-        uint16_t raw = (ctx->wire->read() << 8) | ctx->wire->read();
-        float lux = raw / 1.2; // Convert to lux
+        float lux = raw / 1.2f; // Convert to lux
         
         return {
             .value1 = lux,
@@ -270,11 +276,12 @@ public:
     
     SensorType getType() const override { return SensorType::CUSTOM; }  // TODO: замінити на потрібний тип
 
-    // PA3-4 fix: ISensorPlugin::getMetadata() pure virtual — обо’язкова реалізація, інакше compile error
+    // N-1 fix: поля struct SensorMetadata визначені в INTERFACES_EXTENDED §1:
+    // {typeName, unit, minValue, maxValue, resolution, sampleRate}
     SensorMetadata getMetadata() const override {
         // TODO: заповнити як відповідає ваш датчик
-        return {.sensorType = SensorType::CUSTOM, .manufacturer = "Unknown",
-                .model = "MyI2CSensor", .resolution = 1.0f, .updateRateHz = 10};
+        return {.typeName = "Custom Sensor", .unit = "units",
+                .minValue = 0.0f, .maxValue = 1000.0f, .resolution = 1.0f, .sampleRate = 10};
     }
 
     SensorData read() override {
@@ -425,8 +432,8 @@ public:
 class AsyncSensorPlugin : public ISensorPlugin {
 private:
     PluginContext* ctx = nullptr;
-    SemaphoreHandle_t dataMutex;
-    TaskHandle_t readTask;
+    SemaphoreHandle_t dataMutex = nullptr;  // N-8/N-10 fix: явна ініціалізація — nullptr захищає від vTaskDelete(garbage)
+    TaskHandle_t readTask = nullptr;        // N-10 fix: без nullptr → shutdown() crash якщо xTaskCreate() fails
     SensorData latestData;
     
     static void readTaskFunc(void* param) {
@@ -455,10 +462,25 @@ public:
     
     bool initialize(PluginContext* context) override {
         ctx = context;
+
+        // N-8 fix: NULL при нестачі heap → xSemaphoreTake(nullptr,...) в read() → crash
         dataMutex = xSemaphoreCreateMutex();
-        xTaskCreate(readTaskFunc, "SensorRead", 4096, this,
+        if (!dataMutex) {
+            ctx->log->error(getName(), "Failed to create data mutex (heap exhausted?)");
+            return false;
+        }
+
+        // N-7 fix: pdFAIL якщо немає FreeRTOS task slots або heap → initialize() не повинен брехати
+        BaseType_t taskResult = xTaskCreate(readTaskFunc, "SensorRead", 4096, this,
                     tskIDLE_PRIORITY + 2,  // ≤ main loop priority; priority 5 може starve loop
                     &readTask);
+        if (taskResult != pdPASS) {
+            ctx->log->error(getName(), "Failed to create FreeRTOS task (heap full?)");
+            vSemaphoreDelete(dataMutex);
+            dataMutex = nullptr;
+            return false;
+        }
+
         ctx->log->info(getName(), "Async task started");
         return true;
     }

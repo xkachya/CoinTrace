@@ -544,14 +544,16 @@ class IDisplayPlugin : public IPlugin {
 
 ```cpp
 class IInputPlugin : public IPlugin {
-    // pollEvent() викликається з main loop (100+ Hz)
-    virtual bool pollEvent(InputEvent& event) = 0;
+    // pollEvent() — атомарний pop, викликається з main loop (100+ Hz)
+    // N-4 fix: сигнатура узгоджена з PLUGIN_INTERFACES_EXTENDED.md §3 (std::optional, C++17 idiom)
+    virtual std::optional<InputEvent> pollEvent() = 0;
 };
 ```
 
 **Контракт:**
 - `pollEvent()` має повертатись протягом **1 ms**
-- Якщо немає подій — повернути `false` одразу (не чекати)
+- Якщо немає подій — повернути `std::nullopt` одразу (не чекати)
+- Реалізація **MUST** використовувати mutex або lock-free queue (атомарний pop, thread-safe)
 
 ---
 

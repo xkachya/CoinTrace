@@ -117,7 +117,9 @@ public:
 //
 class IDiagnosticPlugin {
 public:
-    // Повна діагностика (може бути повільною, викликається рідко)
+    // ⚠️ BLOCKING ~57 ms (checkStability: 10×5 ms delay). НЕ викликати з loop() або update()!
+    // Запускати лише з окремого FreeRTOS task або по явному user request (кнопка/команда).
+    // PA3-6 fix: попередження на публічний API (раніше було тільки на checkStability()).
     virtual IPlugin::DiagnosticResult runDiagnostics() = 0;
     
     // Self-test (викликається при запуску або за вимогою)
