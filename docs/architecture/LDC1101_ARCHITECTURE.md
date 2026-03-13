@@ -839,10 +839,10 @@ private:
         uint8_t digCfg = 0xD0 | (respTimeBits & 0x07);
         spiWrite(REG_DIG_CONFIG, digCfg);
 
-        // Verify DIG_CONFIG write
+        // Verify DIG_CONFIG write (повний байт: MIN_FREQ[7:4] + RESP_TIME[2:0])
         uint8_t digReadBack = spiRead(REG_DIG_CONFIG);
-        if ((digReadBack & 0x07) != digCfg) {
-            char msg[60];
+        if (digReadBack != digCfg) {  // Fix LA-1: was (digReadBack & 0x07) — 3-bit mask
+            char msg[60];             //   never equalled digCfg ∈ [0xD0,0xD7] → always false!
             snprintf(msg, sizeof(msg),
                      "DIG_CONFIG verify failed: wrote 0x%02X, read 0x%02X", digCfg, digReadBack);
             ctx->log->error(getName(), msg);
@@ -917,8 +917,10 @@ private:
     }
 
     // ── Розрахунок часу конверсії (мс) ───────────────────────────────
-    // Worst case: fSENSOR = 500 kHz. Значення для Reserved індексів 0,1
-    // встановлені як 192 (мінімум) — safe fallback згідно datasheet.
+    // Консервативна оцінка (завищена): 500 kHz дає більший час ніж реальний worst case.
+    // Реальний worst case при MIN_FREQ=118 kHz: fSENSOR ≈ 200 kHz → ~10.24 мс @ RESP=6144.
+    // Функція повертає ~15 мс — безпечно (дані готові до зчитування). LA-9.
+    // Значення для Reserved індексів 0,1 встановлені як 192 — safe fallback.
 
     uint32_t convTimeMs() const {
         static const uint32_t cycles[] = {192, 192, 192, 384, 768, 1536, 3072, 6144};

@@ -175,6 +175,22 @@
 
 ---
 
+### 12. 🔬 [LDC1101_AUDIT_v1.0.0.md](./LDC1101_AUDIT_v1.0.0.md) - **Незалежний фізичний аудит LDC1101**
+**Для кого:** Embedded-розробники, що працюють з LDC1101Plugin; перевірка фізичної моделі; pre-hardware review  
+**Що містить:**
+- Незалежний аудит `LDC1101_ARCHITECTURE.md` з позиції фізики вимірювань та embedded надійності
+- **12 знахідок:** 1 CRITICAL · 3 HIGH · 4 MEDIUM · 2 LOW · 2 INFO — загальна оцінка **8.5/10**
+- **12 фізичних симуляцій:** виправлені skin depth (δ(Ag,1MHz)=63.4µm, не 20.4µm), alloy conductivity Ag-Cu系, ConversionTime матриця 200–500 kHz, SNR vs RESP_TIME, W-підробки, SPI timing
+- **CRITICAL bug LA-1 (виправлено):** `configureSensor()` DIG_CONFIG verify — регресія хвилі 3, sensor ніколи не ініціалізувався; виправлено `(digReadBack & 0x07)` → `digReadBack`
+- **HIGH LA-2:** skin depth SYSTEM_AUDIT §3.2 містить √10 помилку (10 MHz замість 1 MHz)
+- **HIGH LA-3:** провідність Ag-Cu сплавів (alloy scattering) — Ag925 σ≈15–25 MS/m, не ~62 MS/m
+- **HIGH LA-4:** RESP_TIME 6144(arch) vs 768(MikroE) — задокументовано як ADR-RESP-001
+- Загальна оцінка: архітектура фундаментально правильна; один код-рівень critical bug; фізична модель потребує уточнення alloy conductivity та temperature compensation
+
+**Прочитати якщо ви:** Підключаєте перший LDC1101; хочете зрозуміти фізику вимірювань нумізматичних монет; розбираєте чому sesnor може не ініціалізуватись
+
+---
+
 ### 11. 🔍 [SYSTEM_AUDIT_v1.1.0.md](./SYSTEM_AUDIT_v1.1.0.md) - **Повний незалежний системний аудит**
 **Для кого:** Архітектори, технічні ліди, нові контрибутори, pre-implementation review  
 **Що містить:**
