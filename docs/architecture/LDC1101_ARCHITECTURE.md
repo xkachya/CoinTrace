@@ -1,8 +1,8 @@
 # LDC1101 в системі плагінів CoinTrace: Архітектурний аналіз
 
 **Тип документа:** Технічний аналіз та специфікація реалізації  
-**Версія:** 1.0.0  
-**Дата:** 10 березня 2026  
+**Версія:** 1.1.0  
+**Дата:** 14 березня 2026 (оновлено: ADR-COIN-001 — детекція монети dual-threshold hysteresis; §5.2 + симуляції; `CoinState` enum; `updateCoinState()`; конфіг §7)  
 **Статус:** Готовий до імплементації  
 **Джерело:** Texas Instruments LDC1101 Datasheet SNOSD01D (May 2015 – Revised October 2016)
 
@@ -299,6 +299,65 @@ update(): ▲                   ▲                   ▲
 
 ---
 
+### Детекція присутності монети: ADR-COIN-001
+
+**Проблема (SYS-10):** Архітектура не визначала як firmware розпізнає момент покладання монети на сенсор. Без цього `update()` не знає коли акумулювати вимірювання для ідентифікації, а UI — коли відображати результат.
+
+> ⚠️ **ADR-COIN-001:** Детекція присутності монети реалізується через **dual-threshold hysteresis** на основі RP_DATA відносно `calibrationRpBaseline`. Без окремого FreeRTOS task та крос-плагінних залежностей.
+>
+> **Рішення:** `DETECT = baseline × 0.85` та `RELEASE = baseline × 0.92`
+>
+> **Обгрунтування hysteresis (не single threshold):** Сигнал RP має шум ±1–2%. При single threshold монета на межі спричиняє нескінченне мерехтіння між `COIN_PRESENT` / `IDLE_NO_COIN`. Hysteresis gap 7% повністю поглинає noise budget сенсора при стабільній температурі.
+>
+> **Відхилено: Adaptive rolling baseline (Варіант C):** Монета може лежати на сенсорі хвилини. Rolling average адаптується до `RP_coin` через ~K/2 ітерацій і сприймає монету як новий baseline → помилковий `COIN_REMOVED`. Неприйнятно для нумізматичного use case (монету кладуть і чекають результату).
+>
+> **Відносний threshold:** Множники 0.85 / 0.92 застосовуються до `calibrationRpBaseline`, а не до абсолютних кодів. Архітектура не залежить від невідомого поки що реального baseline range MIKROE-3240. Обидва параметри виносяться в конфіг (`ldc1101.json`, §7) для верифікації при R5 hardware тесті.
+
+#### Розширений State Machine
+
+```
+update() після успішного burst read:
+  ├─ calibrationRpBaseline ≤ 100  → skip (calibrate() ще не викликався)
+  └─ calibrationRpBaseline > 100  → updateCoinState(rpRaw)
+
+updateCoinState(rpRaw):
+  IDLE_NO_COIN:   rpRaw < baseline×0.85  (detectDebounceN=5 підряд) → COIN_PRESENT  [log info]
+                  rpRaw ≥ baseline×0.85                              → detectCount = 0
+  COIN_PRESENT:   rpRaw > baseline×0.92  (releaseDebounceM=3 підряд) → COIN_REMOVED [log info]
+                  rpRaw ≤ baseline×0.92                              → releaseCount = 0
+  COIN_REMOVED:   → (transient, 1 цикл update()) → IDLE_NO_COIN
+```
+
+**`COIN_REMOVED` — навіщо:** UI отримує явний перехідний сигнал після зняття монети (один цикл `update()`). Система може завершити анімацію або підтвердити збереження результату. Без цього стану момент зняття монети непомітний вищому рівню.
+
+#### Симуляція: threshold coverage по металах
+
+Відносний RP @ різних відстанях від котушки MIKROE-3240 (fSENSOR ≈ 300 kHz, baseline = B):
+
+| Метал | σ (MS/m) | μr | RP @ 0 мм (% від B) | RP @ 1 мм | RP @ 3 мм | Detect @ 0 мм | Detect @ 3 мм |
+|---|---|---|---|---|---|---|---|
+| Ag999 | 62 | 1 | **20–30%** | 40–55% | 80–92% | ✅ | ✅ / ⚠️ |
+| Ag925 | 25–35 | 1 | **27–43%** | 50–65% | 82–95% | ✅ | ✅ / ⚠️ |
+| Cu | 58 | 1 | **22–33%** | 43–57% | 80–92% | ✅ | ✅ |
+| Al | 37 | 1 | **33–50%** | 57–70% | 85–95% | ✅ | ⚠️ |
+| Ni | 14 | 600 | **47–67%** | 67–80% | 90–97% | ✅ | ⚠️ |
+| Сталь | 10 | 1000 | **57–77%** | 73–87% | 92–100% | ✅ | ❌ (≥3 мм) |
+
+> ✅ = RP < 85% від B → впевнена детекція. ⚠️ = RP ≈ 82–90% → поруч із threshold, залежить від реального baseline. ❌ = не детектується (очікувано: система орієнтована на 0–1 мм).
+
+#### Симуляція: debounce latency та immunity @ 50 Hz
+
+| Параметр | N / M | Latency | Immunity | Оцінка |
+|---|---|---|---|---|
+| `detect_debounce_n` | 3 | 60 мс | ⚠️ ризик від вібрації при кладанні | не рекомендовано |
+| **`detect_debounce_n`** | **5** | **100 мс** | **✅ баланс UX / immunity** | **рекомендовано** |
+| `detect_debounce_n` | 10 | 200 мс | ✅✅ надійно | відчутна пауза |
+| `release_debounce_m` | 2 | 40 мс | ⚠️ ризик false COIN_REMOVED | не рекомендовано |
+| **`release_debounce_m`** | **3** | **60 мс** | **✅ стабільний перехід** | **рекомендовано** |
+| `release_debounce_m` | 5 | 100 мс | ✅✅ надійно | зайва затримка UX |
+
+---
+
 ## 6. SPI шина і конкурентний доступ
 
 ### SPI пристрої в CoinTrace
@@ -346,7 +405,11 @@ struct PluginContext {
   "spi_cs_pin": 5,
   "resp_time_bits": 7,
   "rp_set": 38,
-  "clkin_freq_hz": 16000000
+  "clkin_freq_hz": 16000000,
+  "coin_detect_threshold": 0.85,
+  "coin_release_threshold": 0.92,
+  "detect_debounce_n": 5,
+  "release_debounce_m": 3
 }
 ```
 
@@ -356,6 +419,10 @@ struct PluginContext {
 | `resp_time_bits` | uint8 | 7 | RESP_TIME bits[2:0]. Значення 7 = 6144 cycles = мінімальний шум. Допустимо 2–7. |
 | `rp_set` | uint8 | 38 (`0x26`) | RP_SET регістр (0x01). MikroE SDK default для MIKROE-3240: RP_MAX=24 kΩ / RP_MIN=1.5 kΩ. Змінювати при `STATUS_NO_OSC`. (ADR-LDC-001) |
 | `clkin_freq_hz` | uint32 | 16000000 | Частота зовнішнього CLKIN. Потрібна для розрахунку абсолютної індуктивності (якщо потрібно). |
+| `coin_detect_threshold` | float | 0.85 | DETECT factor: `rpRaw < baseline × factor` → COIN_PRESENT. Верифікувати при R5 hardware тесті. (ADR-COIN-001) |
+| `coin_release_threshold` | float | 0.92 | RELEASE factor: `rpRaw > baseline × factor` → COIN_REMOVED. Має бути > detect (hysteresis). (ADR-COIN-001) |
+| `detect_debounce_n` | uint8 | 5 | Кількість consecutive samples нижче detect threshold для підтвердження COIN_PRESENT (~100 мс @ 50 Hz). |
+| `release_debounce_m` | uint8 | 3 | Кількість consecutive samples вище release threshold для підтвердження COIN_REMOVED (~60 мс @ 50 Hz). |
 
 ---
 
@@ -371,6 +438,15 @@ struct PluginContext {
 #include <SPI.h>
 
 class LDC1101Plugin : public ISensorPlugin, public IDiagnosticPlugin {
+public:
+
+    // ── Coin detection state (ADR-COIN-001) ──────────────────────────
+    enum class CoinState : uint8_t {
+        IDLE_NO_COIN,   // RP > release threshold — монети на котушці немає
+        COIN_PRESENT,   // RP < detect threshold (debounced) — монета присутня
+        COIN_REMOVED    // transient: щойно забрали (1 цикл update() → IDLE_NO_COIN)
+    };
+
 private:
 
     // ── Карта регістрів ──────────────────────────────────────────────
@@ -432,6 +508,18 @@ private:
     float    calibrationRpBaseline = 0.0f;
     uint32_t lastCalibrationTime   = 0;
 
+    // ── Coin detection config (ADR-COIN-001) ─────────────────────────
+    float   coinDetectThreshold  = 0.85f;  // DETECT:  RP < baseline × factor
+    float   coinReleaseThreshold = 0.92f;  // RELEASE: RP > baseline × factor (hysteresis gap 7%)
+    uint8_t detectDebounceN      = 5;      // consecutive samples below detect  → COIN_PRESENT
+    uint8_t releaseDebounceM     = 3;      // consecutive samples above release → COIN_REMOVED
+
+    struct {
+        CoinState state        = CoinState::IDLE_NO_COIN;
+        uint8_t   detectCount  = 0;   // consecutive below detect threshold
+        uint8_t   releaseCount = 0;   // consecutive above release threshold
+    } coin;
+
 public:
 
     // ── Метадані ─────────────────────────────────────────────────────
@@ -471,7 +559,11 @@ public:
             csPin         = ctx->config->getInt("ldc1101.spi_cs_pin", 5);
             respTimeBits  = ctx->config->getUInt8("ldc1101.resp_time_bits", 0x07);
             rpSetValue    = ctx->config->getUInt8("ldc1101.rp_set", 0x26);  // ADR-LDC-001
-            clkinFreqHz   = ctx->config->getUInt32("ldc1101.clkin_freq_hz", 16000000UL);
+            clkinFreqHz          = ctx->config->getUInt32("ldc1101.clkin_freq_hz", 16000000UL);
+            coinDetectThreshold  = ctx->config->getFloat("ldc1101.coin_detect_threshold",  0.85f);
+            coinReleaseThreshold = ctx->config->getFloat("ldc1101.coin_release_threshold", 0.92f);
+            detectDebounceN      = ctx->config->getUInt8("ldc1101.detect_debounce_n",      5);
+            releaseDebounceM     = ctx->config->getUInt8("ldc1101.release_debounce_m",     3);
         } else {
             csPin = 5;
             ctx->log->warning(getName(), "No config — using default CS pin 5");
@@ -594,6 +686,12 @@ public:
         diag.totalReads++;
         diag.lastSuccess = millis();
         diag.status      = HealthStatus::OK;
+
+        // ── Coin detection: dual-threshold hysteresis (ADR-COIN-001) ─
+        // Guard: пропустити поки baseline не відкалібровано (calibrate() не викликався)
+        if (calibrationRpBaseline > 100.0f) {
+            updateCoinState(rpRaw);
+        }
     }
 
     // ── Read ─────────────────────────────────────────────────────────
@@ -639,6 +737,10 @@ public:
 
     bool isEnabled() const override { return enabled; }
     bool isReady()   const override { return ready; }
+
+    // ── Coin detection state (ADR-COIN-001) ──────────────────────────
+    CoinState getCoinState()  const { return coin.state; }
+    bool      isCoinPresent() const { return coin.state == CoinState::COIN_PRESENT; }
 
     HealthStatus getHealthStatus() const override {
         if (!enabled) return HealthStatus::DISABLED;
@@ -822,6 +924,53 @@ public:
     }
 
 private:
+
+    // ── Coin state machine (ADR-COIN-001) ─────────────────────────────
+    // Викликається з update() після кожного успішного вимірювання.
+    // Dual-threshold hysteresis запобігає boundary oscillation при RP поруч із threshold.
+
+    void updateCoinState(uint16_t rpRaw) {
+        const float rp           = static_cast<float>(rpRaw);
+        const float detectLimit  = calibrationRpBaseline * coinDetectThreshold;
+        const float releaseLimit = calibrationRpBaseline * coinReleaseThreshold;
+
+        switch (coin.state) {
+            case CoinState::IDLE_NO_COIN:
+                if (rp < detectLimit) {
+                    if (++coin.detectCount >= detectDebounceN) {
+                        coin.detectCount  = 0;
+                        coin.releaseCount = 0;
+                        coin.state        = CoinState::COIN_PRESENT;
+                        ctx->log->info(getName(),
+                            "Coin PRESENT (RP=%.0f, baseline=%.0f, ratio=%.2f)",
+                            rp, calibrationRpBaseline, rp / calibrationRpBaseline);
+                    }
+                } else {
+                    coin.detectCount = 0;  // non-consecutive — reset counter
+                }
+                break;
+
+            case CoinState::COIN_PRESENT:
+                if (rp > releaseLimit) {
+                    if (++coin.releaseCount >= releaseDebounceM) {
+                        coin.releaseCount = 0;
+                        coin.detectCount  = 0;
+                        coin.state        = CoinState::COIN_REMOVED;
+                        ctx->log->info(getName(),
+                            "Coin REMOVED (RP=%.0f, baseline=%.0f, ratio=%.2f)",
+                            rp, calibrationRpBaseline, rp / calibrationRpBaseline);
+                    }
+                } else {
+                    coin.releaseCount = 0;  // non-consecutive — reset counter
+                }
+                break;
+
+            case CoinState::COIN_REMOVED:
+                // Transient: одноцикловий сигнал для UI після зняття монети
+                coin.state = CoinState::IDLE_NO_COIN;
+                break;
+        }
+    }
 
     // ── Конфігурація сенсора (викликається тільки в Sleep mode) ──────
 
