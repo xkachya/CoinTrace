@@ -636,7 +636,7 @@ Worst case з LDC1101 + 4 slow plugins (5 ms each):
   Але це інші плагіни, не LDC1101.
 ```
 
-**Висновок §5:** LDC1101Plugin у чинному розробленому вигляді повністю відповідає PLUGIN_CONTRACT.md. **Єдиний критичний blockers — LA-1 (DIG_CONFIG bug)** не дозволяє initialize() повернути true.
+**Висновок §5:** LDC1101Plugin повністю відповідає PLUGIN_CONTRACT.md. ~~**Єдиний критичний blockers — LA-1 (DIG_CONFIG bug)** не дозволяє initialize() повернути true.~~ ✅ **LA-1 виправлено в хвилі 3 (commit d73427c)** — initialize() тепер працює коректно.
 
 ---
 
@@ -644,20 +644,22 @@ Worst case з LDC1101 + 4 slow plugins (5 ms each):
 
 | ID | Severity | Область | Знахідка | Статус |
 |---|---|---|---|---|
-| **LA-1** | 🔴 CRITICAL | Implementation | `configureSensor()`: DIG_CONFIG verify `(readBack & 0x07) != digCfg` — завжди true після хвилі 3. initialize() НІКОЛИ не повертає true. | Новий — регресія хвилі 3 |
-| **LA-2** | 🟠 HIGH | Documentation | SYSTEM_AUDIT §3.2 skin depth значення розраховані при f=10 MHz, а не 1 MHz. δ(Ag,1MHz)=63.4µm, δ(Ag,300kHz)=116µm (не 20.4 та 37 µm). | SYSTEM_AUDIT потребує коригування |
-| **LA-3** | 🟠 HIGH | Analysis | Провідність Ag-Cu сплавів (Ag925/Ag900) знижується в 3–5× від чистого Ag через alloy scattering. Аналіз SYSTEM_AUDIT базується на чистих металах. | SYSTEM_AUDIT потребує доповнення |
-| **LA-4** | 🟠 HIGH | Architecture | RESP_TIME: architecture default=6144 cycles vs MikroE SDK=768 cycles. Не задокументовано як ADR. Аргументація: 2.83× SNR > MikroE за 8× часу — ОБИДВА прийнятні, але вибір повинен бути явним. | Відкрито — потребує ADR |
-| **LA-5** | 🟡 MEDIUM | Implementation | TC1/TC2 записуються без readback-верифікації (на відміну від RP_SET та DIG_CFG). | Новий |
-| **LA-6** | 🟡 MEDIUM | Implementation | `checkCalibration()`: межі (100, 60000) охоплюють майже весь 16-bit діапазон — фактично не перевіряють достовірність baseline. | Новий |
-| **LA-7** | 🟡 MEDIUM | Implementation | update(): відсутній лічильник consecutive DRDYB=1. При frozen conversion сенсор мовчки нічого не вимірює без діагностики. | Новий |
-| **LA-8** | 🟡 MEDIUM | Architecture | LHR mode (24-bit L) не аналізований для калібрування fSENSOR та феромагнітного screening. Документально "відкладений" без пріоритизації. | Відкрито |
-| **LA-9** | 🟢 LOW | Implementation | `convTimeMs()` коментар "Worst case: fSENSOR=500 kHz" помилковий. Фактично worst case: 200 kHz (MIN_FREQ=118 kHz). Функція безпечна (консервативна), але misleading. | Новий |
-| **LA-10** | 🟢 LOW | Architecture | NO_OSC recovery не розрізняє hardware fault від config mismatch. Немає автоматичного RP_SET scan при NO_OSC. | Новий |
-| **LA-11** | ℹ️ INFO | Physics | Виявлення W-підробок під Au/Ag: δ(W,300kHz)=211µm >> δ(Au)=138µm + σ(W)<<σ(Au) → ΔRP ≈ 53% — легко розрізнимо. Не задокументовано в архітектурі як use case. | Інформаційно |
-| **LA-12** | ℹ️ INFO | Physics | Тонке срібне плакування < δ(Ag,300kHz)=116µm: сигнал частково проходить крізь покриття. Плата товщиною > 116 µm захищена від false positive. Не задокументовано. | Інформаційно |
+| **LA-1** | 🔴 CRITICAL | Implementation | `configureSensor()`: DIG_CONFIG verify `(readBack & 0x07) != digCfg` — завжди true після хвилі 3. initialize() НІКОЛИ не повертає true. | ✅ CLOSED — хвиля 3 (commit d73427c) |
+| **LA-2** | 🟠 HIGH | Documentation | SYSTEM_AUDIT §3.2 skin depth значення розраховані при f=10 MHz, а не 1 MHz. δ(Ag,1MHz)=63.4µm, δ(Ag,300kHz)=116µm (не 20.4 та 37 µm). | ✅ CLOSED — хвиля 4 (commit) |
+| **LA-3** | 🟠 HIGH | Analysis | Провідність Ag-Cu сплавів (Ag925/Ag900) знижується в 3–5× від чистого Ag через alloy scattering. Аналіз SYSTEM_AUDIT базується на чистих металах. | 🔴 Відкрито — верифікація потребує real hardware |
+| **LA-4** | 🟠 HIGH | Architecture | RESP_TIME: architecture default=6144 cycles vs MikroE SDK=768 cycles. Не задокументовано як ADR. Аргументація: 2.83× SNR > MikroE за 8× часу — ОБИДВА прийнятні, але вибір повинен бути явним. | ✅ CLOSED — хвиля 4 (ADR-RESP-001) |
+| **LA-5** | 🟡 MEDIUM | Implementation | TC1/TC2 записуються без readback-верифікації (на відміну від RP_SET та DIG_CFG). | ✅ CLOSED — хвиля 4 (commit) |
+| **LA-6** | 🟡 MEDIUM | Implementation | `checkCalibration()`: межі (100, 60000) охоплюють майже весь 16-bit діапазон — фактично не перевіряють достовірність baseline. | 🔴 Відкрито — звузити після R5 даних |
+| **LA-7** | 🟡 MEDIUM | Implementation | update(): відсутній лічильник consecutive DRDYB=1. При frozen conversion сенсор мовчки нічого не вимірює без діагностики. | ✅ CLOSED — хвиля 4 (staleCount) |
+| **LA-8** | 🟡 MEDIUM | Architecture | LHR mode (24-bit L) не аналізований для калібрування fSENSOR та феромагнітного screening. Документально "відкладений" без пріоритизації. | 🔴 Відкрито — довгострокове |
+| **LA-9** | 🟢 LOW | Implementation | `convTimeMs()` коментар "Worst case: fSENSOR=500 kHz" помилковий. Фактично worst case: 200 kHz (MIN_FREQ=118 kHz). Функція безпечна (консервативна), але misleading. | ✅ CLOSED — хвиля 3 (commit d73427c) |
+| **LA-10** | 🟢 LOW | Architecture | NO_OSC recovery не розрізняє hardware fault від config mismatch. Немає автоматичного RP_SET scan при NO_OSC. | 🔴 Відкрито |
+| **LA-11** | ℹ️ INFO | Physics | Виявлення W-підробок під Au/Ag: δ(W,300kHz)=211µm >> δ(Au)=138µm + σ(W)<<σ(Au) → ΔRP ≈ 53% — легко розрізнимо. Не задокументовано в архітектурі як use case. | ℹ️ Інформаційно |
+| **LA-12** | ℹ️ INFO | Physics | Тонке срібне плакування < δ(Ag,300kHz)=116µm: сигнал частково проходить крізь покриття. Плата товщиною > 116 µm захищена від false positive. Не задокументовано. | ℹ️ Інформаційно |
 
-**Загальний рахунок: 1 CRITICAL · 3 HIGH · 4 MEDIUM · 2 LOW · 2 INFO**
+**Загальний рахунок: 1 CRITICAL · 3 HIGH · 4 MEDIUM · 2 LOW · 2 INFO**  
+**Хвиля 3+4 закрила 6 знахідок: LA-1, LA-2, LA-4, LA-5, LA-7, LA-9**  
+**Залишається відкритими: 0 CRITICAL · 1 HIGH (LA-3) · 2 MEDIUM (LA-6, LA-8) · 1 LOW (LA-10) · 2 INFO**
 
 ---
 
@@ -665,18 +667,15 @@ Worst case з LDC1101 + 4 slow plugins (5 ms each):
 
 ### Хвиля 4 — блокер (зробити негайно)
 
-**R1 (з LA-1):** Виправити DIG_CONFIG verify — одна строка:
-```cpp
-// Замінити:
-if ((digReadBack & 0x07) != digCfg) {
-// На:
-if (digReadBack != digCfg) {
-```
+~~**R1 (з LA-1):** Виправити DIG_CONFIG verify~~ ✅ **ВИКОНАНО** (хвиля 3, commit d73427c)
+
+~~**R2 (з LA-4):** Документувати ADR-RESP-001~~ ✅ **ВИКОНАНО** (хвиля 4, `LDC1101_ARCHITECTURE.md §RESP_TIME`)
+
+~~**R3 (з LA-5):** Додати readback для TC1, TC2 в `configureSensor()`~~ ✅ **ВИКОНАНО** (хвиля 4)
+
+~~**R4 (з LA-7):** Додати стале лічильник у `update()`~~ ✅ **ВИКОНАНО** (хвиля 4, `diag.staleCount`)
 
 ### Хвиля 5 — до першого підключення real hardware
-
-**R2 (з LA-4):** Документувати ADR-RESP-001:
-> "RESP_TIME = 6144 cycles (не MikroE default 768). Причина: 2.83× SNR важливіший за 8× час конверсії для нумізматичної точності. ConversionTime при 300 kHz = 6.8 мс << 20 мс update() budget."
 
 **R3 (з LA-5):** Додати readback для TC1, TC2 в `configureSensor()`.
 
@@ -718,9 +717,9 @@ if (digReadBack != digCfg) {
 
 ### Що потребує виправлення
 
-**Один критичний баг** (LA-1, одна строка коду) повністю блокує ініціалізацію сенсора. Це регресія хвилі 3, яка не може потрапити в production.
+**Один критичний баг** (LA-1, одна строка коду) повністю блокував ініціалізацію сенсора. **✅ Виправлено в хвилі 3 (commit d73427c).**
 
-**Фізичний аналіз** у SYSTEM_AUDIT §3.2 має системну помилку в skin depth (10 MHz замість 1 MHz). Якісні висновки про класифікаційний простір в цілому правильні, але числові значення некоректні.
+**Фізичний аналіз** у SYSTEM_AUDIT §3.2 мав системну помилку в skin depth (10 MHz замість 1 MHz). **✅ Виправлено в хвилі 4.** Якісні висновки про класифікаційний простір в цілому правильні.
 
 **Diференціація Ag925/Ag900** фізично можлива (alloy scattering дає ~25% ΔRP), але вимагає:
 - Точного temperature control або компенсації
@@ -729,10 +728,11 @@ if (digReadBack != digCfg) {
 
 ### Готовність до імплементації
 
+**Після виправлень хвиль 3+4 (`configureSensor()` fix + ADR-RESP-001 + TC1/TC2 verify + staleCount):**
+
 ```
-После виправлення LA-1 (1 строка):
-  ✅ LDC1101Plugin готовий до першого підключення hardware
-  📝 Потрібна емпірична калібрація RP діапазону (R5)
+✅ LDC1101Plugin готовий до першого підключення hardware
+📝 Потрібна емпірична калібрація RP діапазону (R5)
 
 Технічний ризик для P-3 (Coin Detection):
   ⚠️ Температурна компенсація відсутня → знижена точність при ΔT > 10°C
@@ -744,5 +744,6 @@ if (digReadBack != digCfg) {
 
 *Документ підготовлено як незалежний технічний аудит.*  
 *Версія: 1.0.0 | Дата: 14 березня 2026*  
+*Оновлено: хвиля 4 — 14 березня 2026 — LA-1/LA-2/LA-4/LA-5/LA-7/LA-9 CLOSED*  
 *Джерела: TI LDC1101 SNOSD01D, MikroE SDK ldc1101.c (2026-03-13), CRC Handbook*  
 *12 симуляцій та аналітичних моделей; без вимірювань на реальному пристрої*
