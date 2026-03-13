@@ -82,20 +82,20 @@ v1.0.0 аудит закрив усі блокуючі для компіляці
 
 | ID | Документ | Знахідка | Severity | Статус |
 |---|---|---|---|---|
-| **PA2-1** | DIAGNOSTICS §1 + ARCH/CREATING | `IPlugin` +2 pure virtual (`getHealthStatus`, `getLastError`) — всі 10+ плагінів-прикладів абстрактні | 🔴 CRITICAL | 🔓 OPEN |
-| **PA2-2** | DIAGNOSTICS §3,§4,§5 + ARCH §PluginSystem | `pluginSystem->getAllPlugins()` — метод не оголошений у `PluginSystem` | 🔴 CRITICAL | 🔓 OPEN |
-| **PA2-3** | DIAGNOSTICS §3,§4,§5 | `plugin->runSelfTest()`, `plugin->getStatistics()` на `IPlugin*` — методи тільки на `IDiagnosticPlugin*` — compile error | 🔴 CRITICAL | 🔓 OPEN |
-| **PA2-4** | DIAGNOSTICS §4 + ARCH §PluginSystem | `pluginSystem->attemptRecovery(plugin)` — метод не оголошений у `PluginSystem` | 🟠 HIGH | 🔓 OPEN |
-| **PA2-5** | CONTRACT §1.3 vs ARCH §PluginContext | `PluginContext` в CONTRACT відсутнє поле `IStorageManager* storage` (PA-25 fix не поширений) | 🟠 HIGH | 🔓 OPEN |
-| **PA2-6** | CREATING_PLUGINS §SPI template | `MySPISensorPlugin::read()`: `spi->transfer16()` без `xSemaphoreTake(ctx->spiMutex)` — violates ADR-ST-008 | 🟠 HIGH | 🔓 OPEN |
-| **PA2-7** | ARCH §IIMUPlugin vs CONTRACT §3.4 | `IIMUPlugin::calibrate()` → `void`; `ISensorPlugin::calibrate()` → `bool` — асиметрія не задокументована, CONTRACT неоднозначний | 🟠 HIGH | 🔓 OPEN |
-| **PA2-8** | CREATING_PLUGINS §AsyncSensorPlugin | `TaskHandle_t readTask` не видаляється в `shutdown()` — FreeRTOS task leak при plugin reload | 🟠 HIGH | 🔓 OPEN |
-| **PA2-9** | ARCH Крок1 / ARCH §Оновлений / DIAGNOSTICS §1 | `IPlugin` визначений тричі з різними наборами методів — немає єдиного канонічного визначення | 🟡 MEDIUM | 🔓 OPEN |
-| **PA2-10** | INTERFACES_EXTENDED §1 vs ARCH §ISensorPlugin | `ISensorPlugin::getMetadata() const = 0` в INTERFACES — pure virtual — відсутній в ARCH definition → абстракція на abstragi, неузгодженість | 🟡 MEDIUM | 🔓 OPEN |
-| **PA2-11** | CREATING_PLUGINS §Поради §3 | `readWithTimeout()`: `Serial.println("ERROR: …")` — copyable example порушує CONTRACT §2.4 | 🟡 MEDIUM | 🔓 OPEN |
+| **PA2-1** | DIAGNOSTICS §1 + ARCH/CREATING | `IPlugin` +2 pure virtual (`getHealthStatus`, `getLastError`) — всі 10+ плагінів-прикладів абстрактні | 🔴 CRITICAL | ✅ CLOSED |
+| **PA2-2** | DIAGNOSTICS §3,§4,§5 + ARCH §PluginSystem | `pluginSystem->getAllPlugins()` — метод не оголошений у `PluginSystem` | 🔴 CRITICAL | ✅ CLOSED |
+| **PA2-3** | DIAGNOSTICS §3,§4,§5 | `plugin->runSelfTest()`, `plugin->getStatistics()` на `IPlugin*` — методи тільки на `IDiagnosticPlugin*` — compile error | 🔴 CRITICAL | ✅ CLOSED |
+| **PA2-4** | DIAGNOSTICS §4 + ARCH §PluginSystem | `pluginSystem->attemptRecovery(plugin)` — метод не оголошений у `PluginSystem` | 🟠 HIGH | ✅ CLOSED |
+| **PA2-5** | CONTRACT §1.3 vs ARCH §PluginContext | `PluginContext` в CONTRACT відсутнє поле `IStorageManager* storage` (PA-25 fix не поширений) | 🟠 HIGH | ✅ CLOSED |
+| **PA2-6** | CREATING_PLUGINS §SPI template | `MySPISensorPlugin::read()`: `spi->transfer16()` без `xSemaphoreTake(ctx->spiMutex)` — violates ADR-ST-008 | 🟠 HIGH | ✅ CLOSED |
+| **PA2-7** | ARCH §IIMUPlugin vs CONTRACT §3.4 | `IIMUPlugin::calibrate()` → `void`; `ISensorPlugin::calibrate()` → `bool` — асиметрія не задокументована, CONTRACT неоднозначний | 🟠 HIGH | ✅ CLOSED |
+| **PA2-8** | CREATING_PLUGINS §AsyncSensorPlugin | `TaskHandle_t readTask` не видаляється в `shutdown()` — FreeRTOS task leak при plugin reload | 🟠 HIGH | ✅ CLOSED |
+| **PA2-9** | ARCH Крок1 / ARCH §Оновлений / DIAGNOSTICS §1 | `IPlugin` визначений тричі з різними наборами методів — немає єдиного канонічного визначення | 🟡 MEDIUM | ✅ CLOSED |
+| **PA2-10** | INTERFACES_EXTENDED §1 vs ARCH §ISensorPlugin | `ISensorPlugin::getMetadata() const = 0` в INTERFACES — pure virtual — відсутній в ARCH definition → абстракція на abstragi, неузгодженість | 🟡 MEDIUM | ✅ CLOSED |
+| **PA2-11** | CREATING_PLUGINS §Поради §3 | `readWithTimeout()`: `Serial.println("ERROR: …")` — copyable example порушує CONTRACT §2.4 | 🟡 MEDIUM | ✅ CLOSED |
 | **PA2-12** | CREATING_PLUGINS §Debugging | Mock `PluginContext`: `.config = nullptr` — плагіни що викликають `ctx->config->getInt()` в initialize() крашать тест | 🟡 MEDIUM | 🔓 OPEN |
-| **PA2-13** | ARCH §Memory Management | Memory budget не враховує display framebuffer (~63 KB heap) — документований залишок 0 KB насправді −63 KB | 🟡 MEDIUM | 🔓 OPEN |
-| **PA2-14** | ARCH §data/config.json example | Inline `"config": "plugins/ldc1101.json"` поле у plugin entry суперечить PA-13 canonical model | 🟡 MEDIUM | 🔓 OPEN |
+| **PA2-13** | ARCH §Memory Management | Memory budget не враховує display framebuffer (~63 KB heap) — документований залишок 0 KB насправді −63 KB | 🟡 MEDIUM | ✅ CLOSED |
+| **PA2-14** | ARCH §data/config.json example | Inline `"config": "plugins/ldc1101.json"` поле у plugin entry суперечить PA-13 canonical model | 🟡 MEDIUM | ✅ CLOSED |
 | **PA2-15** | DIAGNOSTICS §4 §5 | `ctx->log->info(...)` та `SD.open()` безпосередньо у `main.cpp` loop() — `ctx` є private членом PluginSystem, недоступний у main scope | 🟡 MEDIUM | 🔓 OPEN |
 | **PA2-16** | DIAGNOSTICS §2 `checkCalibration()` | `calibrationBaseline = 0` при старті → перша перевірка `< 100` завжди `false` → `runDiagnostics()` завжди `CALIBRATION_NEEDED` до явного calibrate() | 🟢 LOW | 🔓 OPEN |
 | **PA2-17** | CREATING_PLUGINS §BH1750 `read()` | `ctx->wire->requestFrom()` без `wireMutex` у `read()` — race condition якщо read() викликається з Core 1 (CONTRACT §2.2) | 🟢 LOW | 🔓 OPEN |
@@ -105,7 +105,7 @@ v1.0.0 аудит закрив усі блокуючі для компіляці
 
 | ID | Оригінал | Знахідка | Severity | Статус |
 |---|---|---|---|---|
-| **C-PA12** | PA-12 v1.0.0 | Factory hardcoding (`if name == "LDC1101"`) суперечить extensibility promise | 🟡 MEDIUM | 🔓 OPEN |
+| **C-PA12** | PA-12 v1.0.0 | Factory hardcoding (`if name == "LDC1101"`) суперечить extensibility promise | 🟡 MEDIUM | ✅ CLOSED |
 | **C-PA16** | PA-16 v1.0.0 | Plugin dependency injection — механізм не визначено | 🟢 LOW | 🔓 OPEN |
 
 > **PA-20 v1.0.0** (`getStatistics() const` side-effects) → замінена ширшою PA2-3 (methods on wrong type). Окремо не відстежується.
@@ -114,8 +114,7 @@ v1.0.0 аудит закрив усі блокуючі для компіляці
 
 **Разом нових:** 3 CRITICAL · 4 HIGH · 6 MEDIUM · 3 LOW = **16 нових знахідок**  
 **Перенесено з v1.0.0:** C-PA12 (MEDIUM) · C-PA16 (LOW) = **2 carried**  
-**Всього активних:** **18 знахідок (20 з v1.0.0 всі закриті)**  
-**Відкрито після v2.0.0:** 18 🔓 OPEN
+**Всього:** 18 знахідок | **✅ CLOSED: 14** | **🔓 OPEN: 5** (PA2-12, PA2-15, PA2-16, PA2-17, PA2-18, C-PA16)
 
 ---
 
@@ -1195,27 +1194,27 @@ if (fusion) {
 
 ### P-2 Блокуючі (мають бути closed до початку):
 
-- [ ] **PA2-1** — визначити canonical `IPlugin.h` (без getHealthStatus/getLastError або з default impl)
-- [ ] **PA2-2** — додати `getAllPlugins()` до `PluginSystem`
-- [ ] **PA2-3** — виправити DIAGNOSTICS §3,§4,§5 на `dynamic_cast<IDiagnosticPlugin*>`
-- [ ] **PA2-4** — додати `attemptRecovery()` до `PluginSystem`
-- [ ] **PA2-5** — синхронізувати CONTRACT §1.3 PluginContext struct
-- [ ] **C-PA12** — або self-registration, або явно задокументувати обмеження
+- [x] **PA2-1** — визначити canonical `IPlugin.h` (без getHealthStatus/getLastError або з default impl)
+- [x] **PA2-2** — додати `getAllPlugins()` до `PluginSystem`
+- [x] **PA2-3** — виправити DIAGNOSTICS §3,§4,§5 на `dynamic_cast<IDiagnosticPlugin*>`
+- [x] **PA2-4** — додати `attemptRecovery()` до `PluginSystem`
+- [x] **PA2-5** — синхронізувати CONTRACT §1.3 PluginContext struct
+- [x] **C-PA12** — або self-registration, або явно задокументувати обмеження
 
 ### P-2 Рекомендовані (виправити в тому ж PR):
 
-- [ ] **PA2-6** — SPI template + `spiMutex`
-- [ ] **PA2-7** — `IIMUPlugin::calibrate()` → `bool`
-- [ ] **PA2-8** — AsyncSensorPlugin shutdown() + task delete
-- [ ] **PA2-9** — єдиний canonical IPlugin cross-reference
-- [ ] **PA2-10** — уточнити базова vs extended ISensorPlugin
-- [ ] **PA2-14** — видалити inline `"config"` поле з config.json example
+- [x] **PA2-6** — SPI template + `spiMutex`
+- [x] **PA2-7** — `IIMUPlugin::calibrate()` → `bool`
+- [x] **PA2-8** — AsyncSensorPlugin shutdown() + task delete
+- [x] **PA2-9** — єдиний canonical IPlugin cross-reference
+- [x] **PA2-10** — уточнити базова vs extended ISensorPlugin
+- [x] **PA2-14** — видалити inline `"config"` поле з config.json example
 
 ### P-3 / Backlog:
 
-- [ ] PA2-11 — Serial.println у §Поради → ctx->log
+- [ ] PA2-11 — ~~Serial.println у §Поради → ctx->log~~ ✅ CLOSED
 - [ ] PA2-12 — mock ctx config = nullptr
-- [ ] PA2-13 — memory budget revision
+- [x] **PA2-13** — ~~memory budget revision~~ ✅ CLOSED (20→10 плагінів)
 - [ ] PA2-15 — ctx->log у loop() scope
 - [ ] PA2-16 — calibrationBaseline boot behavior
 - [ ] PA2-17 — BH1750 wireMutex comment

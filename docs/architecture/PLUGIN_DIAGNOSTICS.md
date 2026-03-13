@@ -97,13 +97,15 @@ public:
     virtual bool isEnabled() const = 0;
     virtual bool isReady() const = 0;
     
-    // === Базова діагностика (мінімально обов'язкова для всіх плагінів) ===
+    // === Базова діагностика — default impl для плагінів без повної діагностики ===
+    // Плагіни що мають full diagnostics — перевизначають їх (через IDiagnosticPlugin mixin).
+    // Default = "невідомий стан" (не помилка, просто немає інформації).
     
     // Швидка перевірка статусу (викликається часто, має бути швидкою — без I2C/SPI)
-    virtual HealthStatus getHealthStatus() const = 0;
+    virtual HealthStatus getHealthStatus() const { return HealthStatus::UNKNOWN; }
     
     // Отримати останню помилку
-    virtual ErrorCode getLastError() const = 0;
+    virtual ErrorCode getLastError() const { return {0, "No error"}; }
     
     virtual ~IPlugin() = default;
 };
@@ -561,14 +563,17 @@ void showDiagnosticsScreen() {
         snprintf(line, sizeof(line), "%s %-12s", emoji, plugin->getName());
         displayPlugin->drawText(10, y, line, color);
         
-        // Показати статистику
-        auto stats = plugin->getStatistics();
-        snprintf(line, sizeof(line), "%d%% (%d/%d)", 
-            stats.stats.successRate,
-            stats.stats.totalReads - stats.stats.failedReads,
-            stats.stats.totalReads
-        );
-        displayPlugin->drawText(160, y, line, TFT_WHITE);
+        // Показати статистику (тільки для IDiagnosticPlugin)
+        auto* diagPlugin = dynamic_cast<IDiagnosticPlugin*>(plugin);
+        if (diagPlugin) {
+            auto stats = diagPlugin->getStatistics();
+            snprintf(line, sizeof(line), "%d%% (%d/%d)", 
+                stats.stats.successRate,
+                stats.stats.totalReads - stats.stats.failedReads,
+                stats.stats.totalReads
+            );
+            displayPlugin->drawText(160, y, line, TFT_WHITE);
+        }
         
         y += 20;
     }
@@ -592,10 +597,17 @@ void setup() {
     
     for (auto* plugin : pluginSystem->getAllPlugins()) {
         Serial.printf("Testing %s...\n", plugin->getName());
-        bool passed = plugin->runSelfTest();
+        // runSelfTest() — метод IDiagnosticPlugin, не IPlugin.
+        // Плагіни без IDiagnosticPlugin пропускаються (getHealthStatus() — default UNKNOWN).
+        auto* diagPlugin = dynamic_cast<IDiagnosticPlugin*>(plugin);
+        if (!diagPlugin) {
+            Serial.printf("  ⏭️ SKIP (no IDiagnosticPlugin): %s\n", plugin->getName());
+            continue;
+        }
+        bool passed = diagPlugin->runSelfTest();
         
         if (!passed) {
-            auto error = plugin->getLastError();
+            auto error = plugin->getLastError();  // getLastError() — base IPlugin (default impl)
             Serial.printf("  ❌ FAILED: %s\n", error.message);
             
             // Вимкнути несправний плагін
@@ -662,7 +674,9 @@ void logDiagnostics() {
     log.print(timestamp);
     
     for (auto* plugin : pluginSystem->getAllPlugins()) {
-        auto result = plugin->getStatistics();
+        auto* diagPlugin = dynamic_cast<IDiagnosticPlugin*>(plugin);
+        if (!diagPlugin) continue;  // Пропустити плагіни без повної діагностики
+        auto result = diagPlugin->getStatistics();
         
         log.printf("%s: status=%d, success_rate=%d%%, errors=%d/%d\n",
             plugin->getName(),

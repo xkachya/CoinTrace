@@ -138,6 +138,7 @@ struct PluginContext {
     SemaphoreHandle_t spiMutex;    // FreeRTOS mutex для SPI шини (не nullptr)
     ConfigManager*    config;      // Доступ до конфігурації (не nullptr)
     Logger*           log;         // Система логування (не nullptr)
+    IStorageManager*  storage      = nullptr;  // Доступ до MeasurementStore, NVS, LittleFS
 };
 ```
 
@@ -559,8 +560,12 @@ class IInputPlugin : public IPlugin {
 **Контракт:**
 - `calibrate()` — блокуюча операція, `delay()` дозволено
 - **Не викликати з `update()`!** — обов'язково з коду застосунку, поза основного циклу
+- **Повертає `bool`**: `true` = калібрування успішне, `false` = помилка (hardware не відповідає
+  або неможливо визначити baseline). Помилку зосереджувати через `getLastError()`.
 - Тривалість калібрування має бути задокументована в коментарі імплементації
 - При перерванні не повинна залишати сенсор в невизначеному стані
+
+> **Імплементація:** `IIMUPlugin::calibrate()` також повертає `bool` аналогічно. Усі `calibrate()`-методи в системі мають єдиний тип поверненого значення.
 
 ---
 

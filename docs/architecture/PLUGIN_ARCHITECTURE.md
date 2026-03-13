@@ -152,6 +152,12 @@ public:
     virtual bool isEnabled() const = 0;
     virtual bool isReady() const = 0;
     
+    // Базова діагностика — default impl (UNKNOWN / "No error").
+    // Повна діагностика — через IDiagnosticPlugin mixin. Деталі: PLUGIN_DIAGNOSTICS.md.
+    // HealthStatus та ErrorCode визначені в PLUGIN_DIAGNOSTICS.md §1.
+    virtual IPlugin::HealthStatus getHealthStatus() const { return IPlugin::HealthStatus::UNKNOWN; }
+    virtual IPlugin::ErrorCode    getLastError()    const { return {0, "No error"}; }
+    
     virtual ~IPlugin() = default;
 };
 ```
@@ -181,6 +187,10 @@ public:
     
     virtual SensorType getType() const = 0;
     
+    // SensorMetadata: розширене визначення в PLUGIN_INTERFACES_EXTENDED.md §1.
+    // Повний інтерфейс ISensorPlugin з getMetadata() — дивись PLUGIN_INTERFACES_EXTENDED.md.
+    virtual SensorMetadata getMetadata() const = 0;
+    
     // Canonical (5-field) SensorData — визначення та семантика полів:
     // → PLUGIN_INTERFACES_EXTENDED.md §1 "ISensorPlugin - Розширений"
     // struct SensorData {
@@ -208,7 +218,7 @@ public:
     
     virtual IMUData read() = 0;
     virtual bool isLevel(float tolerance = 0.1) = 0;
-    virtual void calibrate() = 0;
+    virtual bool calibrate() = 0;  // bool: true=успіх, false=помилка (аналогічно ISensorPlugin::calibrate())
 };
 
 // include/IStoragePlugin.h
@@ -278,6 +288,10 @@ public:
     // Статус
     virtual bool isEnabled() const = 0;
     virtual bool isReady() const = 0;
+    
+    // Базова діагностика — default impl. Повна діагностика: IDiagnosticPlugin (PLUGIN_DIAGNOSTICS.md).
+    virtual HealthStatus getHealthStatus() const { return HealthStatus::UNKNOWN; }
+    virtual ErrorCode    getLastError()    const { return {0, "No error"}; }
     
     virtual ~IPlugin() = default;
 };
@@ -422,10 +436,13 @@ public:
 
 > ⚠️ `ps_malloc()` недоступний. Не використовуй PSRAM API в плагінах.
 
-**Стратегія розподілу heap:**
-- ~177 KB — система (PluginSystem, ConfigManager, Logger, FreeRTOS stacks)
-- ~160 KB — плагіни (20 плагінів × 8 KB кожен)
-- ~0 KB — залишок (критичний резерв для heap-фрагментації)
+**Стратегія розподілу heap (результат симуляції PLUGIN_AUDIT_v2.0.0.md §3.2):**
+- ~167 KB — overhead (FreeRTOS + framework + display framebuffer ~63KB + LittleFS + JSON)
+- ~80 KB — плагіни (10 плагінів × 8 KB кожен)
+- ~90 KB — safety buffer (фрагментація heap, FreeRTOS task stacks)
+
+> ⚠️ **Ліміт: максимум 10 плагінів.** Display framebuffer ST7789V2 (~63 KB) постійно використовує heap.  
+> 20 плагінів × 8 KB = 160 KB > available → HEAP OVERFLOW на практиці.
 
 ### Memory контракт
 
@@ -922,6 +939,22 @@ public:
         return result;
     }
     
+    // Отримати список всіх зареєстрованих плагінів (PA2-2)
+    const std::vector<IPlugin*>& getAllPlugins() const {
+        return plugins;
+    }
+    
+    // Спробувати відновити несправний плагін (PA2-4)
+    // Послідовність: shutdown → vTaskDelay(100ms) → canInitialize() → initialize()
+    // Повертає true якщо initialize() пройшов успішно.
+    bool attemptRecovery(IPlugin* plugin) {
+        if (!plugin) return false;
+        plugin->shutdown();
+        vTaskDelay(pdMS_TO_TICKS(100));
+        if (!plugin->canInitialize()) return false;
+        return plugin->initialize(&ctx_);
+    }
+    
     // Показати статус системи
     void printStatus() {
         Serial.println("\n=== Plugin Status ===");
@@ -937,10 +970,13 @@ public:
     
 private:
     // Plugin Factory (автоматична реєстрація)
+    // Plugin Factory — hardcoded реєстрація (C-PA12)
+    // ⚠️ ОБМЕЖЕННЯ: При додаванні нового плагіна необхідно:
+    //   1. Додати #include "MyPlugin.h" у цей файл (PluginSystem.h або PluginFactory.cpp)
+    //   2. Додати рядок: if (name == "MyPlugin") return new MyPlugin();
+    //   3. Повторна компіляція обов'язкова.
+    // Це свідоме рішення (P-2 scope). Self-registration macro — в backlog.
     IPlugin* createPlugin(const std::string& type, const std::string& name) {
-        // Тут можна використати макроси для автоматичної реєстрації
-        // Або читати з plugin.json і динамічно створювати
-        
         if (name == "LDC1101") return new LDC1101Plugin();
         if (name == "BMI270") return new BMI270Plugin();
         if (name == "QMC5883L") return new QMC5883LPlugin();
@@ -967,8 +1003,7 @@ private:
     {
       "type": "sensor",
       "name": "LDC1101",
-      "enabled": true,
-      "config": "plugins/ldc1101.json"
+      "enabled": true
     },
     {
       "type": "imu",

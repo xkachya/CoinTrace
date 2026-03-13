@@ -297,10 +297,17 @@ public:
     SensorData read() override {
         if (!ready) return {0, 0, 0.0f, millis(), false};
         
+        // ✅ ADR-ST-008: spiMutex обов'язковий для всіх SPI-транзакцій (SD карта + цей сенсор на одній VSPI)
+        if (xSemaphoreTake(ctx->spiMutex, pdMS_TO_TICKS(50)) != pdTRUE) {
+            return {0, 0, 0.0f, millis(), false};  // Очікування на mutex істекло
+        }
+        
         digitalWrite(csPin, LOW);
         // TODO: SPI транзакція
         uint16_t data = spi->transfer16(0x0000);
         digitalWrite(csPin, HIGH);
+        
+        xSemaphoreGive(ctx->spiMutex);
         
         return {(float)data, 0, 1.0f, millis(), true};
     }
@@ -333,8 +340,10 @@ public:
                 abs(data.accelY) < tolerance);
     }
     
-    void calibrate() override {
+    bool calibrate() override {
         // TODO: Калібрування IMU
+        // Повернути false якщо hardware не відповів або baseline невалідний
+        return true;
     }
     
     // ... базові методи IPlugin
@@ -426,9 +435,22 @@ public:
     bool initialize(PluginContext* context) override {
         ctx = context;
         dataMutex = xSemaphoreCreateMutex();
-        xTaskCreate(readTaskFunc, "SensorRead", 4096, this, 5, &readTask);
+        xTaskCreate(readTaskFunc, "SensorRead", 4096, this,
+                    tskIDLE_PRIORITY + 2,  // ≤ main loop priority; priority 5 може starve loop
+                    &readTask);
         ctx->log->info(getName(), "Async task started");
         return true;
+    }
+    
+    void shutdown() override {
+        if (readTask) {
+            vTaskDelete(readTask);  // ✅ уникнути task leak + use-after-free при перезавантаженні
+            readTask = nullptr;
+        }
+        if (dataMutex) {
+            vSemaphoreDelete(dataMutex);
+            dataMutex = nullptr;
+        }
     }
     
     SensorData read() override {
@@ -666,7 +688,7 @@ uint16_t readWithTimeout(uint32_t timeoutMs = 100) {
     uint32_t start = millis();
     while (!dataReady()) {
         if (millis() - start > timeoutMs) {
-            Serial.println("ERROR: Read timeout");
+            ctx->log->error(getName(), "Read timeout");  // ✅ не Serial.println
             return 0;
         }
         delay(1);
