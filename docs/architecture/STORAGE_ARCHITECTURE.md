@@ -301,20 +301,27 @@ coredump,  data,  coredump, 0x7E0000,  0x10000   #  64 KB
 
 ---
 
-### Option B — Оптимізована (Recommended) ★
+### Option B — Оптимізована (Recommended) ★ — **IMPLEMENTED (Wave 7 P-1)**
 
 Зменшити app slots до реалістичного розміру, звільнивши місце для двох LittleFS partitions.
 
+> **Wave 7 P-1 revision:** адреси змінено для сумісності з PlatformIO esptool.
+> PlatformIO Arduino-ESP32 hardcode-ує `boot_app0.bin → 0xe000` та `firmware → 0x10000`.
+> Оригінала схема (app0=0x20000, otadata=0x18000) приводила до boot failure.
+> NVS зменшено з 60 KB до 20 KB (стандарт); для поточного NVSManager (settings +
+> calibration + meas_count) це більш ніж достатньо. Всі offset-и в active CSV
+> (`partitions/cointrace_8MB.csv`) є остаточними.
+
 ```csv
-# Option B: Optimized — РЕКОМЕНДОВАНА
-nvs,           data,  nvs,      0x9000,    0xF000    #  60 KB
-otadata,       data,  ota,      0x18000,   0x2000    #   8 KB
-# gap 0x1A000–0x20000 = 24 KB (bootloader alignment, cannot use)
-app0,          app,   ota_0,    0x20000,   0x280000  # 2.5 MB (достатньо з запасом)
-app1,          app,   ota_1,    0x2A0000,  0x280000  # 2.5 MB
-littlefs_sys,  data,  spiffs,   0x520000,  0x100000  # 1.0 MB (web UI + configs)
-littlefs_data, data,  spiffs,   0x620000,  0x1C0000  # 1.75 MB (measurements + logs + cache)
-coredump,      data,  coredump, 0x7E0000,  0x20000   # 128 KB (збільшено)
+# Option B: Optimized — РЕКОМЕНДОВАНА (IMPLEMENTED)
+# PlatformIO-compatible: standard ESP32 addresses for esptool
+nvs,           data,  nvs,      0x9000,    0x5000    #  20 KB (standard; достатньо для NVSManager)
+otadata,       data,  ota,      0xe000,    0x2000    #   8 KB (standard 0xe000 = boot_app0.bin)
+app0,          app,   ota_0,    0x10000,   0x280000  # 2.5 MB (standard 0x10000 = firmware upload)
+app1,          app,   ota_1,    0x290000,  0x280000  # 2.5 MB
+littlefs_sys,  data,  spiffs,   0x510000,  0x100000  # 1.0 MB (web UI + configs)
+littlefs_data, data,  spiffs,   0x610000,  0x1C0000  # 1.75 MB (measurements + logs + cache)
+coredump,      data,  coredump, 0x7D0000,  0x30000   # 192 KB (збільшено vs original 128 KB)
 # Flash використано повністю: 0x800000 = 8 MB
 ```
 
@@ -365,20 +372,21 @@ coredump,       data,  coredump, 0x7B0000,  0x40000   # 256 KB
 
 ### 7.1 Розмір та capacity
 
-NVS розміщується на 60 KB (Option B). Фізична ємність:
+NVS розміщується на 20 KB (Option B, Wave 7 revision). Фізична ємність:
 ```
-60 KB / 4 KB page = 15 pages
-NVS використовує 1 overhead page + 1 wear-leveling spare = 13 робочих pages
+20 KB / 4 KB page = 5 pages
+NVS використовує 1 overhead page + 1 wear-leveling spare = 3 робочих pages
 Entries per page: (4096 - 32 header) / 32 = 126 entries
-Total: 13 × 126 = 1638 entries max
-Overhead NVS namespace index: ~5% = ~81 entries
-Net usable: ~1557 entries × 32 B = ~48 KB корисних даних
+Total: 3 × 126 = 378 entries max
+Overhead NVS namespace index: ~5% = ~18 entries
+Net usable: ~360 entries × 32 B = ~11 KB корисних даних
+Достатньо для: wifi(4) + sensor(12) + system(3) + storage(2) + ota(1) + plugin(N) entries
 ```
 
 ### 7.2 Namespace Layout
 
 ```
-NVS (60 KB)
+NVS (20 KB)
 │
 ├── namespace: "wifi"                    # WiFi provisioning
 │   ├── "ssid"      : String (≤32 B)

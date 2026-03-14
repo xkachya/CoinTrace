@@ -12,6 +12,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
 
 /**
  * @brief Minimal persistence interface exposed to plugins via PluginContext.

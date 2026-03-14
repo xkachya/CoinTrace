@@ -15,6 +15,7 @@
 #include "PluginSystem.h"
 #include "PluginContext.h"
 #include "LDC1101Plugin.h"
+#include "NVSManager.h"
 
 // ── Logger globals (ініціалізуються першими в setup()) ────────────
 static Logger              gLogger;
@@ -25,6 +26,7 @@ static RingBufferTransport gRingTransport(100, /*usePsram=*/false);  // ESP32-S3
 static ConfigManager gConfig;
 static PluginSystem  gPluginSystem;
 static PluginContext gCtx;
+static NVSManager    gNVS;
 // Note: LDC1101Plugin is heap-allocated in setup() so PluginSystem::end()
 // can safely call delete (ownership contract — PLUGIN_ARCHITECTURE.md §3.1).
 
@@ -114,7 +116,18 @@ void setup() {
   }
   gCtx.config    = &gConfig;
   gCtx.log       = &gLogger;
-  gCtx.storage   = nullptr;  // Wave 7: NVS/LittleFS StorageManager
+
+  // ── 4b. NVS (Wave 7) ──────────────────────────────────────────
+  // begin() opens all NVS namespaces. Fatal if NVS is unavailable
+  // (indicates flash corruption — device needs reflash).
+  if (gNVS.begin()) {
+    gCtx.storage = &gNVS;
+    gLogger.info("NVS", "Ready — meas_count=%u slot=%u",
+                 gNVS.getMeasCount(), gNVS.getMeasSlot());
+  } else {
+    gCtx.storage = nullptr;  // plugins guard with null-check
+    gLogger.error("NVS", "begin() failed — storage unavailable (flash corruption?)");
+  }
 
   // ── 5. Plugin system ──────────────────────────────────────────
   gPluginSystem.addPlugin(new LDC1101Plugin());  // PluginSystem owns; deletes on end()

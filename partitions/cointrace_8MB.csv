@@ -1,0 +1,38 @@
+# CoinTrace Custom Partition Table - 8MB (PlatformIO-compatible layout)
+# STORAGE_ARCHITECTURE.md section 6, ADR-ST-002 (rev: standard ESP32 addresses)
+#
+# Flash: ESP32-S3FN8 = 8 MB = 0x800000
+#
+# IMPORTANT: changing this file requires full erase_flash before upload.
+#     Without erase: bootloader finds app at old offset -> boot loop.
+#     Command: pio run -e cointrace-dev -t erase
+#
+# Two LittleFS partitions (dual-partition strategy, ADR-ST-002):
+#   littlefs_sys  - web UI, configs (updated by developer via uploadfs)
+#   littlefs_data - measurements, logs, cache (NEVER touched by uploadfs)
+#
+# NOTE: app0 kept at traditional 0x10000 for PlatformIO esptool compatibility.
+#   PlatformIO Arduino-ESP32 hardcodes boot_app0.bin to 0xe000 and firmware to
+#   0x10000 by default. Moving these requires custom upload_flags (complex).
+#   NVS is 20KB (0x5000) - sufficient for settings/calibration/meas_count.
+#
+# Offset layout (hex):
+#   0x000000-0x007FFF  bootloader   32 KB (fixed, not in table)
+#   0x008000-0x008FFF  part table    4 KB (fixed, not in table)
+#   0x009000-0x00DFFF  nvs          20 KB
+#   0x00E000-0x00FFFF  otadata       8 KB (boot_app0.bin, standard address)
+#   0x010000-0x28FFFF  app0          2.5 MB
+#   0x290000-0x50FFFF  app1          2.5 MB
+#   0x510000-0x60FFFF  lfs_sys       1.0 MB
+#   0x610000-0x7CFFFF  lfs_data      1.75 MB
+#   0x7D0000-0x7FFFFF  coredump      192 KB
+#   Total: 0x800000 = 8 MB (OK)
+#
+# Name,          Type,  SubType,   Offset,    Size,    Flags
+nvs,             data,  nvs,       0x9000,    0x5000,
+otadata,         data,  ota,       0xe000,    0x2000,
+app0,            app,   ota_0,     0x10000,   0x280000,
+app1,            app,   ota_1,     0x290000,  0x280000,
+littlefs_sys,    data,  spiffs,    0x510000,  0x100000,
+littlefs_data,   data,  spiffs,    0x610000,  0x1C0000,
+coredump,        data,  coredump,  0x7D0000,  0x30000,

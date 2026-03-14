@@ -192,3 +192,61 @@ if (!status.word.empty()) {
 **Правило:** `keysState()` повертає reference — ніколи не копіювати. Завжди перевіряти `word.empty()` перед `word[0]`.
 
 ---
+
+## 2026-03-15 — PlatformIO: custom partition table boot loop через hardcoded esptool addresses
+
+**Середовище:** ESP32-S3FN8 (8MB Flash), M5Stack Cardputer, PlatformIO espressif32 6.13.0, Arduino framework  
+**Симптом:** Після заливки прошивки з кастомною partition table пристрій не завантажується — boot loop. Serial показує `rst:0x...` і відразу reset без жодного лога з firmware.
+
+**Причина:** PlatformIO при `pio run -t upload` (esptool backend) **hardcode-ує адреси** незалежно від вмісту partition CSV:
+
+| Бінарник         | Hardcoded адреса |
+|------------------|------------------|
+| `bootloader.bin` | `0x0000`         |
+| `partitions.bin` | `0x8000`         |
+| `boot_app0.bin`  | `0xe000`         |
+| `firmware.bin`   | `0x10000`        |
+
+Оригінальна схема мала `otadata @ 0x18000` і `app0 @ 0x20000`. esptool залив `firmware.bin` на `0x10000` (середина NVS/otadata зони), а bootloader шукав app0 на `0x20000` — там порожньо → boot loop.
+
+```
+0x9000  -> nvs        (correct)
+0x10000 -> FIRMWARE   <- esptool always writes here!
+0x18000 -> otadata    (overwritten by firmware)
+0x20000 -> app0       <- bootloader looks here, nothing found -> reset
+```
+
+**Рішення:** Привести partition table до стандартних адрес, які esptool очікує:
+
+```csv
+nvs,     data, nvs,   0x9000,  0x5000   # 20 KB (fits between 0x9000 and 0xe000)
+otadata, data, ota,   0xe000,  0x2000   # standard: esptool writes boot_app0.bin here
+app0,    app,  ota_0, 0x10000, 0x280000 # standard: esptool writes firmware.bin here
+```
+
+`nvs` зменшено з 60 KB до 20 KB — необхідно, щоб помістилось між `0x9000` і `0xe000`. Для NVSManager з ~25 реальними entries це більш ніж достатньо (запас 14x).
+
+**Альтернатива (якщо треба `app0 != 0x10000`):** передати кастомні адреси через `upload_flags` у `platformio.ini`. Але це ламає OTA workflow.
+
+**Де в коді:** `partitions/cointrace_8MB.csv`, `platformio.ini`, `boards/m5cardputer-adv.json`  
+**Правило:** У PlatformIO Arduino-ESP32 завжди тримай `otadata @ 0xe000` і `app0 @ 0x10000`.
+
+---
+
+## 2026-03-15 — PlatformIO: Unicode в partition CSV падає на Windows (cp1252)
+
+**Середовище:** Windows 10/11, PlatformIO, Python cp1252 locale  
+**Симптом:** Build успішний, але `checkprogsize` падає з `UnicodeDecodeError: 'charmap' codec can't decode byte 0x8f`.
+
+**Причина:** PlatformIO читає partition `.csv` через стандартний Python file open без explicit encoding — на Windows це `cp1252`. Символи `⚠️`, `✅`, `—` (em-dash), `§` тощо не входять в cp1252.
+
+**Рішення:** Тільки ASCII в `.csv` файлах партицій. Замінити:
+- `⚠️` → `NOTE:` або `IMPORTANT:`
+- `✅` → `(OK)` або `(verified)`
+- `—` (em-dash) → `-`
+- `§` -> `section`
+
+**Де в коді:** `partitions/cointrace_8MB.csv`  
+**Правило:** partition `.csv` = strict ASCII. Коментарі можна, але тільки 7-bit символи.
+
+---
