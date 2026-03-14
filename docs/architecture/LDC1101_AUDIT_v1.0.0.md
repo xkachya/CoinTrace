@@ -656,10 +656,18 @@ Worst case з LDC1101 + 4 slow plugins (5 ms each):
 | **LA-10** | 🟢 LOW | Architecture | NO_OSC recovery не розрізняє hardware fault від config mismatch. Немає автоматичного RP_SET scan при NO_OSC. | 🔴 Відкрито |
 | **LA-11** | ℹ️ INFO | Physics | Виявлення W-підробок під Au/Ag: δ(W,300kHz)=211µm >> δ(Au)=138µm + σ(W)<<σ(Au) → ΔRP ≈ 53% — легко розрізнимо. Не задокументовано в архітектурі як use case. | ℹ️ Інформаційно |
 | **LA-12** | ℹ️ INFO | Physics | Тонке срібне плакування < δ(Ag,300kHz)=116µm: сигнал частково проходить крізь покриття. Плата товщиною > 116 µm захищена від false positive. Не задокументовано. | ℹ️ Інформаційно |
+| **LA-13** | 🟡 MEDIUM | Implementation | `getHealthStatus()`: бере `dataMutex` з timeout 10 мс — порушує "fast getter" контракт (PLUGIN_CONTRACT §2.5). При health monitoring 10 плагінів → потенційно 100 мс stall. | ✅ CLOSED — хвиля 5 (atomic `staleFlag` в `update()`) |
+| **LA-14** | 🟡 MEDIUM | Architecture | `calibrationRpBaseline = 0.0f` після ребуту → `checkCalibration()` → false → CALIBRATION_NEEDED при кожному старті. Для щоденного використання — реальна проблема UX. | 🔴 Відкрито — prerequisite: `IStorageManager* storage` в `PluginContext` |
+| **LA-15** | 🟡 MEDIUM | Architecture | `COIN_REMOVED` активний 1 цикл `update()` = 20 мс @ 50 Hz. Відсутній polling contract для споживачів — при 10–25 Hz polling систематично пропускається. | ✅ CLOSED — хвиля 5 (polling contract + таблиця в §5.2) |
+| **LA-16** | 🟢 LOW | Implementation | `convTimeMs()` коментар "500 kHz дає більший час" — логічно неправильно. Функція безпечна завдяки +2 ms margin. Edge case: при fSENSOR=118 kHz реальний час 17.4 мс > формула 15 мс. | ✅ CLOSED — хвиля 5 (comment rewrite) |
+| **LA-17** | 🟢 LOW | Architecture | `getCoinState()` — polling only. Відсутній callback/observer API для CoinState переходів. При async UI або CoinAnalyzer task → потенційно пропущені events. | 🔴 Відкрито — backlog v2 (callback API) |
+| **LA-18** | 🟢 LOW | Implementation | RP валідація: лише sentinel 0x0000/0xFFFF. Коди 1..~999 та 60001..65534 фізично неможливі для MIKROE-3240 але проходять перевірку. | 🔴 Відкрито — звузити після R5 hardware даних |
+| **LA-19** | ℹ️ INFO | Implementation | `lastCalibrationTime`: встановлюється в `calibrate()` але ніде не використовується в `checkCalibration()` — dead field без документованого плану. | ✅ CLOSED — хвиля 5 (задокументовано як reserved для NVS age-check, M-2) |
+| **LA-20** | ℹ️ INFO | Architecture | `reconfigureSensor()` — private, без async-захисного коментаря. Виклик з async task конкуруватиме з `update()` без попередження. | ✅ CLOSED — хвиля 5 (захисний коментар додано) |
 
-**Загальний рахунок: 1 CRITICAL · 3 HIGH · 4 MEDIUM · 2 LOW · 2 INFO**  
-**Хвиля 3+4 закрила 6 знахідок: LA-1, LA-2, LA-4, LA-5, LA-7, LA-9**  
-**Залишається відкритими: 0 CRITICAL · 1 HIGH (LA-3) · 2 MEDIUM (LA-6, LA-8) · 1 LOW (LA-10) · 2 INFO**
+**Загальний рахунок: 1 CRITICAL · 3 HIGH · 7 MEDIUM · 5 LOW · 4 INFO** (вкл. 8 знахідок зовнішнього аудиту v1.0.0 від 14 березня 2026)  
+**Хвилі 3+4+5 закрили 11 знахідок: LA-1/LA-2/LA-4/LA-5/LA-7/LA-9 (хв. 3+4); LA-13/LA-15/LA-16/LA-19/LA-20 (хв. 5)**  
+**Залишається відкритими: 0 CRITICAL · 1 HIGH (LA-3) · 3 MEDIUM (LA-6, LA-8, LA-14) · 3 LOW (LA-10, LA-17, LA-18) · 2 INFO (LA-11, LA-12)**
 
 ---
 
@@ -675,11 +683,25 @@ Worst case з LDC1101 + 4 slow plugins (5 ms each):
 
 ~~**R4 (з LA-7):** Додати стале лічильник у `update()`~~ ✅ **ВИКОНАНО** (хвиля 4, `diag.staleCount`)
 
-### Хвиля 5 — до першого підключення real hardware
+### Хвиля 5 — зовнішній аудит LDC1101_ARCHITECTURE v1.1.0 (14 березня 2026)
 
-**R3 (з LA-5):** Додати readback для TC1, TC2 в `configureSensor()`.
+**Джерело:** `docs/external/LDC1101_ARCHITECTURE_AUDIT_2026-03-14.md` (0 CRITICAL · 0 HIGH · 3 MEDIUM · 3 LOW · 2 INFO)
 
-**R4 (з LA-7):** Додати стале лічильник у `update()` — попередити якщо DRDYB=1 > 10 consecutive calls.
+~~**R5-1 (з LA-13):** Прибрати `dataMutex` з `getHealthStatus()` — замінити на atomic `staleFlag`~~ ✅ **ВИКОНАНО** (хвиля 5)
+
+~~**R5-2 (з LA-15):** Додати polling contract для `COIN_REMOVED` в §5.2~~ ✅ **ВИКОНАНО** (хвиля 5)
+
+~~**R5-3 (з LA-16):** Виправити логічну помилку в коментарі `convTimeMs()`~~ ✅ **ВИКОНАНО** (хвиля 5)
+
+~~**R5-4 (з LA-19):** Задокументувати `lastCalibrationTime` як reserved для NVS age-check~~ ✅ **ВИКОНАНО** (хвиля 5)
+
+~~**R5-5 (з LA-20):** Додати async-захисний коментар до `reconfigureSensor()`~~ ✅ **ВИКОНАНО** (хвиля 5)
+
+**R5-6 (з LA-14):** Зберігати `calibrationRpBaseline` в NVS. **PREREQUISITE:** `IStorageManager* storage` в `PluginContext` (STORAGE_ARCHITECTURE).
+
+**R5-7 (з LA-17):** Callback API для CoinState переходів — `setCoinStateCallback()`. Backlog v2.
+
+**R5-8 (з LA-18):** Розширена RP валідація після калібрування. Виконати після hardware даних.
 
 ### Хвиля 6 — до першого fingerprint collection
 
@@ -744,6 +766,6 @@ Worst case з LDC1101 + 4 slow plugins (5 ms each):
 
 *Документ підготовлено як незалежний технічний аудит.*  
 *Версія: 1.0.0 | Дата: 14 березня 2026*  
-*Оновлено: хвиля 4 — 14 березня 2026 — LA-1/LA-2/LA-4/LA-5/LA-7/LA-9 CLOSED*  
+*Оновлено: хвиля 4 — 14 березня 2026 — LA-1/LA-2/LA-4/LA-5/LA-7/LA-9 CLOSED; хвиля 5 — 14 березня 2026 — LA-13/LA-15/LA-16/LA-19/LA-20 CLOSED (зовнішній аудит v1.0.0)*  
 *Джерела: TI LDC1101 SNOSD01D, MikroE SDK ldc1101.c (2026-03-13), CRC Handbook*  
 *12 симуляцій та аналітичних моделей; без вимірювань на реальному пристрої*

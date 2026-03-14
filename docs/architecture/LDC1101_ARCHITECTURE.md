@@ -1,8 +1,8 @@
 # LDC1101 в системі плагінів CoinTrace: Архітектурний аналіз
 
 **Тип документа:** Технічний аналіз та специфікація реалізації  
-**Версія:** 1.1.0  
-**Дата:** 14 березня 2026 (оновлено: ADR-COIN-001 — детекція монети dual-threshold hysteresis; §5.2 + симуляції; `CoinState` enum; `updateCoinState()`; конфіг §7)  
+**Версія:** 1.2.0  
+**Дата:** 14 березня 2026 (оновлено: хвиля 5 — M-1: `staleFlag` без mutex в `getHealthStatus()`; M-3: polling contract `COIN_REMOVED`; L-1: `convTimeMs()` comment; I-1: `lastCalibrationTime` documented; I-2: `reconfigureSensor()` async comment)  
 **Статус:** Готовий до імплементації  
 **Джерело:** Texas Instruments LDC1101 Datasheet SNOSD01D (May 2015 – Revised October 2016)
 
@@ -330,6 +330,16 @@ updateCoinState(rpRaw):
 
 **`COIN_REMOVED` — навіщо:** UI отримує явний перехідний сигнал після зняття монети (один цикл `update()`). Система може завершити анімацію або підтвердити збереження результату. Без цього стану момент зняття монети непомітний вищому рівню.
 
+> ⚠️ **Polling contract (M-3):** `COIN_REMOVED` активний рівно **1 цикл `update()` = 20 мс @ 50 Hz**. Споживач (`CoinAnalyzer`, UI task) зобов'язаний опитувати `getCoinState()` з частотою ≥ частоти `update()` (мінімум 50 Hz) щоб гарантовано перехопити цей стан.
+>
+> | Polling rate споживача | P(побачити `COIN_REMOVED`) |
+> |---|---|
+> | 50 Hz (= update rate) | 100% ✅ |
+> | 25 Hz | ~50% ⚠️ |
+> | 10 Hz | ~20% ⚠️ |
+>
+> Callback альтернатива: `setCoinStateCallback()` (backlog, LA-17).
+
 #### Симуляція: threshold coverage по металах
 
 Відносний RP @ різних відстанях від котушки MIKROE-3240 (fSENSOR ≈ 300 kHz, baseline = B):
@@ -506,7 +516,8 @@ private:
     } diag;
 
     float    calibrationRpBaseline = 0.0f;
-    uint32_t lastCalibrationTime   = 0;
+    uint32_t lastCalibrationTime   = 0;    // ⚑ Reserved: NVS age-check при завантаженні baseline (M-2)
+    bool     staleFlag             = false; // Атомарний stale-індикатор: set/clear в update(), read в getHealthStatus() без mutex (M-1)
 
     // ── Coin detection config (ADR-COIN-001) ─────────────────────────
     float   coinDetectThreshold  = 0.85f;  // DETECT:  RP < baseline × factor
@@ -636,6 +647,11 @@ public:
     void update() override {
         if (!ready) return;
 
+        // Stale detection (M-1): set atomically тут — читається в getHealthStatus() без mutex
+        if (cached.valid && (millis() - cached.timestamp > 5000)) {
+            staleFlag = true;
+        }
+
         uint8_t status = spiRead(REG_STATUS);
 
         if (status & STATUS_NO_OSC) {
@@ -682,6 +698,7 @@ public:
         cached.valid     = true;
         xSemaphoreGive(dataMutex);
 
+        staleFlag        = false;  // M-1: нові дані отримано — скидаємо
         diag.staleCount  = 0;
         diag.totalReads++;
         diag.lastSuccess = millis();
@@ -746,11 +763,8 @@ public:
         if (!enabled) return HealthStatus::DISABLED;
         if (!ready)   return HealthStatus::INITIALIZATION_FAILED;
 
-        if (dataMutex && xSemaphoreTake(dataMutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-            bool stale = cached.valid && (millis() - cached.timestamp > 5000);
-            xSemaphoreGive(dataMutex);
-            if (stale) return HealthStatus::TIMEOUT;
-        }
+        // M-1: staleFlag оновлюється в update() — читаємо без mutex (bool = 1 байт, атомарний на Xtensa LX7)
+        if (staleFlag) return HealthStatus::TIMEOUT;
 
         // Поріг > 10 щоб виявити ранні систематичні відмови
         if (diag.totalReads > 10) {
@@ -1039,6 +1053,8 @@ private:
 
     // ── Реконфігурація без повної ре-ініціалізації ────────────────────
     // Дозволяє змінити RESP_TIME або RP_SET в рантаймі.
+    // ⚠️ Strategy A only — без mutex захисту (I-2).
+    //    Виклик з async task потребує: spiMutex.take → SLEEP → configure → ACTIVE → spiMutex.give
 
     bool reconfigureSensor() {
         spiWrite(REG_START_CONFIG, FUNC_MODE_SLEEP);
@@ -1096,9 +1112,11 @@ private:
     }
 
     // ── Розрахунок часу конверсії (мс) ───────────────────────────────
-    // Консервативна оцінка (завищена): 500 kHz дає більший час ніж реальний worst case.
-    // Реальний worst case при MIN_FREQ=118 kHz: fSENSOR ≈ 200 kHz → ~10.24 мс @ RESP=6144.
-    // Функція повертає ~15 мс — безпечно (дані готові до зчитування). LA-9.
+    // Формула: ceiling(cycles / 500kHz) + 2 мс margin. LA-9.
+    // ВАЖЛИВО: 500 kHz у знаменнику дає МЕНШИЙ час ніж нижчий реальний fSENSOR.
+    // Функція безпечна завдяки +2 мс margin (перекриває різницю при fSENSOR ≥ 200 kHz). (L-1)
+    // Edge case: при fSENSOR=118 kHz (мін. MIN_FREQ) реальний час 17.4 мс > формула 15 мс;
+    //   для MIKROE-3240 fSENSOR ≈ 200–300 kHz — формула достатньо консервативна.
     // Значення для Reserved індексів 0,1 встановлені як 192 — safe fallback.
 
     uint32_t convTimeMs() const {
