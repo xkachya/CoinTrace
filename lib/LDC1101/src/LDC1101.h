@@ -1,13 +1,14 @@
-// LDC1101.h - Texas Instruments LDC1101 Inductive Sensor Driver
-// Part of CoinTrace - Open Source Inductive Coin Analyzer
+// LDC1101.h — DEPRECATED
+// CoinTrace — Open Source Inductive Coin Analyzer
 // License: GPL v3
-// Repository: https://github.com/xkachya/CoinTrace
+//
+// ⚠ This placeholder was written for I2C which is WRONG.
+//   LDC1101 uses 4-wire SPI (MODE0, MSBFIRST, 4 MHz).
+//   See lib/LDC1101Plugin/src/LDC1101Plugin.h for the correct driver.
 
-#ifndef LDC1101_H
-#define LDC1101_H
-
-#include <Arduino.h>
-#include <Wire.h>
+#pragma once
+// Nothing defined here — use LDC1101Plugin.h
+#if 0
 
 // LDC1101 I2C default address
 #define LDC1101_I2C_DEFAULT_ADDR 0x2A
@@ -103,4 +104,5 @@ private:
   uint16_t readRegister16(uint8_t reg_msb);
 };
 
-#endif // LDC1101_H
+#endif // 0 — deprecated guard
+// End of deprecated stub

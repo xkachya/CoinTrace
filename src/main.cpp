@@ -5,15 +5,28 @@
 
 #include <Arduino.h>
 #include <M5Cardputer.h>
+#include <Wire.h>
+#include <SPI.h>
 #include "Logger.h"
 #include "SerialTransport.h"
 #include "RingBufferTransport.h"
 #include "logger_macros.h"
+#include "ConfigManager.h"
+#include "PluginSystem.h"
+#include "PluginContext.h"
+#include "LDC1101Plugin.h"
 
 // ── Logger globals (ініціалізуються першими в setup()) ────────────
 static Logger              gLogger;
 static SerialTransport     gSerialTransport(Serial, SerialTransport::Format::TEXT, 115200);
 static RingBufferTransport gRingTransport(100, /*usePsram=*/false);  // ESP32-S3FN8: NO PSRAM (LA-1)
+
+// ── Plugin system globals ────────────────────────────────────────
+static ConfigManager gConfig;
+static PluginSystem  gPluginSystem;
+static PluginContext gCtx;
+// Note: LDC1101Plugin is heap-allocated in setup() so PluginSystem::end()
+// can safely call delete (ownership contract — PLUGIN_ARCHITECTURE.md §3.1).
 
 // Display CoinTrace version and configuration on startup
 void displayStartupInfo() {
@@ -49,10 +62,7 @@ void displayStartupInfo() {
   #endif
   
   #ifdef LDC1101_ENABLED
-  M5Cardputer.Display.println("- LDC1101 sensor");
-  M5Cardputer.Display.print("  Frequency: ");
-  M5Cardputer.Display.print(SINGLE_FREQUENCY / 1000000);
-  M5Cardputer.Display.println(" MHz");
+  M5Cardputer.Display.println("- LDC1101 (SPI)");
   #endif
   
   M5Cardputer.Display.println();
@@ -83,19 +93,35 @@ void setup() {
                (unsigned int)(ESP.getPsramSize() / 1024 / 1024));
   LOG_DEBUG(&gLogger, "System", "Flash: %u MB",
             (unsigned int)(ESP.getFlashChipSize() / 1024 / 1024));
-  LOG_DEBUG(&gLogger, "LDC1101", "I2C SDA=%d SCL=%d addr=0x%02X freq=%dHz steps=%d",
-            LDC1101_I2C_SDA, LDC1101_I2C_SCL, LDC1101_I2C_ADDR,
-            SINGLE_FREQUENCY, DISTANCE_STEPS);
-
   // ── 2. Display startup screen ────────────────────────────────
   displayStartupInfo();
 
-  // ── 3. TODO: Hardware init (SPI/I2C + plugin context) ────────
-  // SPI.begin(...);
-  // Wire.begin(LDC1101_I2C_SDA, LDC1101_I2C_SCL);
-  // ctx.log = &gLogger; ctx.spiMutex = xSemaphoreCreateMutex();
+  // ── 3. Hardware buses ─────────────────────────────────────────
+  // VSPI: SCK=GPIO40, MISO=GPIO39, MOSI=GPIO14
+  SPI.begin(40, 39, 14);
+  // Grove I2C: SDA=GPIO2, SCL=GPIO1 (available for future sensors)
+  Wire.begin(2, 1);
 
-  gLogger.info("System", "CoinTrace ready");
+  // ── 4. Plugin context ─────────────────────────────────────────
+  gCtx.spi       = &SPI;
+  gCtx.spiMutex  = xSemaphoreCreateMutex();
+  gCtx.wire      = &Wire;
+  gCtx.wireMutex = xSemaphoreCreateMutex();
+  // PLUGIN_CONTRACT.md §1.3: mutexes must be non-null before begin()
+  if (!gCtx.spiMutex || !gCtx.wireMutex) {
+    gLogger.error("System", "FATAL: mutex creation failed — insufficient heap");
+    while (true) { delay(1000); }  // halt: no safe recovery without synchronisation
+  }
+  gCtx.config    = &gConfig;
+  gCtx.log       = &gLogger;
+  gCtx.storage   = nullptr;  // Wave 7: NVS/LittleFS StorageManager
+
+  // ── 5. Plugin system ──────────────────────────────────────────
+  gPluginSystem.addPlugin(new LDC1101Plugin());  // PluginSystem owns; deletes on end()
+  gPluginSystem.begin(&gCtx);  // calls canInitialize() → initialize() for each plugin
+
+  gLogger.info("System", "CoinTrace ready — %d/%d plugins initialised",
+               gPluginSystem.readyCount(), gPluginSystem.pluginCount());
 }
 
 void loop() {
@@ -124,10 +150,8 @@ void loop() {
     }
   }
   
-  // TODO: Main CoinTrace measurement loop
-  // - Read LDC1101 sensor data
-  // - Process k1/k2 algorithm
-  // - Display results on screen
-  
+  // Plugin update loop (runs all enabled plugins, ≤ 10 ms each)
+  gPluginSystem.update();
+
   delay(10);
 }

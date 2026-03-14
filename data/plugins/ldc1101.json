@@ -1,0 +1,12 @@
+{
+  "name": "LDC1101",
+  "enabled": true,
+  "spi_cs_pin": 5,
+  "resp_time_bits": 7,
+  "rp_set": 38,
+  "clkin_freq_hz": 16000000,
+  "coin_detect_threshold": 0.85,
+  "coin_release_threshold": 0.92,
+  "detect_debounce_n": 5,
+  "release_debounce_m": 3
+}

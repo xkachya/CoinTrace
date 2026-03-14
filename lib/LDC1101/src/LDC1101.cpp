@@ -1,9 +1,11 @@
-// LDC1101.cpp - Texas Instruments LDC1101 Inductive Sensor Driver Implementation
-// Part of CoinTrace - Open Source Inductive Coin Analyzer
+// LDC1101.cpp — DEPRECATED
+// CoinTrace — Open Source Inductive Coin Analyzer
 // License: GPL v3
-// Repository: https://github.com/xkachya/CoinTrace
+//
+// ⚠ This file is intentionally empty.
+//   LDC1101 uses 4-wire SPI. See lib/LDC1101Plugin/src/LDC1101Plugin.h.
 
-#include "LDC1101.h"
+// (No implementation — class removed. Compiler produces empty translation unit.)
 
 LDC1101::LDC1101(uint8_t i2c_addr) : _i2c_addr(i2c_addr), _frequency(0) {
   // Constructor

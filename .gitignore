@@ -125,3 +125,7 @@ build/
 # Compiled firmware
 firmware/
 memory_usage.txt
+
+# Temporary CLI output files
+build_output.txt
+test_output.txt

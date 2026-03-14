@@ -1,0 +1,21 @@
+{
+  "name": "LDC1101Plugin",
+  "version": "1.0.0",
+  "description": "LDC1101 Inductive Sensor Plugin for CoinTrace (SPI, ISensorPlugin + IDiagnosticPlugin)",
+  "keywords": ["ldc1101", "inductive", "sensor", "coin", "metal", "spi"],
+  "authors": [
+    {
+      "name": "CoinTrace Community",
+      "url": "https://github.com/xkachya/CoinTrace"
+    }
+  ],
+  "license": "GPL-3.0",
+  "homepage": "https://github.com/xkachya/CoinTrace",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xkachya/CoinTrace.git"
+  },
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"],
+  "headers": "LDC1101Plugin.h"
+}
