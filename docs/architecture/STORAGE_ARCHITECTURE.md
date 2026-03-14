@@ -1,8 +1,8 @@
 # Storage Architecture — CoinTrace™
 
-**Статус:** ✅ Accepted v1.5.0 — [PRE-1]..[PRE-8] вирішено; Variant A (2×200KB logs), ID validation, mutex scope, GPIO0 boot, Soft Reset semantics, coredump filename, open-once pattern, ADR-ST-009: MeasurementStore SD archive copy-before-overwrite  
-**Версія:** 1.5.0  
-**Дата:** 2026-03-13  
+**Статус:** ✅ Accepted v1.6.0 — [PRE-1]..[PRE-8] вирішено; [F-05] protocol_id placeholder виправлено; P-1 Acceptance Criteria додано; §18 Factory Reset to Stock Firmware додано  
+**Версія:** 1.6.0  
+**Дата:** 2026-03-14  
 **Автор:** Yuriy Kachmaryk
 
 > ⚠️ **КРИТИЧНО:** Рішення щодо partition layout та NVS namespace structure неможливо змінити після
@@ -398,7 +398,10 @@ NVS (60 KB)
 │   ├── "freq_hz"   : UInt32  # Operating frequency (default 5000000)
 │   ├── "cal_ts"    : Int64   # Unix timestamp last calibration
 │   ├── "cal_valid" : Bool    # Calibration passed validation
-│   └── "proto_id"  : String  # Protocol ID під час калібрування (наприклад "p1_1mhz_013mm")
+│   └── "proto_id"  : String  # Protocol ID під час калібрування
+                             # ⚠️ [F-05] Значення буде визначено після R-01 (перше вимірювання).
+                             # Реальний fSENSOR MIKROE-3240 ≈ 200–500 kHz (залежить від котушки),
+                             # НЕ 1 MHz і НЕ 5 MHz. Placeholder: "p1_UNKNOWN_013mm".
 │
 ├── namespace: "system"                  # User-facing settings
 │   ├── "brightness": UInt8   (0–255, default 128)
@@ -536,7 +539,7 @@ private:
 {
   "schema_ver": 1,
   "algo_ver": 1,
-  "protocol_id": "p1_1mhz_013mm",
+  "protocol_id": "p1_UNKNOWN_013mm",
   "protocol_ver": "1.0",
   "device_id": "CoinTrace-A1B2",
   "ts": 1741780000,
@@ -961,11 +964,16 @@ esptool. Буде переглянуто перед production release.
 {
   "schema_ver": 1,
   "algo_ver": 1,
-  "protocol_id": "p1_1mhz_013mm",
+  "protocol_id": "p1_UNKNOWN_013mm",
   "protocol_ver": "1.0",
   "cal_ts": 1741779000
 }
 ```
+> ⚠️ **[F-05]** `protocol_id` буде уточнено після R-01 (перше реальне вимірювання з MIKROE-3240).
+> Реальний fSENSOR ≈ 200–500 kHz, значно менше за 1 MHz. Placeholder `"p1_UNKNOWN_013mm"`
+> запобігає помилковому внеску у community DB до підтвердження частоти.
+> Cross-ref: FINGERPRINT_DB_ARCHITECTURE.md §7 (Frozen physical constants).
+
 Без цих полів файл вважається invalid та ігнорується при community submission.
 
 ---
@@ -1287,9 +1295,37 @@ Hard Reset = повне відновлення заводського стану
 | Артефакт | Що робить | Пріоритет |
 |---|---|---|
 | **Fix B-01** | `usePsram=false` у `main.cpp` | URGENT |
-| `partitions/cointrace_8MB.csv` | Кастомна partition table (Option B або A) | P-1 |
+| `partitions/cointrace_8MB.csv` | Кастомна partition table (Option B) | P-1 |
 | `boards/m5cardputer-adv.json` update | `"partitions": "cointrace_8MB.csv"` | P-1 |
 | `platformio.ini` update | `board_build.filesystem = littlefs` | P-1 |
+
+> ⚠️ **Критична пастка при першому flash:** зміна partition table **вимагає** повного `erase_flash`
+> перед upload. Без нього bootloader знаходить app0 за старим offset → boot loop.
+>
+> Правильна послідовність (один раз при зміні partition table):
+> ```
+> esptool.py --chip esp32s3 erase_flash
+> pio run -t upload          # firmware
+> pio run -t uploadfs        # LittleFS sys
+> ```
+
+#### P-1 Acceptance Criteria
+
+Фаза P-1 вважається завершеною коли виконані **всі** перевірки:
+
+- [ ] Partition table flashed without boot loop
+- [ ] `NVSManager::begin()` returns true (Serial log: `NVS: all namespaces open`)
+- [ ] NVS round-trip: `putString("test","ok")` → reboot → `getString("test")` == "ok"
+- [ ] `LittleFSManager::mountSys()` success → file `/sys/config/device.json` readable
+- [ ] `LittleFSManager::mountData()` success → can create and read `/data/test.txt`
+- [ ] `SDCardManager::tryMount()` — graceful DEGRADED log if no SD card present
+- [ ] `SDCardManager::tryMount()` with card → can create file on SD
+- [ ] `meas_count` persists across reboot (NVS write → power off → boot → same value)
+- [ ] Sensor calibration data persists across reboot
+- [ ] `pio run -t uploadfs -e fs-sys` does **not** destroy LittleFS_data content
+- [ ] Soft Reset: WiFi erased, calibration preserved
+- [ ] Hard Reset: everything erased, device boots cleanly to defaults
+- [ ] GPIO0 held at boot: LittleFS_data formatted, device restarts
 
 ### Фаза P-2: NVS Layer
 
@@ -1364,6 +1400,84 @@ Hard Reset = повне відновлення заводського стану
 *Версія 1.4.0 — [F-02] RING_SIZE 300→250: LittleFS margin 3%→14%; [F-03] ADR-ST-005 timeout text 100→500ms; [F-04] Wire.begin(SDA=GPIO8, SCL=GPIO9) у boot sequence [2.3]; [F-05] §12.1 SDTransport Модель S — не в Logger dispatch chain; [F-06] CRC32 spec: /data/cache/index_crc32.bin (4B little-endian uint32_t).*  
 *Версія 1.4.1 — [FDB-05 Variant G] sd_generation.bin у §8.2 cache tree; boot [7a] generation staleness check після CRC32; buildCache() зберігає sd_generation.bin.*  
 *Наступний крок: реалізувати P-1 (partition table + NVSManager)*
+
+---
+
+## 18. Повернення до заводської прошивки M5Stack (Factory Restore)
+
+> **Чому цей розділ потрібен:** CoinTrace вносить незворотні зміни в flash (partition table, NVS, LittleFS).
+> Без цієї процедури користувач, який хоче повернути Cardputer-Adv до оригінального стану, 
+> потрапляється з пристроєм у невідомому стані. Відновлення завжди можливе і займає ~5 хвилин.
+
+### 18.1 Що змінюється після встановки CoinTrace
+
+| Компонент | Заводське | CoinTrace | Зворотність |
+|---|---|---|---|
+| Partition table | `default_8MB.csv` | `cointrace_8MB.csv` (Option B) | Тільки через `erase_flash` |
+| NVS content | M5Stack WiFi/UIFlow data | CoinTrace namespaces (wifi, sensor, system) | Через `nvs_flash_erase()` або `erase_flash` |
+| LittleFS/SPIFFS | M5Stack demo assets / UIFlow | CoinTrace web UI + plugin config | Через format або `erase_flash` |
+| Firmware | M5Stack User Demo / UIFlow2 | CoinTrace firmware | Перезаписується при flash |
+| SD карта | Не змінюється | CoinTrace measurements/DB | Відформатувати окремо на ПК |
+
+### 18.2 Метод A — M5Burner (рекомендовано, без командного рядка)
+
+```
+1. Завантажити M5Burner: https://docs.m5stack.com/en/uiflow/m5burner/intro
+2. Перевести Cardputer-Adv у Download Mode:
+   a) Вимкнути (перемикач збоку → OFF)
+   b) Натиснути та ТРИМАТИ кнопку G0
+   c) Увімкнути (перемикач → ON)
+   d) Відпустити G0 — екран порожній (нормально)
+3. Підключити USB-C кабель
+4. У M5Burner: категорія Cardputer-Adv → "Цardputer-Adv User Demo" → Burn
+   M5Burner виконує erase_flash автоматично
+5. Після завершення: пристрій у тому самому стані що і з коробки
+```
+
+### 18.3 Метод B — esptool.py (повний контроль, командний рядок)
+
+```bash
+# Перенести в Download Mode (див. метод A крок 2), потім:
+
+# Повне стирання flash (ОБОВ'ЯЗКОВО при зміні partition table)
+esptool.py --chip esp32s3 --port COM3 erase_flash
+# Windows: COM3, Linux/macOS: /dev/ttyACM0 або /dev/tty.usbmodem*
+
+# Прошивка заводської firmware (.bin з M5Burner або GitHub Releases)
+esptool.py --chip esp32s3 --port COM3 --baud 1500000 \
+  write_flash 0x0 Cardputer-Adv-UserDemo.bin
+
+# Вимкнути → увімкнути (без G0)
+```
+
+### 18.4 Метод C — Web Flasher (без встановлення ПЗ)
+
+```
+1. Відкрити Chrome або Edge (WebSerial API недоступний в Firefox)
+   https://web.esphome.io/ або https://adafruit.github.io/Adafruit_WebSerial_ESPTool/
+2. Перенести в Download Mode
+3. Connect → обрати serial port → занти .bin заводської firmware
+4. Flash address: 0x0 → Program
+```
+
+### 18.5 SD карта
+
+Procedures above do **not** touch the SD card. If needed, format it separately on a PC (FAT32).
+
+### 18.6 Предуповедження для користувачів (README.md)
+
+> CoinTrace replaces the factory firmware and flash partition layout.
+> **Restoring to factory state is always possible** and takes ~5 minutes.
+>
+> Before installing CoinTrace:
+> - If you use UIFlow2 — export your projects
+>
+> To restore to stock firmware at any time:
+> - You need: a USB-C cable and M5Burner (free, https://docs.m5stack.com/en/uiflow/m5burner/intro)
+> - Full instructions: `docs/architecture/STORAGE_ARCHITECTURE.md §18`
+
+*Версія 1.5.1 — [F-05] protocol_id плейсхолдер "p1_UNKNOWN_013mm"; P-1 Acceptance Criteria в §15; §18 Factory Restore додано.*
+*Версія 1.6.0 — [AUDIT-2026-03-14] F-05/F-01–F-08 опрацьовано.*
 
 ---
 

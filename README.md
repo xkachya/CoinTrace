@@ -175,6 +175,11 @@ Want to customize CoinTrace firmware or contribute code?
 
 **Beginner-friendly:** Never coded before? The guide walks you through everything step-by-step.
 
+> ⚠️ **CoinTrace replaces the factory firmware and flash partition layout.**
+> Restoring to stock M5Stack firmware is always possible and takes ~5 minutes using
+> [M5Burner](https://docs.m5stack.com/en/uiflow/m5burner/intro) (free, no command line needed).
+> Full restore instructions: [STORAGE_ARCHITECTURE.md §18](docs/architecture/STORAGE_ARCHITECTURE.md)
+
 ---
 
 ### Quick Start (Advanced Users)
