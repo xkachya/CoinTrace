@@ -6,7 +6,7 @@
 class RingBufferTransport : public ILogTransport {
 public:
     explicit RingBufferTransport(uint16_t capacity = 100,
-                                  bool     usePsram  = true);
+                                  bool     usePsram  = false);  // ESP32-S3FN8: no external PSRAM (LA-1)
     ~RingBufferTransport();
 
     // Allocates buffer (PSRAM preferred) and creates internal mutex.

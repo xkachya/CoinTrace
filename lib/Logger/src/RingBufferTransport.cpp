@@ -21,8 +21,8 @@ bool RingBufferTransport::begin() {
     mutex_ = xSemaphoreCreateMutex();
     if (!mutex_) return false;
 
-    // Спробувати PSRAM (8 MB на M5Cardputer-Adv), fallback на heap.
-    // capacity=100, sizeof(LogEntry)=217 → ~21 KB — добре поміщається в PSRAM.
+    // Спробувати PSRAM (якщо usePsram=true і psramFound()), fallback на heap.
+    // capacity=100, sizeof(LogEntry)=220 → ~21.5 KB — добре поміщається в PSRAM.
     if (usePsram_ && psramFound()) {
         buffer_ = static_cast<LogEntry*>(ps_malloc(capacity_ * sizeof(LogEntry)));
     }

@@ -3,8 +3,9 @@
 #include "LogLevel.h"
 
 // Fixed-size struct — no heap allocation in RingBuffer.
-// Size: 4 + 1 + 20 + 192 = 217 bytes.
-// RingBufferTransport(100) = ~21 KB — use PSRAM on ESP32-S3.
+// sizeof(LogEntry) = 220 bytes: 4+1+20+192 = 217 natural + 3 tail padding (GCC Xtensa ABI) (LA-4).
+// RingBufferTransport(100) = 220 × 100 = 22 000 bytes ≈ 21.5 KB.
+// ESP32-S3FN8: no external PSRAM — use RingBufferTransport(100, /*usePsram=*/false) (LA-1).
 struct LogEntry {
     uint32_t timestampMs;
     LogLevel level;
