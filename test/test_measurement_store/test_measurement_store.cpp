@@ -148,10 +148,10 @@ void test_sentinel_string_rejected(void) {
 void test_sentinel_valid_accepted(void) {
     // Correctly formed file: "complete": true at end.
     JsonDocument doc;
-    doc["ts"]         = 100;
-    doc["device_id"]  = "CoinTrace-AABB";
-    doc["protocol"]   = "p1_UNKNOWN_013mm";
-    doc["pos_count"]  = 1;
+    doc["ts"]          = 100;
+    doc["device_id"]   = "CoinTrace-AABB";
+    doc["protocol_id"] = "p1_UNKNOWN_013mm";
+    doc["pos_count"]   = 1;
     doc["rp"][0]      = 5000.0f;
     doc["complete"]   = true;  // sentinel written last
 

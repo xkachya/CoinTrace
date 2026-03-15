@@ -268,6 +268,7 @@ Pre-P-1 Acceptance Criteria специфіковані в STORAGE_ARCHITECTURE.m
 |---|---|---|---|
 | **FUTURE-7** | v1.2.0 M7-L3 | `RING_SIZE` зміна між версіями = out-of-bounds slot; не задокументовано як immutable | ADR-ST-006: `RING_SIZE = immutable post-v1`; зміна = major version bump з migration guide |
 | **FUTURE-8** | v1.2.0 M7-L3 | OTA rollback + `schema_ver` compatibility matrix не специфікована | ADR-ST-007: rollback firmware MUST читати всі `schema_ver ≤ current`; підвищення = окремий compatibility ADR |
+| **EXT-FUTURE-7** | P-3 Cleanup 2026-03-15 | P-3 "Phase 1" schema — flat `rp[]`/`l[]`/`metal_code` без `schema_ver`, `algo_ver`, `protocol_ver`, `cal_ts`, nested `raw`/`vector`/`match` (SR-15) — не задокументована як офіційна проміжна версія. Також: поле `"protocol"` виправлено на `"protocol_id"` (P-3 Cleanup) | P-5 migration strategy: `doc["schema_ver"] \| 0 == 0` → Phase-1 reader (flat format, немає `vector`); `schema_ver == 1` → full §8.3 format. SR-15 compliance (algo_ver, protocol_ver, cal_ts) — обов'язкові до першого community DB submission |
 
 ---
 

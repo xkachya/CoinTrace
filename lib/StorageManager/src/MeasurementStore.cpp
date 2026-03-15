@@ -64,11 +64,11 @@ bool MeasurementStore::save(const Measurement& m) {
     // Key insertion order is preserved by ArduinoJson (linked list).
     // "complete" is added LAST — sentinel invariant (ADR-ST-006 / A-03).
     JsonDocument doc;
-    doc["ts"]         = m.ts;
-    doc["device_id"]  = deviceId_;
-    doc["protocol"]   = "p1_UNKNOWN_013mm";  // [F-05] real fSENSOR TBD at R-01
+    doc["ts"]          = m.ts;
+    doc["device_id"]   = deviceId_;
+    doc["protocol_id"] = "p1_UNKNOWN_013mm";  // [F-05] real fSENSOR TBD at R-01
 
-    doc["pos_count"]  = m.pos_count;
+    doc["pos_count"]   = m.pos_count;
 
     JsonArray rpArr = doc["rp"].to<JsonArray>();
     JsonArray lArr  = doc["l"].to<JsonArray>();
