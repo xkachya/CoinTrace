@@ -1,0 +1,378 @@
+# Debugging Guide — CoinTrace Firmware
+
+**Applies to:** CoinTrace firmware, M5Stack Cardputer-Adv (ESP32-S3FN8), Windows  
+**Cross-ref:** `docs/guides/development-setup.md`, `docs/guides/UPLOADFS_GUIDE.md`
+
+---
+
+## Quick Reference
+
+```powershell
+# Capture full boot log with hardware reset (recommended)
+$ser = New-Object System.IO.Ports.SerialPort "COM3",115200,"None",8,"One"
+$ser.Open()
+$ser.RtsEnable = $true ; $ser.DtrEnable = $true ; Start-Sleep -Milliseconds 200
+$ser.RtsEnable = $false; $ser.DtrEnable = $false; Start-Sleep -Milliseconds 3500
+$ser.ReadExisting() ; $ser.Close()
+
+# Live monitor (Ctrl+C to exit)
+pio device monitor -e cointrace-dev
+
+# Build only (no upload)
+pio run -e cointrace-dev
+
+# Upload firmware
+pio run -e cointrace-dev -t upload
+
+# Upload sys partition (web UI + configs)
+pio run -e uploadfs-sys -t uploadfs
+```
+
+---
+
+## 1. Getting the Boot Log
+
+The most important debugging tool is the UART boot log on COM3 at 115200 baud.
+
+### Option A — PowerShell hardware reset (recommended)
+
+Triggers a clean hardware reset via RTS/DTR and captures the full boot sequence,
+including the ESP-ROM bootloader and all `[Nms]` log lines:
+
+```powershell
+$ser = New-Object System.IO.Ports.SerialPort "COM3",115200,"None",8,"One"
+$ser.Open()
+# Assert reset: pull RTS+DTR high, then release
+$ser.RtsEnable = $true ; $ser.DtrEnable = $true ; Start-Sleep -Milliseconds 200
+$ser.RtsEnable = $false; $ser.DtrEnable = $false
+# Wait for boot to complete (firmware takes ~800 ms to reach "ready")
+Start-Sleep -Milliseconds 3500
+$log = $ser.ReadExisting()
+$ser.Close()
+Write-Output $log
+```
+
+**Expected output on a healthy device:**
+```
+ESP-ROM:esp32s3-20210327
+rst:0x15 (USB_UART_CHIP_RESET),boot:0xb (SPI_FAST_FLASH_BOOT)
+...
+[673ms] INFO  System         | CoinTrace 1.0.0-dev starting
+[673ms] INFO  System         | CPU: 240 MHz | Heap: 332944 B | PSRAM: 0 MB
+[699ms] INFO  NVS            | Ready — meas_count=0 slot=0
+[722ms] INFO  LFS            | sys mounted — free: 976 KB
+[733ms] INFO  LFS            | /sys/config/device.json found
+[768ms] INFO  LFS            | data mounted — free: 1720 KB
+[774ms] INFO  System         | CoinTrace ready — 0/1 plugins initialised
+```
+
+**Tuning the capture window:** if your boot takes longer (SD mount, large cache build),
+increase the `Start-Sleep -Milliseconds 3500` value. 5000–8000 ms is safe for first boot.
+
+---
+
+### Option B — PlatformIO monitor (interactive, live)
+
+```powershell
+pio device monitor -e cointrace-dev
+```
+
+Shows log output in real-time. Does **not** reset the device — you see output only from
+the moment you connect. To get the full boot log: press the physical reset button
+(or power-cycle) while the monitor is running.
+
+Press `Ctrl+C` to exit.
+
+---
+
+### Option C — PlatformIO upload + monitor (build, flash, then watch)
+
+```powershell
+pio run -e cointrace-dev -t upload ; pio device monitor -e cointrace-dev
+```
+
+Uploads new firmware and immediately attaches the monitor. PlatformIO resets the device
+automatically at the end of upload, so you catch the full boot sequence.
+
+---
+
+### Option D — Built-in PlatformIO test monitor (background)
+
+```powershell
+pio device monitor -e cointrace-dev --filter default 2>&1 | Select-Object -First 50 &
+```
+
+Runs in background (`&`). Useful when you want to capture output while running another
+command in the same terminal. Pipe to a file for persistent logs:
+
+```powershell
+pio device monitor -e cointrace-dev 2>&1 | Tee-Object -FilePath boot.log &
+```
+
+---
+
+## 2. Understanding Boot Log Lines
+
+### Log format
+
+```
+[699ms] INFO  NVS            | Ready — meas_count=0 slot=0
+ ^^^^^  ^^^^  ^^^              ^^^^^^^^^^^^^^^^^^^^^^^^^
+ Time   Level Tag              Message
+```
+
+Levels: `DEBUG` `INFO` `WARN` `ERROR` — controlled by `log_level` in NVS (default: `INFO`).  
+ESP framework native logs (e.g. `[I][LittleFS.cpp:98]`) appear at `DEBUG` level and are
+printed by `log_i()` / `log_e()` directly to Serial, bypassing the CoinTrace Logger.
+
+### Critical boot lines and their meaning
+
+| Line | Meaning | Action if missing/wrong |
+|---|---|---|
+| `INFO NVS \| Ready` | NVS opened all namespaces | Check flash with `pio run -t erase` + re-upload |
+| `INFO LFS \| sys mounted` | `littlefs_sys` at 0x510000 OK | Run `pio run -e uploadfs-sys -t uploadfs` |
+| `INFO LFS \| /sys/config/device.json found` | P-2 acceptance criterion | Run uploadfs-sys |
+| `INFO LFS \| data mounted` | `littlefs_data` at 0x610000 OK | Power cycle; if persists → full erase |
+| `WARN LFS \| sys mount failed` | Sys partition empty or corrupted | `pio run -e uploadfs-sys -t uploadfs` |
+| `WARN LFS \| data mount failed` | Data partition corrupted | Full erase + re-flash |
+| `ERROR LDC1101 \| CHIP_ID mismatch` | Sensor not connected or SPI fault | Expected when sensor unplugged |
+| `E esp_littlefs: Corrupted dir pair` | LittleFS internal corruption | Power cycle; if persists → full erase |
+
+### Normal "degraded" messages (not real errors)
+
+```
+[WARN] LFS | sys mount failed — no web UI or plugin config (uploadfs-sys required)
+```
+Expected on first flash before `uploadfs-sys` is run. Device continues normally.
+
+```
+[ERROR] LDC1101 | CHIP_ID mismatch: expected 0xD4, got 0x00
+```
+Expected when LDC1101 sensor board is not attached. Plugin disables itself gracefully.
+
+---
+
+## 3. Checking Partition State
+
+### Verify partition table is flashed correctly
+
+```powershell
+cd d:\GitHub\CoinTrace
+python -m esptool --chip esp32s3 --port COM3 read_flash 0x8000 0x1000 partition_backup.bin
+python -m esptool --chip esp32s3 partition_table --verify partition_backup.bin
+```
+
+Or read back and decode:
+```powershell
+python -m esptool --chip esp32s3 --port COM3 read_flash 0x8000 0xc00 pt.bin
+python -m esptool --chip esp32s3 partition_table --raw-flash pt.bin
+```
+
+### Expected partition layout
+
+```
+# Offset     Size        Name             Type  SubType
+0x009000    0x005000    nvs              data  nvs         (20 KB)
+0x00e000    0x002000    otadata          data  ota         (8 KB)
+0x010000    0x280000    app0             app   ota_0       (2.5 MB)
+0x290000    0x280000    app1             app   ota_1       (2.5 MB)
+0x510000    0x100000    littlefs_sys     data  spiffs      (1.0 MB)
+0x610000    0x1c0000    littlefs_data    data  spiffs      (1.75 MB)
+0x7d0000    0x030000    coredump         data  coredump    (192 KB)
+```
+
+If the offsets differ → `pio run -e cointrace-dev -t erase` then re-flash.
+
+### Check free space on both LittleFS partitions (from boot log)
+
+The boot log always reports:
+```
+[Xms] INFO LFS | sys mounted  — free: 976 KB    ← littlefs_sys  (1024 KB total, ~5 KB used)
+[Xms] INFO LFS | data mounted — free: 1720 KB   ← littlefs_data (1792 KB total, empty)
+```
+
+If `free` is suspiciously low (e.g. sys < 900 KB) → `data/` folder is too large.
+Check size:
+```powershell
+(Get-ChildItem -Recurse d:\GitHub\CoinTrace\data | Measure-Object -Property Length -Sum).Sum / 1KB
+```
+
+---
+
+## 4. NVS State
+
+### Read meas_count and boot counter
+
+NVS values are printed at boot:
+```
+[699ms] INFO NVS | Ready — meas_count=0 slot=0
+```
+
+`meas_count` is the total monotonic measurement count (never resets except Hard Reset).  
+`slot = meas_count % 250` — the LittleFS ring buffer slot that will be written next.
+
+### Wipe NVS (soft reset all settings, keep calibration)
+
+Implement via firmware Soft Reset (`Fn+Del` 3 s). Not yet available — until then,
+the only option is full erase (which also erases calibration):
+
+```powershell
+pio run -e cointrace-dev -t erase    # erases ALL flash including NVS and LittleFS
+pio run -e cointrace-dev -t upload   # re-flash firmware
+pio run -e uploadfs-sys  -t uploadfs # re-flash sys partition
+```
+
+---
+
+## 5. Full Erase and Re-Flash Sequence
+
+Required when:
+- Changing partition table layout (new CSV)
+- Suspected flash corruption (`Corrupted dir pair` in boot log after power cycle)
+- Switching from UIFlow/M5Stack firmware back from stock
+
+```powershell
+# 1. Erase all flash
+pio run -e cointrace-dev -t erase
+
+# 2. Flash firmware
+pio run -e cointrace-dev -t upload
+
+# 3. Flash sys partition content (web UI + device.json)
+pio run -e uploadfs-sys -t uploadfs
+
+# 4. littlefs_data: no step needed — firmware formats on first boot
+#    Boot log: "data mounted — free: 1720 KB"
+```
+
+**Note:** `pio run -e cointrace-dev -t upload` alone does NOT touch LittleFS. Step 3
+is needed after every full erase to restore `device.json` and web UI.
+
+---
+
+## 6. Build Flags and Debug Levels
+
+### Enable verbose debug output
+
+In `platformio.ini`, add to `[env:cointrace-dev]` / `build_flags`:
+
+```ini
+-DCORE_DEBUG_LEVEL=5        # ESP32 framework: show all log_d/log_i/log_e output
+-DDEBUG_ESP_LITTLEFS=1      # LittleFS internal debug (very verbose)
+```
+
+Remove before committing — these flood the serial output.
+
+### Check build size
+
+```powershell
+pio run -e cointrace-dev 2>&1 | Select-String "RAM:|Flash:"
+```
+
+Current baseline:
+```
+RAM:   [=         ]   8.4% (used 27 KB / 320 KB)
+Flash: [==        ]  20.5% (used 536 KB / 2.5 MB)
+```
+
+If Flash exceeds ~70% → check for unintended large static arrays or string literals.
+
+---
+
+## 7. Download Mode (Manual Flash)
+
+If PlatformIO cannot auto-reset the device (upload fails with "Connecting..."):
+
+1. Power **off** the device (side switch → OFF)
+2. Hold the **G0 button** (bottom-left of keyboard)
+3. Power **on** (side switch → ON)
+4. Release G0 — screen stays blank (normal)
+5. Run upload command
+
+```powershell
+pio run -e cointrace-dev -t upload
+```
+
+To exit Download Mode: power off → power on (without holding G0).
+
+---
+
+## 8. Common Problems and Quick Fixes
+
+### Upload fails — "A fatal error occurred: Failed to connect"
+
+```
+Device is not in Download Mode or wrong COM port.
+```
+→ Check Device Manager: should show "USB-Enhanced-SERIAL CH343 (COM3)"  
+→ Enter Download Mode manually (§7 above)  
+→ Verify `upload_port = COM3` in `platformio.ini`
+
+---
+
+### Build error — partition CSV not found
+
+```
+[uploadfs] ERROR: partition CSV not found: partitions/cointrace_8MB.csv
+```
+→ Confirm `partitions/cointrace_8MB.csv` exists in project root  
+→ Run from project directory: `cd d:\GitHub\CoinTrace`
+
+---
+
+### `sys mount failed` after uploading new firmware
+
+```
+[WARN] LFS | sys mount failed — no web UI or plugin config
+```
+→ Firmware upload does NOT touch `littlefs_sys`. This message appears after full erase.  
+→ Fix: `pio run -e uploadfs-sys -t uploadfs`
+
+---
+
+### `E esp_littlefs: Corrupted dir pair at {0x0, 0x1}`
+
+LittleFS metadata blocks are corrupted. Usually caused by interrupted upload or power loss
+during first format.
+
+→ Power cycle once (sometimes self-heals via LittleFS journal)  
+→ If persists: full erase + re-flash (§5)
+
+---
+
+### uploadfs flashes to wrong address
+
+```
+Flash will be erased from 0x00610000 to 0x007cffff   ← WRONG (data partition)
+```
+vs correct:
+```
+[uploadfs] FS_START  : 0x00610000 -> 0x00510000       ← script patched correctly
+Flash will be erased from 0x00510000 to 0x0060ffff    ← CORRECT
+```
+
+→ Verify `extra_scripts = post:scripts/upload_littlefs_sys.py` is present in `[env:uploadfs-sys]`  
+→ See `docs/guides/UPLOADFS_GUIDE.md` — "Troubleshooting" section
+
+---
+
+## 9. Useful One-Liners
+
+```powershell
+# Show only errors and size summary from build
+pio run -e cointrace-dev 2>&1 | Select-String "error:|RAM:|Flash:"
+
+# Tail the monitor output to a file (background)
+pio device monitor -e cointrace-dev 2>&1 | Tee-Object -FilePath .\boot.log &
+
+# Check COM port is available
+[System.IO.Ports.SerialPort]::GetPortNames()
+
+# Read 2 seconds of live serial output without resetting
+$s = New-Object System.IO.Ports.SerialPort "COM3",115200
+$s.Open() ; Start-Sleep 2 ; $s.ReadExisting() ; $s.Close()
+
+# Check git status before committing
+git status --short
+git log --oneline -5
+```
