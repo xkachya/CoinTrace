@@ -1,0 +1,14 @@
+{
+  "schema_ver": 1,
+  "device": {
+    "name": "CoinTrace",
+    "hw_rev": "1.0",
+    "fw_ver": "1.0.0-dev"
+  },
+  "plugins": [
+    {
+      "type": "ldc1101",
+      "enabled": true
+    }
+  ]
+}

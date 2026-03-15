@@ -16,6 +16,7 @@
 #include "PluginContext.h"
 #include "LDC1101Plugin.h"
 #include "NVSManager.h"
+#include "LittleFSManager.h"
 
 // ── Logger globals (ініціалізуються першими в setup()) ────────────
 static Logger              gLogger;
@@ -26,7 +27,8 @@ static RingBufferTransport gRingTransport(100, /*usePsram=*/false);  // ESP32-S3
 static ConfigManager gConfig;
 static PluginSystem  gPluginSystem;
 static PluginContext gCtx;
-static NVSManager    gNVS;
+static NVSManager        gNVS;
+static LittleFSManager   gLFS;
 // Note: LDC1101Plugin is heap-allocated in setup() so PluginSystem::end()
 // can safely call delete (ownership contract — PLUGIN_ARCHITECTURE.md §3.1).
 
@@ -127,6 +129,27 @@ void setup() {
   } else {
     gCtx.storage = nullptr;  // plugins guard with null-check
     gLogger.error("NVS", "begin() failed — storage unavailable (flash corruption?)");
+  }
+
+  // ── 4c. LittleFS (Wave 7 P-2) ────────────────────────────────────────────
+  // mountSys():  read-only partition, no auto-format. Requires uploadfs-sys
+  //              to be run once before /sys/config/device.json is available.
+  // mountData(): formats on first boot; creates measurements/, cache/, logs/.
+  // Both gracefully degrade: failure → warn + continue (no crash).
+  if (gLFS.mountSys()) {
+    gLogger.info("LFS", "sys mounted — free: %u KB", gLFS.sysFreeBytes() / 1024);
+    if (gLFS.sys().exists("/config/device.json")) {
+      gLogger.info("LFS", "/sys/config/device.json found");
+    } else {
+      gLogger.warning("LFS", "/sys/config/device.json missing — run: pio run -e uploadfs-sys -t uploadfs");
+    }
+  } else {
+    gLogger.warning("LFS", "sys mount failed — no web UI or plugin config (uploadfs-sys required)");
+  }
+  if (gLFS.mountData()) {
+    gLogger.info("LFS", "data mounted — free: %u KB", gLFS.dataFreeBytes() / 1024);
+  } else {
+    gLogger.warning("LFS", "data mount failed — measurements will not persist");
   }
 
   // ── 5. Plugin system ──────────────────────────────────────────

@@ -250,3 +250,50 @@ app0,    app,  ota_0, 0x10000, 0x280000 # standard: esptool writes firmware.bin 
 **Правило:** partition `.csv` = strict ASCII. Коментарі можна, але тільки 7-bit символи.
 
 ---
+
+## 2026-03-15 — PlatformIO: `board_build.littlefs_partition_label` ігнорується при uploadfs
+
+**Середовище:** PlatformIO espressif32 6.13.0, ESP32-S3, два LittleFS partition в CSV (`littlefs_sys`, `littlefs_data`)  
+**Симптом:** `pio run -e uploadfs-sys -t uploadfs` пише на адресу `littlefs_data` (0x610000) замість очікуваної `littlefs_sys` (0x510000). Розмір образу = 1.75 MB (data partition) замість 1 MB (sys partition).
+
+```
+# Очікувалось:
+Flash will be erased from 0x00510000 to 0x0060ffff...  # littlefs_sys
+
+# Отримали:
+Flash will be erased from 0x00610000 to 0x007cffff...  # littlefs_data !!!
+```
+
+**Причина:** PlatformIO espressif32 6.13.0 завжди ставить `FS_START`/`FS_SIZE` з ОСТАННЬОЇ partition з subtype=`spiffs` у CSV. З двома LittleFS partition (`littlefs_sys` ПЕРША, `littlefs_data` ОСТАННЯ) — завжди вибирає data. `board_build.littlefs_partition_label` впливає лише на IDE metadata, але **не** на uploadfs pipeline.
+
+**Точні змінні (знайдено через debug print в post: скрипті):**
+```python
+FS_START = 6356992      # = 0x610000 (data partition offset) -- WRONG
+FS_SIZE  = 1835008      # = 0x1C0000 = 1.75 MB (data partition size) -- WRONG
+# FS_START є останнім елементом UPLOADERFLAGS -- саме він передається esptool
+```
+
+**Рішення:** `post:` extra_scripts hook, який патчить ці дві змінні після того як платформа їх встановлює:
+```python
+# scripts/upload_littlefs_sys.py (post:, НЕ pre:)
+# 1. Парсить partition CSV -> знаходить partition за label -> offset + size
+# 2. env.Replace(FS_START=offset, FS_SIZE=size)
+# Вся решта uploadfs pipeline (mklittlefs + esptool) працює без змін.
+```
+
+**Чому `post:`, а не `pre:`:** `pre:` запускається ДО того як `platform/main.py` встановлює `FS_START`/`FS_SIZE`. Наш `Replace` одразу перезаписується платформою. `post:` запускається ПІСЛЯ -> наш override стабільний.
+
+**Чому `AddCustomTarget("uploadfs")` не підходить:** `platformio/builder/tools/piotarget.py` має `assert name not in env["__PIO_TARGETS"]` -- uploadfs вже зареєстровано платформою -> `AssertionError`.
+
+**Результат після fix:**
+```
+[uploadfs] FS_START  : 0x00610000 -> 0x00510000
+[uploadfs] FS_SIZE   : 0x1C0000 -> 0x100000 (1024 KB)
+Flash will be erased from 0x00510000 to 0x0060ffff...
+```
+
+**Де в коді:** `scripts/upload_littlefs_sys.py`, `platformio.ini` секція `[env:uploadfs-sys]`  
+**Документація:** `docs/guides/UPLOADFS_GUIDE.md`  
+**Правило:** `board_build.littlefs_partition_label` НЕ працює для uploadfs target. Для multi-partition LittleFS завжди використовуй `post:` скрипт з `env.Replace(FS_START=..., FS_SIZE=...)`.
+
+---
