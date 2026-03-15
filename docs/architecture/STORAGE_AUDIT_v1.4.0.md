@@ -236,8 +236,8 @@ Pre-P-1 Acceptance Criteria специфіковані в STORAGE_ARCHITECTURE.m
 | **SA2-FUTURE-2** | v1.3.0 B-H1 | TCA8418 DEGRADED + LittleFS_data corrupt = "stuck boot" без виходу; GPIO0 recovery форматує тільки data | Документувати secondary recovery: GPIO0 утримання >10s = повний Hard Reset |
 | **SA2-FUTURE-3** | v1.3.0 Module C | FAT32: power fail під час SD copy → corrupt archive (no temp+rename) | При SD copy: писати в `tmp_YYYYMMDD.txt`, потім rename; при reboot видаляти `tmp_*` |
 | **EXT-FUTURE-1** | v1.4.0 F-02 | LittleFS_data margin 14.1%; measurement file >4KB → 2 blocks/file → ring-buffer overflow ємності | P-3 MeasurementStore: guard `if (json_size > 3800) LOG_ERROR + truncate alternatives` |
-| **EXT-FUTURE-5** | P-3 A-02 | MeasurementStore: boundary validation відсутня — `computeVector()` може отримати `rp[0]=0` від будь-якого майбутнього плагіна → NaN | `save()`: перевірка `rp[i] > 1.0f` для ВСІХ позицій ДО `computeVector()` — незалежно від plugin-level guards (defense-in-depth; → §9) |
-| **EXT-FUTURE-6** | P-3 A-03 | MeasurementStore: `load()` не перевіряє sentinel `"complete": true` → partial/aborted записи завантажаться як валідні | `load()`: `deserializeJson()` success + `doc["complete"].is<bool>() && doc["complete"].as<bool>()` перед поверненням даних (→ §9) |
+| **EXT-FUTURE-5** | P-3 A-02 | MeasurementStore: boundary validation відсутня — `computeVector()` може отримати `rp[0]=0` від будь-якого майбутнього плагіна → NaN | `save()`: перевірка `rp[i] > 1.0f` для ВСІХ позицій ДО `computeVector()` — незалежно від plugin-level guards (defense-in-depth; → §9) | ✅ **CLOSED P-3** — `MeasurementStore::save()` (P-3 2026-03-15): `if (m.rp[0] < 1.0f) return false` BEFORE `isDataMounted()`. Test: `test_measurement_store` A-02 покриття. |
+| **EXT-FUTURE-6** | P-3 A-03 | MeasurementStore: `load()` не перевіряє sentinel `"complete": true` → partial/aborted записи завантажаться як валідні | `load()`: `deserializeJson()` success + `doc["complete"].is<bool>() && doc["complete"].as<bool>()` перед поверненням даних (→ §9) | ✅ **CLOSED P-3** — `MeasurementStore::load()` (P-3 2026-03-15): sentinel перевірка реалізована. Test: `test_measurement_store` A-03 покриття (4 edge-case). |
 
 ---
 
@@ -309,8 +309,8 @@ Pre-P-1 Acceptance Criteria специфіковані в STORAGE_ARCHITECTURE.m
 | ID | Знахідка | Severity | Статус | Backlog |
 |---|---|---|---|---|
 | **A-01** | STORAGE_ARCHITECTURE §8.3: `esp_efuse_get_custom_mac()` → `ESP_ERR_INVALID_ARG` без custom eFuse MAC | 🟡 MEDIUM | ✅ CLOSED 2026-03-15 | ~~A-01~~ |
-| **A-02** | MeasurementStore: відсутня boundary validation → `computeVector()` отримає `rp[0]=0` від будь-якого плагіна → NaN результат | 🟠 HIGH | 🔓 OPEN | **EXT-FUTURE-5** |
-| **A-03** | MeasurementStore `load()`: відсутня перевірка sentinel `"complete": true` → partial/aborted запис вважається валідним | 🟡 MEDIUM | 🔓 OPEN | **EXT-FUTURE-6** |
+| **A-02** | MeasurementStore: відсутня boundary validation → `computeVector()` отримає `rp[0]=0` від будь-якого плагіна → NaN результат | 🟠 HIGH | ✅ CLOSED 2026-03-15 | **EXT-FUTURE-5** |
+| **A-03** | MeasurementStore `load()`: відсутня перевірка sentinel `"complete": true` → partial/aborted запис вважається валідним | 🟡 MEDIUM | ✅ CLOSED 2026-03-15 | **EXT-FUTURE-6** |
 
 *(A-04, A-05 → LOGGER_AUDIT_v2.0.0.md LF-FUTURE-6/7)*
 

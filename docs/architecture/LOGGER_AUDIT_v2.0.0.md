@@ -490,8 +490,8 @@ Stack-local `localBuf[256]` + stack-local `LogEntry` — нульове heap all
 | LF-FUTURE-3 | LA-7: `addTransport()` → взяти mutex або додати thread-safety doc | MEDIUM | До Phase 2 start |
 | LF-FUTURE-4 | LA-8: `setGlobalMinLevel()` → додати SoC-specific atomicity note | LOW | До P-3 |
 | LF-FUTURE-5 | LA-9: mutex timeout rationale → задокументувати в §8 | LOW | До P-3 |
-| **LF-FUTURE-6** | A-04 (Wave7_P3 external audit 2026-03-15): LittleFSTransport `processEntry()` та `rotate()` мають `portMAX_DELAY` — порушення SA2-8 ("portMAX_DELAY ЗАБОРОНЕНИЙ"). Spec виправлено: `pdMS_TO_TICKS(200)` / `pdMS_TO_TICKS(1000)` з graceful drop/skip. Impl залишається. | HIGH | P-3 (до першого build) |
-| **LF-FUTURE-7** | A-05 (Wave7_P3 external audit 2026-03-15): LittleFSTransport `write()` не має null-guard на `queue_`; base `isActive()` повертає `true` за замовчуванням → транспорт вважається активним між ctor і `startTask()`. Impl: `if (!queue_) { droppedCount_++; return; }` + override `isActive()` → `return queue_ != nullptr && taskRunning_`. | MEDIUM | P-3 (до першого build) |
+| **LF-FUTURE-6** | A-04 (Wave7_P3 external audit 2026-03-15): LittleFSTransport `processEntry()` та `rotate()` мають `portMAX_DELAY` — порушення SA2-8 ("portMAX_DELAY ЗАБОРОНЕНИЙ"). Spec виправлено: `pdMS_TO_TICKS(200)` / `pdMS_TO_TICKS(1000)` з graceful drop/skip. | HIGH | ✅ **CLOSED P-3 2026-03-15** — `processEntry(): pdMS_TO_TICKS(200)`, `rotate(): pdMS_TO_TICKS(1000)` — реалізовано в LittleFSTransport.cpp |
+| **LF-FUTURE-7** | A-05 (Wave7_P3 external audit 2026-03-15): LittleFSTransport `write()` не має null-guard на `queue_`; base `isActive()` повертає `true` за замовчуванням → транспорт вважається активним між ctor і `startTask()`. | MEDIUM | ✅ **CLOSED P-3 2026-03-15** — `write(): if (!queue_) { droppedCount_++; return; }` + `isActive() override: return queue_ != nullptr && taskRunning_` — реалізовано в LittleFSTransport.cpp |
 
 ---
 

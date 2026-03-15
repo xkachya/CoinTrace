@@ -17,6 +17,8 @@
 #include "LDC1101Plugin.h"
 #include "NVSManager.h"
 #include "LittleFSManager.h"
+#include "LittleFSTransport.h"
+#include "MeasurementStore.h"
 
 // ── Logger globals (ініціалізуються першими в setup()) ────────────
 static Logger              gLogger;
@@ -29,8 +31,12 @@ static PluginSystem  gPluginSystem;
 static PluginContext gCtx;
 static NVSManager        gNVS;
 static LittleFSManager   gLFS;
-// Note: LDC1101Plugin is heap-allocated in setup() so PluginSystem::end()
+static LittleFSTransport gLfsTransport(gLFS, /*maxLogKB=*/200, /*queue=*/64);
+static MeasurementStore  gMeasStore(gLFS, gNVS);
+// LDC1101Plugin is heap-allocated in setup() so PluginSystem::end()
 // can safely call delete (ownership contract — PLUGIN_ARCHITECTURE.md §3.1).
+// Hold a raw pointer (non-owning) for direct coin-state access in loop().
+static LDC1101Plugin*    gLDC = nullptr;
 
 // Display CoinTrace version and configuration on startup
 void displayStartupInfo() {
@@ -148,12 +154,22 @@ void setup() {
   }
   if (gLFS.mountData()) {
     gLogger.info("LFS", "data mounted — free: %u KB", gLFS.dataFreeBytes() / 1024);
+
+    // ── 4d. LittleFS log transport (Wave 7 P-3) ─────────────────────────
+    // startTask() BEFORE addTransport() — write() needs the queue to exist.
+    gLfsTransport.startTask(/*core=*/0, /*prio=*/2);
+    gLogger.addTransport(&gLfsTransport);
+    gLogger.info("LFS", "LittleFSTransport started");
+
+    // ── 4e. MeasurementStore (Wave 7 P-3) ───────────────────────────
+    gMeasStore.begin();
   } else {
     gLogger.warning("LFS", "data mount failed — measurements will not persist");
   }
 
   // ── 5. Plugin system ──────────────────────────────────────────
-  gPluginSystem.addPlugin(new LDC1101Plugin());  // PluginSystem owns; deletes on end()
+  gLDC = new LDC1101Plugin();           // PluginSystem owns (deletes on end()); gLDC is non-owning
+  gPluginSystem.addPlugin(gLDC);
   gPluginSystem.begin(&gCtx);  // calls canInitialize() → initialize() for each plugin
 
   gLogger.info("System", "CoinTrace ready — %d/%d plugins initialised",
@@ -188,6 +204,31 @@ void loop() {
   
   // Plugin update loop (runs all enabled plugins, ≤ 10 ms each)
   gPluginSystem.update();
+
+  // ── Wave 7 P-3: Save measurement on COIN_REMOVED ──────────────────
+  // COIN_REMOVED is a transient state (1 update() cycle) set after coin lifts.
+  // Must be checked immediately after update() to avoid missing the transition.
+  if (gLDC && gLDC->isReady() && gLFS.isDataMounted()) {
+    if (gLDC->getCoinState() == LDC1101Plugin::CoinState::COIN_REMOVED) {
+      ISensorPlugin::SensorData data = gLDC->read();
+      if (data.valid && data.value1 > 1.0f) {
+        Measurement m = {};
+        m.ts        = millis() / 1000;
+        m.rp[0]     = data.value1;   // LDC1101 Rp raw code
+        m.l[0]      = data.value2;   // LDC1101 L  raw code
+        m.pos_count = 1;             // P-3: single position only
+        strlcpy(m.metal_code, "UNKN",          sizeof(m.metal_code));
+        strlcpy(m.coin_name,  "Unclassified",  sizeof(m.coin_name));
+        m.conf = 0.0f;               // classification deferred to P-5+
+        if (gMeasStore.save(m)) {
+          gLogger.info("Meas", "Saved #%u — RP=%.0f L=%.0f ts=%us",
+                       gNVS.getMeasCount() - 1, m.rp[0], m.l[0], m.ts);
+        } else {
+          gLogger.warning("Meas", "save() failed (RP=%.0f)", m.rp[0]);
+        }
+      }
+    }
+  }
 
   delay(10);
 }

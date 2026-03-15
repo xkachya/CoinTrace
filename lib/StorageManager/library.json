@@ -1,10 +1,13 @@
 {
   "name": "StorageManager",
   "version": "1.0.0",
-  "description": "CoinTrace storage layer: NVSManager (Tier 0 NVS) and LittleFSManager (Tier 1). STORAGE_ARCHITECTURE.md.",
+  "description": "CoinTrace storage layer: NVSManager (Tier 0), LittleFSManager (Tier 1), MeasurementStore (P-3). STORAGE_ARCHITECTURE.md.",
   "license": "GPL-3.0",
   "frameworks": "arduino",
   "platforms": "espressif32",
+  "dependencies": {
+    "bblanchon/ArduinoJson": "^7.0.0"
+  },
   "build": {
     "srcDir": "src",
     "includeDir": "src"
