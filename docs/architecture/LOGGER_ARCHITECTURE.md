@@ -779,7 +779,12 @@ void LittleFSTransport::processEntry(const LogEntry& entry) {
     char line[256];
     uint16_t len = entry.toJsonLine(line, sizeof(line));  // JSON Lines format
 
-    xSemaphoreTake(lfsDataMutex_, portMAX_DELAY);
+    // [A-04] SA2-8: portMAX_DELAY ЗАБОРОНЕНИЙ — може заблокувати bg task назавжди.
+    // MainLoop тримає mutex максимум ~10 ms (LittleFS write). 200 ms = generous margin.
+    if (xSemaphoreTake(lfsDataMutex_, pdMS_TO_TICKS(200)) != pdTRUE) {
+        droppedCount_++;
+        return;  // skip entry, не блокуватись
+    }
     lfs_file_write(&lfs_data, &currentFile_, line, len);
     lfs_file_sync(&lfs_data, &currentFile_);  // power-fail safe без close overhead
     currentSizeBytes_ += len;
@@ -791,8 +796,12 @@ void LittleFSTransport::processEntry(const LogEntry& entry) {
 }
 
 void LittleFSTransport::rotate() {
-    // Тримаємо mutex на весь цикл — атомарна операція для WebServer
-    xSemaphoreTake(lfsDataMutex_, portMAX_DELAY);
+    // Тримаємо mutex на весь цикл — атомарна операція для WebServer.
+    // [A-04] SA2-8: timeout 1000 ms (не portMAX_DELAY). Включає SD copy (~50 ms) + rename + delete.
+    // Якщо timeout → rotation відкладається; watermark CRITICAL зупинить записи якщо потрібно.
+    if (xSemaphoreTake(lfsDataMutex_, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return;  // graceful skip: rotation відкладена
+    }
 
     lfs_file_close(&lfs_data, &currentFile_);  // тільки тут!
     fileOpen_ = false;

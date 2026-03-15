@@ -581,8 +581,10 @@ private:
 > **`complete: true`** — поле присутнє **тільки** у файлах, що були повністю записані. При crash
 > під час write файл не матиме цього поля → при читанні такий запис відкидається як invalid.
 >
-> **`device_id`** генерується як `"CoinTrace-" + hex(esp_efuse_get_custom_mac()[4:6])` — унікально
+> **`device_id`** генерується як `"CoinTrace-" + hex(esp_efuse_mac_get_default()[4:6])` — унікально
 > для кожного пристрою на основі ESP32 eFuse MAC (останні 2 байти).
+> ⚠️ [A-01] Використовувати `esp_efuse_mac_get_default()`, **не** `esp_efuse_get_custom_mac()`.
+> `get_custom_mac()` повертає `ESP_ERR_INVALID_ARG` якщо custom MAC не записаний в eFuse (типовий випадок).
 >
 > **`slope_rp_per_mm_lr`** — безрозмірний коефіцієнт (одиниця: 1/mm), лінійна регресія k-ratio векторів
 > по просторових позиціях (0, 1, 3 мм). Типове значення ≈ -0.137. НЕ Ohm/mm.

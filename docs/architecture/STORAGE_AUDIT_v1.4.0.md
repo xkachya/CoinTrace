@@ -19,6 +19,7 @@
 6. [Pre-P-1 Checklist — статус](#6-pre-p-1-checklist--статус)
 7. [Що архітектура зробила ПРАВИЛЬНО (підтверджено зовнішнім аудитом)](#7-що-архітектура-зробила-правильно)
 8. [Зведений backlog (актуальний стан після v1.4.0)](#8-зведений-backlog)
+9. [Wave 7 P-3 External Audit — знахідки A-01..A-05](#9-wave-7-p-3-external-audit--знахідки-a-01a-05)
 
 ---
 
@@ -235,6 +236,8 @@ Pre-P-1 Acceptance Criteria специфіковані в STORAGE_ARCHITECTURE.m
 | **SA2-FUTURE-2** | v1.3.0 B-H1 | TCA8418 DEGRADED + LittleFS_data corrupt = "stuck boot" без виходу; GPIO0 recovery форматує тільки data | Документувати secondary recovery: GPIO0 утримання >10s = повний Hard Reset |
 | **SA2-FUTURE-3** | v1.3.0 Module C | FAT32: power fail під час SD copy → corrupt archive (no temp+rename) | При SD copy: писати в `tmp_YYYYMMDD.txt`, потім rename; при reboot видаляти `tmp_*` |
 | **EXT-FUTURE-1** | v1.4.0 F-02 | LittleFS_data margin 14.1%; measurement file >4KB → 2 blocks/file → ring-buffer overflow ємності | P-3 MeasurementStore: guard `if (json_size > 3800) LOG_ERROR + truncate alternatives` |
+| **EXT-FUTURE-5** | P-3 A-02 | MeasurementStore: boundary validation відсутня — `computeVector()` може отримати `rp[0]=0` від будь-якого майбутнього плагіна → NaN | `save()`: перевірка `rp[i] > 1.0f` для ВСІХ позицій ДО `computeVector()` — незалежно від plugin-level guards (defense-in-depth; → §9) |
+| **EXT-FUTURE-6** | P-3 A-03 | MeasurementStore: `load()` не перевіряє sentinel `"complete": true` → partial/aborted записи завантажаться як валідні | `load()`: `deserializeJson()` success + `doc["complete"].is<bool>() && doc["complete"].as<bool>()` перед поверненням даних (→ §9) |
 
 ---
 
@@ -285,7 +288,111 @@ Pre-P-1 Acceptance Criteria специфіковані в STORAGE_ARCHITECTURE.m
 | ~~SA2-9~~ | v1.3.0 F-L1 | §16 Soft Reset "optional" → виміри завжди зберігаються | ✅ v1.3.2 |
 | ~~SA2-10~~ | v1.3.0 F-L2 | §10 OQ-07 "3×300KB" → "2×200KB" | ✅ v1.3.2 |
 | ~~F-05~~ | v1.4.0 external | `protocol_id: "p1_1mhz_013mm"` — неправильний fSENSOR | ✅ **v1.6.0** (2026-03-14) — `"p1_UNKNOWN_013mm"` + §18 factory restore |
+| ~~A-01~~ | P-3 external 2026-03-15 | STORAGE_ARCHITECTURE §8.3: `esp_efuse_get_custom_mac()` → повертає `ESP_ERR_INVALID_ARG` без custom eFuse MAC | ✅ **2026-03-15** — `esp_efuse_mac_get_default()` + ⚠️ [A-01] warning note в §8.3 (→ §9) |
 
 ---
 
-*Наступний аудит: STORAGE_AUDIT_v1.5.0 — після завершення P-1 + P-2 (NVSManager + LittleFSManager реалізація). Верифікація: відповідність accepted checklist §15, persistence round-trip тести.*
+*Наступний аудит: STORAGE_AUDIT_v1.5.0 — після завершення P-3 (MeasurementStore + LittleFSTransport реалізація). Верифікація: persistence round-trip тести, sentinel validation (EXT-FUTURE-6), boundary guard (EXT-FUTURE-5).*
+
+---
+
+## 9. Wave 7 P-3 External Audit — знахідки A-01..A-05
+
+**Джерело:** `docs/external/Wave7_P3_Implementation_Audit.2026-03-15.md`  
+**Дата:** 2026-03-15  
+**Контекст:** Зовнішній аудит проведено перед початком P-3 (MeasurementStore + LittleFSTransport). Охоплює обидва модулі: Storage (A-01, A-02, A-03) та Logger/LittleFSTransport (A-04, A-05). Logger-знахідки A-04/A-05 поглинуті в LOGGER_AUDIT_v2.0.0.md § Backlog (LF-FUTURE-6, LF-FUTURE-7).
+
+---
+
+### Score-карта (Storage-релевантні знахідки)
+
+| ID | Знахідка | Severity | Статус | Backlog |
+|---|---|---|---|---|
+| **A-01** | STORAGE_ARCHITECTURE §8.3: `esp_efuse_get_custom_mac()` → `ESP_ERR_INVALID_ARG` без custom eFuse MAC | 🟡 MEDIUM | ✅ CLOSED 2026-03-15 | ~~A-01~~ |
+| **A-02** | MeasurementStore: відсутня boundary validation → `computeVector()` отримає `rp[0]=0` від будь-якого плагіна → NaN результат | 🟠 HIGH | 🔓 OPEN | **EXT-FUTURE-5** |
+| **A-03** | MeasurementStore `load()`: відсутня перевірка sentinel `"complete": true` → partial/aborted запис вважається валідним | 🟡 MEDIUM | 🔓 OPEN | **EXT-FUTURE-6** |
+
+*(A-04, A-05 → LOGGER_AUDIT_v2.0.0.md LF-FUTURE-6/7)*
+
+---
+
+### A-01 — esp_efuse_mac_get_default() (ЗАКРИТО)
+
+**Знахідка:** STORAGE_ARCHITECTURE §8.3 pseudocode для `device_id` генерації використовував `esp_efuse_get_custom_mac()[4:6]`.
+
+**Проблема:** `esp_efuse_get_custom_mac()` повертає `ESP_ERR_INVALID_ARG` якщо custom MAC не записаний в eFuse — типова ситуація для всіх пристроїв без заводського прошивання. Правильна функція: `esp_efuse_mac_get_default()` (повертає factory Ethernet MAC, завжди доступний).
+
+**Правка (2026-03-15):** §8.3 оновлено: `esp_efuse_get_custom_mac` → `esp_efuse_mac_get_default` + ⚠️ [A-01] warning block з поясненням різниці.
+
+---
+
+### A-02 — MeasurementStore: Two-Layer Defense (EXT-FUTURE-5)
+
+**Знахідка:** В специфікації `computeVector()` відсутній guard на `rp[0] == 0`. LDC1101Plugin має власний guard (`rpRaw == 0` at line 254 + `calibrationRpBaseline_ > 100.0f` at line 281), але MeasurementStore не може покладатися на це.
+
+**Чому plugin-only guard недостатній:**
+
+MeasurementStore — це **storage boundary**. Його `save()` може бути викликаним:
+- `LDC1101Plugin` (наразі — з guards)
+- Будь-яким майбутнім плагіном (PesoScalePlugin, CalibrationPlugin) — без гарантій
+- Безпосередньо з тестів або діагностичного коду
+- Після рефакторингу, де plugin guards будуть видалені чи змінені
+
+**Правильна архітектура (defense-in-depth):**
+
+```
+Layer 1 — Plugin boundary (LDC1101Plugin):
+  rpRaw == 0 || rpRaw == 0xFFFF → return early    ← hardware guard
+  calibrationRpBaseline_ <= 100.0f → skip save    ← calibration guard
+
+Layer 2 — Storage boundary (MeasurementStore::save()):
+  for (int i = 0; i < 4; i++) {
+      if (m.rp[i] < 1.0f) {                        ← boundary contract
+          LOG_WARN("save() rejected: rp[%d]=%.2f", i, m.rp[i]);
+          return false;
+      }
+  }
+  computeVector(m.rp, m.l, vec);  // safe: no NaN
+```
+
+**Ключова відмінність:** Layer 1 захищає від bad hardware read. Layer 2 захищає від bad caller. Вони не дублюють одне одного — вони захищають від різних failure modes.
+
+**Наслідок:** `computeVector()` може ВИМАГАТИ `rp[i] > 0` через precondition у doc-comment, але НЕ повинна самостійно ним управляти — відповідальність за валідацію belongs to `save()` як точка входу.
+
+**Реалізація (P-3):** `save()` first validation block; `computeVector()` — додати `ASSERT(rp[i] > 0)` debug mode only.
+
+---
+
+### A-03 — "complete" sentinel validation (EXT-FUTURE-6)
+
+**Знахідка:** `MeasurementStore::load()` у специфікації не перевіряє наявність `"complete": true` — файли, записані частково (power fail після `open()` але до запису sentinel) будуть завантажені як валідні вимірювання.
+
+**Деталі:**
+
+Файл `m_NNN.json` пишеться з sentinel-останнім патерном (ADR-ST-006 write-first invariant):
+```json
+{ "ts": ..., "rp": [...], ..., "complete": true }  ← sentinel last
+```
+
+Якщо power fail відбувається до запису `"complete"` → файл може містити valid JSON але без sentinel → MeasurementStore::load() має відхилити його.
+
+**Правильна реалізація:**
+```cpp
+DeserializationError err = deserializeJson(doc, file);
+if (err) { return false; }                            // bad JSON
+if (!doc["complete"].is<bool>()) { return false; }   // missing sentinel
+if (!doc["complete"].as<bool>()) { return false; }   // sentinel = false
+// all fields validated → safe to use
+```
+
+**Відмінність від аудиторного рекомендації:** Аудитор пропонував зберігати `"complete"` першим для "швидкої перевірки". Це зайве (ArduinoJson не streaming parser) і суперечить ADR-ST-006 write-first invariant (sentinel MUST бути останнім записаним). Зберігати `"complete"` ОСТАННІМ — правильно. Перевіряти при `load()` — обов'язково.
+
+---
+
+### Агентська додаткова знахідка (не в оригінальному аудиті)
+
+**A-04 мав друге входження в LOGGER_ARCHITECTURE.md.** Зовнішній аудит зафіксував `portMAX_DELAY` тільки в `rotate()` (§6.6). Агент виявив ідентичне порушення SA2-8 і в `processEntry()` (§6.6, ~12 рядків вище). Обидва виправлені одночасно:
+- `processEntry()`: `portMAX_DELAY` → `pdMS_TO_TICKS(200)` з graceful drop
+- `rotate()`: `portMAX_DELAY` → `pdMS_TO_TICKS(1000)` з graceful skip
+
+---
