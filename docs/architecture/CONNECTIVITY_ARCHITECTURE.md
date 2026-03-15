@@ -468,7 +468,7 @@ GET  /api/v1/database
 POST /api/v1/database/match
      body: {
        "algo_ver": 1,
-       "protocol_id": "p1_1mhz_013mm",
+       "protocol_id": "p1_UNKNOWN_013mm",  // placeholder до R-01 (ADR-ST-007)
        "vector": {
          "dRp1": 312.4, "k1": 0.742, "k2": 0.531,
          "slope_rp_per_mm_lr": -0.128, "dL1": 0.18
@@ -612,7 +612,10 @@ const device = await navigator.bluetooth.requestDevice({
   "fw_version":   "1.0.0",
   "measured_at":  "2026-03-11T14:23:45Z",
   "conditions": {
-    "protocol_id":  "p1_1mhz_013mm",
+    "protocol_id":  "p1_UNKNOWN_013mm",
+    // ⚠️ [F-05] Реальний fSENSOR MIKROE-3240 ≈ 200–500 kHz, НЕ 1 MHz.
+    // protocol_id буде уточнено після R-01 (перше реальне вимірювання).
+    // Cross-ref: STORAGE_ARCHITECTURE.md ADR-ST-007.
     "freq_hz":      1000000,
     "steps_mm":     [0, 1, 3],
     "coil_model":   "MIKROE-3240"

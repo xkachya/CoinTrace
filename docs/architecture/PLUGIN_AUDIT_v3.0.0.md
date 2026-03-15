@@ -99,6 +99,9 @@
 | **N-8** | CREATING_PLUGINS `AsyncSensorPlugin` | `xSemaphoreCreateMutex()` return value не перевіряється → `dataMutex = nullptr` при нестачі heap → `xSemaphoreTake(nullptr, ...)` в `read()` → crash | 🟠 HIGH | ✅ CLOSED 2026-03-13 |
 | **N-9** | ARCH §4 `QMC5883LPlugin` `readRegister16()` | `ctx->wire->requestFrom()` та `ctx->wire->read()` без `wireMutex` → race condition якщо `read()` викликається з будь-якого task (CONTRACT §2.2) | 🟡 MEDIUM | 🔓 OPEN |
 | **N-10** | CREATING_PLUGINS `AsyncSensorPlugin` | `TaskHandle_t readTask;` оголошено без `= nullptr` → якщо `xTaskCreate()` fails, `readTask` має garbage value → `if (readTask) vTaskDelete(readTask)` → vTaskDelete з undefined handle → crash | 🟡 MEDIUM | ✅ CLOSED 2026-03-13 |
+| **N-11** | CREATING_PLUGINS `ST7789V2DisplayPlugin` / CONTRACT §2.3 | Display plugin з framebuffer: 240×135×2 = 64,800 B >> CONTRACT limit 8 KB. CONTRACT не документує виключення для display plugins з власним framebuffer. Всі інші плагіни ≤ 8 KB ✅ — виключення потрібне лише для display | ℹ️ INFO | 🔓 OPEN |
+| **N-12** | ARCHITECTURE: event bus / inter-plugin communication | Inter-plugin сигналізація відсутня: `CoinDetected → trigger HX711` не типізовано. Зараз плагіни спілкуються тільки через shared state або глобальні об'єкти. Phase 2 item: observer pattern або FreeRTOS event groups | 🟢 LOW | 🔓 OPEN (Phase 2) |
+| **N-13** | CREATING_PLUGINS BH1750 `read()` vs CONTRACT §1.5 Strategy A | CONTRACT Strategy A: "mutex не потрібен якщо read() тільки з MainTask". Але BH1750Plugin бере `wireMutex` у `read()` (правильно — WebServer task також читає). Документ демонструє Strategy B не пояснюючи why. Плутає нових contributors які читають Strategy A поряд | 🟢 LOW | 🔓 OPEN (doc clarification) |
 
 ### Підтверджені OPEN (перенесені з v2.0.0 аудиту)
 
@@ -119,9 +122,9 @@
 
 ### Підсумок v3.0.0
 
-**Нових знахідок:** 1 CRITICAL · 3 HIGH · 4 MEDIUM · 2 LOW = **10 нових знахідок**  
+**Нових знахідок:** 1 CRITICAL · 3 HIGH · 4 MEDIUM · 4 LOW · 1 INFO = **13 нових знахідок**  
 **Перенесено open:** 2 HIGH · 5 MEDIUM · 3 LOW · 2 INFO = **12 перенесено**  
-**Всього відкритих:** 22 знахідки  
+**Всього відкритих:** 25 знахідки *(+3 додано зовнішнім аудитом 2026-03-15: N-11, N-12, N-13)*  
 
 **Blocker для P-2:** N-1 (CRITICAL), N-4 (HIGH) → **2 compile blockers**
 
@@ -1141,3 +1144,37 @@ N-1..N-10 — виявлені ВПЕРШЕ незалежним аудитом 
 *Методологія: повний незалежний аналіз без перенесення висновків з попередніх аудитів*  
 *Попередній аудит: `docs/architecture/obsolete/PLUGIN_AUDIT_v2.0.0.md`*  
 *Наступна дія: Хвиля 1 виправлень (N-1, N-4) → Хвиля 2 (N-8, N-10, PA2-17) → старт P-2*
+
+---
+
+## 21. Cross-reference: зовнішній аудит 2026-03-15
+
+**Документ:** `docs/external/CoinTrace_Plugin_Architecture_Audit.2026-03-14.md`  
+**Аудитор:** Embedded Systems Architecture Review  
+**Дата крос-аналізу:** 2026-03-15  
+
+| Ext. ID | Знахідка зовнішнього аудиту | Внутрішній статус | Дія |
+|---|---|---|---|
+| **F-01** | `canInitialize()` завжди `true` — vestigial method | BY DESIGN — PLUGIN_CONTRACT.md §53 явно документує: ctx недоступний на цьому етапі, hw перевірка заборонена | Закрито: задокументовано |
+| **F-02** | PluginSystem implementation відсутня | **FALSE POSITIVE** — `include/PluginSystem.h` + `src/PluginSystem.cpp` існують і повністю реалізовані. Аудит аналізував тільки docs, не src/ | Закрито: false positive |
+| **F-03 / X-03** | HX711 100ms blocking порушує CONTRACT §2.1 | = **N-6** (OPEN) — вже зафіксовано внутрішньо | Mapped → N-6 |
+| **F-04 / X-02** | `ctx->spiMutex` vs `spi_vspi_mutex` identity unclear | ✅ **FIXED 2026-03-15** — alias comment додано до STORAGE_ARCHITECTURE §9.4 | Закрито |
+| **F-05** | Display plugin framebuffer 64 KB >> 8 KB CONTRACT limit | = **N-11** (нова знахідка, додана цього сеансу) | Mapped → N-11 |
+| **F-06 / X-07** | `protocol_id "p1_1mhz"` хибний для MIKROE-3240 | ✅ **FIXED 2026-03-15** — CONNECTIVITY_ARCHITECTURE: `p1_1mhz_013mm` → `p1_UNKNOWN_013mm` (×2) | Закрито |
+| **F-07** | Plugin dependency resolution відсутня | Phase 2 backlog. Пов'язано з PA3-11 (globals) та PA2-15 (ctx scope) | Відкрито (Phase 2) |
+| **F-08** | Event bus / inter-plugin communication відсутня | = **N-12** (нова знахідка, додана цього сеансу) | Mapped → N-12 |
+| **F-09 / X-06** | CONTRACT v1.0.0 vs ARCHITECTURE v2.0.0 version mismatch | = **N-3** (OPEN) — суперечність max plugins 20 vs 10 | Mapped → N-3 |
+| **F-10** | No plugin unload/disable at runtime | Phase 3 (power management). Низький пріоритет | Відкрито (Phase 3) |
+| **F-11** | `shutdown()` порядок не LIFO | ✅ **FIXED 2026-03-15** — `PluginSystem.cpp end()` тепер reverse iteration (LIFO) | Закрито |
+| **F-12** | IStoragePlugin boundary vs StorageManager | Пов'язано з N-5. INTERFACES_EXTENDED вже clarifies | Відкрито (doc clarification) |
+| **X-01** | Logger cross-task usage потребує explainer | LOW — LOGGER_ARCHITECTURE §8 описує thread safety. Потрібен explainer comment у CONTRACT | Відкрито (doc) |
+| **X-04** | 10Hz guarantee unspecified | = **PA3-8** (OPEN) | Mapped → PA3-8 |
+| **X-05** | IDiagnosticPlugin 57ms blocking не задокументовано в CONTRACT | PA3-6 ⚠️ BLOCKING warning вже додано 2026-03-13 → CLOSED | Mapped → PA3-6 CLOSED |
+| **X-08** | BH1750 wireMutex vs Strategy A документація суперечить собі | = **N-13** (нова знахідка, додана цього сеансу) | Mapped → N-13 |
+
+**Підсумок зовнішнього аудиту 2026-03-15:**
+- **False positives:** F-02 (PluginSystem існує в src/)
+- **Виправлено цього сеансу:** F-04/X-02 (spiMutex alias), F-06/X-07 (protocol_id), F-11 (LIFO shutdown) — 3 fixes staged
+- **Дублікати внутрішніх знахідок:** F-03/X-03 → N-6, F-09/X-06 → N-3, X-04 → PA3-8, X-05 → PA3-6
+- **Нові знахідки, додані до v3.0.0:** N-11 (display RAM), N-12 (event bus), N-13 (wireMutex docs)
+- **Підтверджено незалежно:** PA3-2/N-6 (HX711 blocking), F-11 (LIFO) — external знайшов ті самі проблеми

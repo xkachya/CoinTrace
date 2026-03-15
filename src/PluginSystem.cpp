@@ -62,7 +62,9 @@ void PluginSystem::update() {
 }
 
 void PluginSystem::end() {
-    for (uint8_t i = 0; i < count_; ++i) {
+    // Shutdown in reverse registration order (LIFO) — mirrors standard dependency teardown.
+    // Plugin N may depend on resources from Plugin N-1, so N must shut down first.
+    for (int8_t i = static_cast<int8_t>(count_) - 1; i >= 0; --i) {
         if (!plugins_[i]) continue;
         plugins_[i]->shutdown();
         delete plugins_[i];

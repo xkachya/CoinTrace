@@ -699,6 +699,10 @@ SD.begin(12 /*CS_SD*/, spi_vspi, 20000000);  // 20 MHz (обмеження 33Ω 
 LDC1101 ldc(spi_vspi, 5 /*CS_LDC*/);
 
 // Mutex для координації: SDTransport (async task) vs MainLoop (LDC SPI burst)
+// ⚠️ Naming note (X-02): spi_vspi_mutex у псевдокоді цього документа =
+//    ctx->spiMutex з PluginContext (PLUGIN_CONTRACT.md §1.3).
+//    В реальному коді: gCtx.spiMutex = xSemaphoreCreateMutex() (main.cpp).
+//    Один mutex — два імені в різних документах; не створювати окремий!
 SemaphoreHandle_t spi_vspi_mutex = xSemaphoreCreateMutex();
 ```
 
