@@ -767,7 +767,7 @@ SensorData read() override;
 
 ### В репозиторії є готові приклади:
 
-- `lib/LDC1101Plugin/` - Індуктивний сенсор (I2C)
+- `lib/LDC1101Plugin/` - Індуктивний сенсор (SPI)
 - `lib/BMI270Plugin/` - IMU 6DOF (I2C)
 - `lib/SDCardPlugin/` - Сховище (SPI)
 - `lib/MockSensorPlugin/` - Demo sensor (no hardware)

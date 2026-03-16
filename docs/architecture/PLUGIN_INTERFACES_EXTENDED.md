@@ -1,8 +1,8 @@
 # Розширені інтерфейси плагінів CoinTrace
 
 **Документ:** Повний список інтерфейсів для всіх типів залізя  
-**Версія:** 1.1.0  
-**Дата:** 10 березня 2026  
+**Версія:** 1.2.0  
+**Дата:** 10 березня 2026 (оновлено: 16 березня 2026 — v1.2.0: SensorData value2 уточнено для LDC1101; value3 зарезервовано для LHR backlog)  
 **Статус:** 📝 Проектування (розширення базової архітектури)
 
 ---
@@ -90,9 +90,11 @@ public:
     
     // Універсальний інтерфейс зчитування
     struct SensorData {
-        float value1;               // Основне значення
-        float value2;               // Додаткове (напр. L для LDC1101)
-        float confidence;           // 0.0-1.0 впевненість вимірювання
+        float value1;               // Основне значення (LDC1101: raw RP_DATA code, uint16 cast to float)
+        float value2;               // Додаткове (LDC1101: raw L_DATA code, uint16 cast to float; 0 if unused)
+        //                          // LDC1101 value2 -> індуктивність L [мкГн] = code × (RP_max / 65536)
+        //                          // value3 — зарезервовано: LHR raw 24-bit (§10 задача 7, LDC1101_ARCHITECTURE.md v1.5)
+        float confidence;           // 0.0–1.0 впевненість вимірювання
         uint32_t timestamp;         // Час зчитування (ms)
         bool valid;                 // Чи валідне вимірювання
     };
