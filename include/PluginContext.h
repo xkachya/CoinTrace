@@ -38,6 +38,7 @@ struct PluginContext {
 
     SPIClass*         spi;        // Initialised SPI bus (SPI / VSPI)
     SemaphoreHandle_t spiMutex;   // FreeRTOS mutex — take before every SPI burst in async tasks
+                                  // ≡ spi_vspi_mutex in STORAGE_ARCHITECTURE — same object, one mutex for the entire VSPI bus
 
     // ── Services ──────────────────────────────────────────────────────────────
     ConfigManager*    config;     // Plugin configuration access (never nullptr)
