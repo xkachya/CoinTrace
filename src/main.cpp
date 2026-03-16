@@ -19,6 +19,7 @@
 #include "LittleFSManager.h"
 #include "LittleFSTransport.h"
 #include "MeasurementStore.h"
+#include "SDCardManager.h"   // Wave 7 P-4
 
 // ── Logger globals (ініціалізуються першими в setup()) ────────────
 static Logger              gLogger;
@@ -33,6 +34,7 @@ static NVSManager        gNVS;
 static LittleFSManager   gLFS;
 static LittleFSTransport gLfsTransport(gLFS, /*maxLogKB=*/200, /*queue=*/64);
 static MeasurementStore  gMeasStore(gLFS, gNVS);
+static SDCardManager     gSDCard;  // Wave 7 P-4 — optional SD archive tier
 // LDC1101Plugin is heap-allocated in setup() so PluginSystem::end()
 // can safely call delete (ownership contract — PLUGIN_ARCHITECTURE.md §3.1).
 // Hold a raw pointer (non-owning) for direct coin-state access in loop().
@@ -163,6 +165,16 @@ void setup() {
 
     // ── 4e. MeasurementStore (Wave 7 P-3) ───────────────────────────
     gMeasStore.begin();
+
+    // ── 4f. SD Card (Wave 7 P-4) ─────────────────────────────────────────────
+    // tryMount() acquires spiMutex for SD.begin() — safe here (SPI init done at step 3).
+    // Non-fatal: if SD absent, device continues in LittleFS-only mode.
+    gSDCard.tryMount(gCtx.spi, gCtx.spiMutex);
+    gMeasStore.setSDCardManager(&gSDCard);
+    gLfsTransport.setSDCardManager(&gSDCard);
+    gLogger.info("SD", "SD card %s",
+                 gSDCard.isAvailable() ? "available (archive tier active)"
+                                       : "not available (LittleFS-only mode)");
   } else {
     gLogger.warning("LFS", "data mount failed — measurements will not persist");
   }

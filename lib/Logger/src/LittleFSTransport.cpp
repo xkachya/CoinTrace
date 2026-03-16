@@ -1,8 +1,9 @@
-// LittleFSTransport.cpp — Asynchronous LittleFS_data Log Transport (Wave 7 P-3)
+// LittleFSTransport.cpp — Asynchronous LittleFS_data Log Transport (Wave 7 P-3/P-4)
 // CoinTrace — Open Source Inductive Coin Analyzer
 // License: GPL v3
 
 #include "LittleFSTransport.h"
+#include "SDCardManager.h"  // P-4: SD rotate hook (forward-declared in .h)
 #include <Arduino.h>  // log_e / log_w / strlen
 
 LittleFSTransport::LittleFSTransport(LittleFSManager& lfs,
@@ -138,6 +139,13 @@ void LittleFSTransport::rotate() {
     currentSizeBytes_ = 0;
 
     xSemaphoreGive(lfs_.lfsDataMutex());
+
+    // [ADR-ST-009 rotate hook] Archive the just-rotated log.1 to SD.
+    // lfsDataMutex is NOW RELEASED — copyLogToSD() uses alternating chunk scopes.
+    // log.1.jsonl is stable: only modified at the NEXT rotation (200 KB away).
+    if (sdMgr_ != nullptr && sdMgr_->isAvailable()) {
+        sdMgr_->copyLogToSD(lfs_, LOG_ARCHIVE);
+    }
 
     openCurrentFile();  // open fresh log.0.jsonl
 }

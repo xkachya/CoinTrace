@@ -1,4 +1,4 @@
-// LittleFSTransport.h — Asynchronous LittleFS_data Log Transport (Wave 7 P-3)
+// LittleFSTransport.h — Asynchronous LittleFS_data Log Transport (Wave 7 P-3/P-4)
 // CoinTrace — Open Source Inductive Coin Analyzer
 // License: GPL v3
 // LOGGER_ARCHITECTURE.md §6.6
@@ -11,6 +11,12 @@
 //   Open-once pattern: log.0.jsonl is kept open between write()s (1 sync/entry).
 //   Background FreeRTOS task drains the LogEntry queue and performs rotation.
 //   Rotation at maxLogKB_: log.1 deleted, log.0 → log.1, new log.0 opened.
+//
+// Wave 7 P-4 — SD rotate hook:
+//   After rotation, log.1.jsonl (the just-filled log) is stream-copied to SD
+//   via SDCardManager::copyLogToSD(). Called AFTER lfsDataMutex is released
+//   so that alternating mutex scopes can be used (no simultaneous hold).
+//   [SA2-6] see LittleFSManager.h lock-ordering rules.
 //
 // Audit guards:
 //   [LF-FUTURE-7 / A-05] write():       null-guard on queue_ (task may not be started).
@@ -31,6 +37,9 @@
 #include <freertos/queue.h>
 #include <freertos/task.h>
 #include <freertos/semphr.h>
+
+// Forward declaration — SDCardManager.h is in StorageManager; included in .cpp.
+class SDCardManager;
 
 class LittleFSTransport : public ILogTransport {
 public:
@@ -57,6 +66,10 @@ public:
     void startTask(uint8_t coreId = 0, UBaseType_t priority = 2);
     void stopTask();
 
+    // Inject optional SD card manager for log archival on rotation (P-4).
+    // Call in setup() after gSDCard.tryMount(). sd may be null (hook is a no-op).
+    void setSDCardManager(SDCardManager* sd) { sdMgr_ = sd; }
+
 private:
     static constexpr const char* LOG_CURRENT = "/logs/log.0.jsonl";
     static constexpr const char* LOG_ARCHIVE = "/logs/log.1.jsonl";
@@ -68,6 +81,7 @@ private:
     uint16_t          queueSize_;
     volatile uint32_t droppedCount_ = 0;
     volatile bool     taskRunning_  = false;
+    SDCardManager*    sdMgr_        = nullptr;  // optional P-4 rotate hook
 
     // File kept open between writes (open-once pattern — LOGGER_ARCHITECTURE §6.6).
     File             currentFile_;

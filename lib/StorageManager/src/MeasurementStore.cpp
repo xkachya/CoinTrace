@@ -1,8 +1,9 @@
-// MeasurementStore.cpp — Ring-buffer Measurement Persistence (Wave 7 P-3)
+// MeasurementStore.cpp — Ring-buffer Measurement Persistence (Wave 7 P-3/P-4)
 // CoinTrace — Open Source Inductive Coin Analyzer
 // License: GPL v3
 
 #include "MeasurementStore.h"
+#include "SDCardManager.h"  // P-4: ADR-ST-009 copy-before-overwrite
 #include <ArduinoJson.h>
 #include <esp_mac.h>     // esp_efuse_mac_get_default() [A-01]
 #include <Arduino.h>     // log_i / log_e / log_w / strlcpy
@@ -42,6 +43,20 @@ bool MeasurementStore::begin() {
 
 uint32_t MeasurementStore::count() const {
     return nvs_.getMeasCount();
+}
+
+// ── readSlotRaw() — [ADR-ST-009] helper ──────────────────────────────────────
+// Caller MUST hold lfsDataMutex before invoking.
+// Returns byte count read, or 0 if the file does not exist.
+
+size_t MeasurementStore::readSlotRaw(uint16_t slot, uint8_t* out, size_t maxLen) {
+    char path[32];
+    slotPath(slot, path, sizeof(path));
+    File f = lfs_.data().open(path, "r");
+    if (!f) return 0;
+    size_t n = f.read(out, maxLen);
+    f.close();
+    return n;
 }
 
 // ── save() ────────────────────────────────────────────────────────────────────
@@ -93,8 +108,31 @@ bool MeasurementStore::save(const Measurement& m) {
         return false;
     }
 
+    // [ADR-ST-009] Copy-before-overwrite: when the ring wraps, archive the slot
+    // that is about to be evicted to SD, using two SEPARATE mutex scopes.
+    // lfsDataMutex is released before spiMutex is acquired — never held together.
+    uint16_t slot         = nvs_.getMeasSlot();  // = getMeasCount() % NVS_RING_SIZE
+    bool     is_overwrite = (nvs_.getMeasCount() >= NVS_RING_SIZE);
+
+    if (is_overwrite && sdMgr_ != nullptr && sdMgr_->isAvailable()) {
+        uint32_t globalId = nvs_.getMeasCount() - NVS_RING_SIZE;
+        // rawBuf is static: MAX_JSON_B = 3800 bytes would stress the loop() stack.
+        // Threading contract: save() is MainLoop-only, so static is safe here.
+        static uint8_t rawBuf[MAX_JSON_B];
+        size_t rawLen = 0;
+        {
+            // Scope 1: read evicted slot from LittleFS.
+            LittleFSDataGuard g(lfs_.lfsDataMutex());
+            if (g.ok()) rawLen = readSlotRaw(slot, rawBuf, sizeof(rawBuf));
+        }
+        // Scope 2: write to SD (separate mutex — spiMutex acquired inside writeMeasurement).
+        if (rawLen > 0) {
+            sdMgr_->writeMeasurement(globalId, rawBuf, rawLen);
+        }
+    }
+
     char path[32];
-    slotPath(nvs_.getMeasSlot(), path, sizeof(path));
+    slotPath(slot, path, sizeof(path));
 
     // Write under lfsDataMutex (LittleFSTransport bg task may be active).
     LittleFSDataGuard g(lfs_.lfsDataMutex());
