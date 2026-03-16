@@ -1,7 +1,7 @@
 // LDC1101Plugin.h — LDC1101 Inductive Sensor Plugin (SPI)
 // CoinTrace — Open Source Inductive Coin Analyzer
 // License: GPL v3
-// LDC1101_ARCHITECTURE.md §8 (v1.2.0)
+// LDC1101_ARCHITECTURE.md §8 (v1.3.2 contract; impl parity: v1.2.0 — LHR/HIGH_Q backlog pending R-01)
 //
 // Hardware: MIKROE-3240 breakout, ESP32-S3 VSPI
 //   SCK = GPIO40, MISO = GPIO39, MOSI = GPIO14, CS = GPIO5 (configurable)
