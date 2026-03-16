@@ -1,0 +1,19 @@
+{
+  "coin_name":     "Silver 833 (synthetic centroid)",
+  "records_count": 1,
+  "centroid": {
+    "dRp1":               312.4,
+    "k1":                 0.8563,
+    "k2":                 0.5864,
+    "slope_rp_per_mm_lr": -0.1375,
+    "dL1":                18.0
+  },
+  "std_dev": {
+    "dRp1":               0.0,
+    "k1":                 0.0000,
+    "k2":                 0.0000,
+    "slope_rp_per_mm_lr": 0.0000,
+    "dL1":                0.0
+  },
+  "radius_95pct": 0.1000
+}

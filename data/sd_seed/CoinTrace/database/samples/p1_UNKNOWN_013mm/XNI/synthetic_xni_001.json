@@ -1,0 +1,43 @@
+{
+  "schema_ver": 1,
+  "algo_ver": 1,
+  "protocol_ver": 1,
+  "coin": {
+    "metal_code": "XNI",
+    "metal_name": "Nickel"
+  },
+  "conditions": {
+    "protocol_id":    "p1_UNKNOWN_013mm",
+    "freq_hz":        1000000,
+    "steps_mm":       [0, 1, 3],
+    "coil_model":     "MIKROE-3240",
+    "coil_turns":     null,
+    "resp_time_code": 6
+  },
+  "raw": {
+    "rp0": 9500.0,
+    "rp1": 9680.0,
+    "rp2": 9640.4,
+    "rp3": 9586.4,
+    "l0":  1150.0,
+    "l1":  1500.0
+  },
+  "vector": {
+    "dRp1":               180.0,
+    "k1":                 0.7800,
+    "k2":                 0.4800,
+    "slope_rp_per_mm_lr": -0.1700,
+    "dL1":                350.0
+  },
+  "metadata": {
+    "device_id":         "CoinTrace-SYNTH",
+    "fw_version":        "0.0.0-synthetic",
+    "temp_c":            23.0,
+    "measured_at":       "2026-03-16T10:00:00Z",
+    "contributor":       "synthetic_generator",
+    "reference_quality": "unknown",
+    "mint_certificate":  "",
+    "status":            "reviewed",
+    "notes":             "SYNTHETIC TEST DATA. Феромагнітний метал: l1 > l0 (inductance INCREASES), dL1=350 µH vs ~18 µH у срібла. Головний дискримінатор від срібла/міді. Не використовувати для реальної ідентифікації"
+  }
+}

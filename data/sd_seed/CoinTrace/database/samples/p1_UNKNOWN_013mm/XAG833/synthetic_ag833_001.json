@@ -1,0 +1,43 @@
+{
+  "schema_ver": 1,
+  "algo_ver": 1,
+  "protocol_ver": 1,
+  "coin": {
+    "metal_code": "XAG833",
+    "metal_name": "Silver 833"
+  },
+  "conditions": {
+    "protocol_id":    "p1_UNKNOWN_013mm",
+    "freq_hz":        1000000,
+    "steps_mm":       [0, 1, 3],
+    "coil_model":     "MIKROE-3240",
+    "coil_turns":     null,
+    "resp_time_code": 6
+  },
+  "raw": {
+    "rp0": 10247.3,
+    "rp1": 10559.7,
+    "rp2": 10514.8,
+    "rp3": 10430.5,
+    "l0":  1204.3,
+    "l1":  1186.5
+  },
+  "vector": {
+    "dRp1":               312.4,
+    "k1":                 0.8563,
+    "k2":                 0.5864,
+    "slope_rp_per_mm_lr": -0.1375,
+    "dL1":                18.0
+  },
+  "metadata": {
+    "device_id":         "CoinTrace-SYNTH",
+    "fw_version":        "0.0.0-synthetic",
+    "temp_c":            23.0,
+    "measured_at":       "2026-03-16T10:00:00Z",
+    "contributor":       "synthetic_generator",
+    "reference_quality": "unknown",
+    "mint_certificate":  "",
+    "status":            "reviewed",
+    "notes":             "SYNTHETIC TEST DATA (raw values from FINGERPRINT_DB_ARCHITECTURE §3.1 example) — не використовувати для реальної ідентифікації"
+  }
+}

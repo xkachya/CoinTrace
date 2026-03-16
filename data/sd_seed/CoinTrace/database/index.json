@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "generated_at": "2026-03-16T10:00:00Z",
+  "generation": 1,
+  "protocols": ["p1_UNKNOWN_013mm"],
+  "entries": [
+    {
+      "id":           "xag999/synthetic",
+      "protocol_id":  "p1_UNKNOWN_013mm",
+      "metal_code":   "XAG999",
+      "coin_name":    "Test Silver 999 (synthetic)",
+      "year":         null,
+      "centroid":     {"dRp1_n": 0.4750, "k1": 0.8700, "k2": 0.6200, "slope": -0.1264, "dL1_n": 0.0100},
+      "radius_95pct": 0.1000,
+      "records_count": 1
+    },
+    {
+      "id":           "xag925/synthetic",
+      "protocol_id":  "p1_UNKNOWN_013mm",
+      "metal_code":   "XAG925",
+      "coin_name":    "Test Silver 925 (synthetic)",
+      "year":         null,
+      "centroid":     {"dRp1_n": 0.4313, "k1": 0.8580, "k2": 0.5910, "slope": -0.1359, "dL1_n": 0.0093},
+      "radius_95pct": 0.1000,
+      "records_count": 1
+    },
+    {
+      "id":           "xag833/synthetic",
+      "protocol_id":  "p1_UNKNOWN_013mm",
+      "metal_code":   "XAG833",
+      "coin_name":    "Test Silver 833 (synthetic)",
+      "year":         null,
+      "centroid":     {"dRp1_n": 0.3905, "k1": 0.8563, "k2": 0.5864, "slope": -0.1375, "dL1_n": 0.0090},
+      "radius_95pct": 0.1000,
+      "records_count": 1
+    },
+    {
+      "id":           "xcu/synthetic",
+      "protocol_id":  "p1_UNKNOWN_013mm",
+      "metal_code":   "XCU",
+      "coin_name":    "Test Copper (synthetic)",
+      "year":         null,
+      "centroid":     {"dRp1_n": 0.3625, "k1": 0.8200, "k2": 0.5450, "slope": -0.1496, "dL1_n": 0.0075},
+      "radius_95pct": 0.1000,
+      "records_count": 1
+    },
+    {
+      "id":           "xni/synthetic",
+      "protocol_id":  "p1_UNKNOWN_013mm",
+      "metal_code":   "XNI",
+      "coin_name":    "Test Nickel (synthetic, ferromagnetic)",
+      "year":         null,
+      "centroid":     {"dRp1_n": 0.2250, "k1": 0.7800, "k2": 0.4800, "slope": -0.1700, "dL1_n": 0.1750},
+      "radius_95pct": 0.1000,
+      "records_count": 1
+    }
+  ]
+}
