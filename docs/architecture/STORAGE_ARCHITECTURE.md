@@ -1,8 +1,8 @@
 # Storage Architecture — CoinTrace™
 
-**Статус:** ✅ Accepted v1.6.0 — [PRE-1]..[PRE-8] вирішено; [F-05] protocol_id placeholder виправлено; P-1 Acceptance Criteria додано; §18 Factory Reset to Stock Firmware додано  
-**Версія:** 1.6.0  
-**Дата:** 2026-03-14  
+**Статус:** ✅ Accepted v1.7.0 — [PRE-1]..[PRE-8] вирішено; [F-05] protocol_id placeholder виправлено; P-1 Acceptance Criteria додано; §18 Factory Reset to Stock Firmware додано; §14.3 Soft Shutdown (v1.5 backlog); §17.2 boot [1.4] deep sleep check  
+**Версія:** 1.7.0  
+**Дата:** 2026-03-16  
 **Автор:** Yuriy Kachmaryk
 
 > ⚠️ **КРИТИЧНО:** Рішення щодо partition layout та NVS namespace structure неможливо змінити після
@@ -1302,6 +1302,88 @@ Hard Reset = повне відновлення заводського стану
 
 ---
 
+### 14.3 Soft Shutdown (v1.5 backlog)
+
+> **Пріоритет:** MEDIUM — UX покращення + захист SD FAT32. Не блокує v1 (NVS і LittleFS power-fail safe; SD batch model ~24 writes/добу мінімізує ризик FAT corruption при апаратному вимкненні).
+
+#### Навіщо
+
+Cardputer-Adv вимикається апаратним перемикачем (SW2 SPDT). ESP32-S3 не отримує попередження — живлення зникає миттєво. Після появи SD archive (P-4) і WiFi (Wave 8) graceful shutdown стає практично важливим:
+- SD FAT metadata записується при `close()` — перерване вимкнення може пошкодити FAT
+- WiFi/BLE клієнти отримують timeout замість чистого disconnect
+- Open-once log file (`log.0.jsonl`) потребує `lfs_file_close()` для гарантованого flush
+
+#### Тригер
+
+**`Fn + Q`** — натиснути і тримати 2 секунди. `Fn + Del` вже зарезервовано для Factory Reset (§14.1).
+
+#### UX flow
+
+```
+T=0.0s  Fn+Q натиснуто
+T=0.5s  Display: "Hold to shut down..." + прогрес-бар
+T=2.0s  Display: "Shutting down..." → запуск послідовності
+T=2.5s  Display: "Safe to power off ✓" → esp_deep_sleep_start()
+        Якщо клавішу відпустити до T=2s — shutdown скасовується
+```
+
+#### Послідовність завершення (~550 мс загалом)
+
+```
+[S1]  gShutdownRequested = true          ; зупинити measurement pipeline (50 мс)
+[S2]  gPluginSystem.shutdownAll()        ; LIFO: LDC1101 → Sleep mode (100 мс)
+      ; ⚠️ Display плагін НЕ вимикається на цьому кроці — потрібен для [S6]
+[S3]  WiFi.disconnect() + BLE::deinit() ; клієнти отримують чистий disconnect (200 мс)
+[S4]  gLfsTransport.end()               ; lfs_file_sync() + lfs_file_close() (100 мс)
+[S5]  gSDCard.umount()                  ; SD.end() — FAT metadata finalized (50 мс)
+[S6]  Display: "Safe to power off ✓"   ; brightness dim (50 мс)
+[S7]  esp_deep_sleep_start()            ; без wakeup source → тільки power cycle будить
+```
+
+**Deep sleep vs Light sleep:** deep sleep (~10 µA) обрано через 400× менше споживання ніж light sleep (~4 mA). RAM не потрібна — всі дані збережені на flash/SD. Вихід: тільки hardware SW2 OFF→ON → повний boot через `setup()`.
+
+#### Діаграма станів
+
+```
+NORMAL OPERATION
+      │ Fn+Q held 0.5s
+      ▼
+SHUTDOWN_PENDING ──── released ──→ NORMAL OPERATION
+      │ Fn+Q held 2.0s
+      ▼
+SHUTDOWN_ACTIVE → [S1]..[S7] → DEEP SLEEP (~10 µA)
+                                        │ SW2 OFF→ON
+                                        ▼
+                                   setup() (full boot)
+```
+
+#### Порівняльна таблиця операцій скидання
+
+| Аспект | Soft Shutdown (Fn+Q 2s) | Soft Reset (Fn+Del 3s) | Hard Reset (Fn+Del 10s) |
+|---|---|---|---|
+| NVS | Зберігається | WiFi+system стираються | Все стирається |
+| LittleFS_data | Зберігається | Зберігається | Форматується |
+| SD | `umount()` — FAT safe | Не торкається | Не торкається |
+| Calibration | Зберігається | Зберігається | Стирається |
+| Кінцевий стан | Deep sleep | Reboot | Reboot |
+
+#### GPIO0 dual-role (важлива нотатка)
+
+GPIO0 має **дві різні ролі** залежно від контексту:
+- **Boot time** (§17.2 [1.5]): 5-секундний holddown → `LittleFS_data.format()`. Перевіряється **тільки в `setup()`** — не конфліктує з runtime.
+- **Runtime** (fallback): якщо TCA8418 (клавіатура) недоступна → GPIO0 long press (2s) → soft shutdown. Реалізувати разом з TCA8418 fault handling.
+
+#### Edge cases
+
+| Ситуація | Поведінка |
+|---|---|
+| `CoinState == COIN_PRESENT` при Fn+Q | Display: "Remove coin first". Shutdown відкладається до COIN_REMOVED/IDLE. Force після 5s warning. |
+| `calibrate()` активне | Завершується природньо (max +3 сек). `gShutdownRequested` перевіряється в `loop()`, не в `calibrate()`. |
+| OTA update активне (Wave 8) | OTA callback перевіряє `gShutdownRequested` → reject OTA → proceed with shutdown. ESP-IDF auto-rollback при наступному boot. |
+| TCA8418 I2C failure | GPIO0 runtime long press як fallback (div §17.2). |
+
+---
+
 ## 15. Фазовий roadmap
 
 ### Фаза P-1: Foundation (блокери → реалізація)
@@ -1413,7 +1495,8 @@ Hard Reset = повне відновлення заводського стану
 *Версія 1.3.2 — [SA2-1..SA2-10]: second audit fixes — atomic claim residues (ADR-ST-005/006), Hard Reset stop bg task, Boot [5] LittleFSTransport conditional, guard timeout 100→500ms + ok()=false contract, SD write model corrected, lock ordering contract, free space check mutex scope, §16/§10 doc sync.*  
 *Версія 1.4.0 — [F-02] RING_SIZE 300→250: LittleFS margin 3%→14%; [F-03] ADR-ST-005 timeout text 100→500ms; [F-04] Wire.begin(SDA=GPIO8, SCL=GPIO9) у boot sequence [2.3]; [F-05] §12.1 SDTransport Модель S — не в Logger dispatch chain; [F-06] CRC32 spec: /data/cache/index_crc32.bin (4B little-endian uint32_t).*  
 *Версія 1.4.1 — [FDB-05 Variant G] sd_generation.bin у §8.2 cache tree; boot [7a] generation staleness check після CRC32; buildCache() зберігає sd_generation.bin.*  
-*Наступний крок: реалізувати P-1 (partition table + NVSManager)*
+*Версія 1.7.0 — §14.3 Soft Shutdown (Fn+Q, deep sleep, [S1]..[S7] sequence, state machine, edge cases, GPIO0 dual-role); §17.2 boot [1.4] deep sleep wakeup check (skip GPIO0 recovery); CONNECTIVITY_ARCHITECTURE §5.3 shutdown_pending/shutdown_complete WebSocket events.*  
+*Наступний крок: реалізація P-4 (SDCardManager + FingerprintCache)*
 
 ---
 
@@ -1509,6 +1592,15 @@ Procedures above do **not** touch the SD card. If needed, format it separately o
 
 ```
 [1] Serial.begin(115200)                     ; bootstrap Serial
+[1.4] deep sleep wakeup check               ; захист від помилкового recovery при wakeup
+    cause = esp_sleep_get_wakeup_cause()
+    if cause != ESP_SLEEP_WAKEUP_UNDEFINED:
+        ; пристрій прокинувся з deep sleep (наприклад після soft shutdown §14.3)
+        ; GPIO0 recovery check [1.5] не застосовується — це не cold boot
+        ; Зараз: cause завжди UNDEFINED (soft shutdown без wakeup source)
+        ; Резервування: якщо в майбутньому додається timer/GPIO wakeup — guard тут
+        Serial.println("[BOOT] Deep sleep wakeup — skip recovery check")
+        goto [2]  ; пропустити [1.5] GPIO0 recovery
 [1.5] GPIO0 recovery check                  ; BOOT button (active LOW, підтяжка 10kΩ)
     ; [PRE-4] display() НЕ використовується — LCD не ініціалізований до кроку [9]
     ; [PRE-4] delay(5000) → TWDT race → замінено на 50×100ms loop з wdt reset

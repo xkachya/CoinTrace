@@ -525,7 +525,13 @@ POST /api/v1/ota/update
 {"v":1,"t":"status","heap":320000,"heap_min":295040}
 {"v":1,"t":"log","level":"INFO","comp":"LDC1101","msg":"RP=1250 L=18.2","ms":1234}
 {"v":1,"t":"heartbeat"}
+{"v":1,"t":"shutdown_pending","hold_ms_remaining":1500}
+{"v":1,"t":"shutdown_complete"}
 ```
+
+> **`shutdown_pending`** (v1.5): надсилається коли користувач тримає Fn+Q довше 0.5 сек (STORAGE_ARCHITECTURE §14.3). `hold_ms_remaining` — скільки мілісекунд залишилось до фактичного shutdown. Клієнт може показати попередження ("Device shutting down...") або зберегти поточний стан UI. Якщо клавішу відпустили — `shutdown_pending` більше не надсилається (shutdown скасовано).
+>
+> **`shutdown_complete`**: надсилається як останнє WebSocket повідомлення перед `esp_deep_sleep_start()`. Після нього з'єднання зривається. Клієнт що отримав `shutdown_complete` має показати "Device offline" і **не** намагатись reconnect (на відміну від неочікуваного dropout де reconnect обов'язковий).
 
 **Messages (client → server):**
 ```json
