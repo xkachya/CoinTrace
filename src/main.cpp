@@ -19,7 +19,8 @@
 #include "LittleFSManager.h"
 #include "LittleFSTransport.h"
 #include "MeasurementStore.h"
-#include "SDCardManager.h"   // Wave 7 P-4
+#include "SDCardManager.h"      // Wave 7 P-4
+#include "FingerprintCache.h"   // Wave 7 P-4
 
 // ── Logger globals (ініціалізуються першими в setup()) ────────────
 static Logger              gLogger;
@@ -34,7 +35,8 @@ static NVSManager        gNVS;
 static LittleFSManager   gLFS;
 static LittleFSTransport gLfsTransport(gLFS, /*maxLogKB=*/200, /*queue=*/64);
 static MeasurementStore  gMeasStore(gLFS, gNVS);
-static SDCardManager     gSDCard;  // Wave 7 P-4 — optional SD archive tier
+static SDCardManager     gSDCard;        // Wave 7 P-4 — optional SD archive tier
+static FingerprintCache  gFPCache;        // Wave 7 P-4 — fingerprint index in RAM
 // LDC1101Plugin is heap-allocated in setup() so PluginSystem::end()
 // can safely call delete (ownership contract — PLUGIN_ARCHITECTURE.md §3.1).
 // Hold a raw pointer (non-owning) for direct coin-state access in loop().
@@ -175,6 +177,17 @@ void setup() {
     gLogger.info("SD", "SD card %s",
                  gSDCard.isAvailable() ? "available (archive tier active)"
                                        : "not available (LittleFS-only mode)");
+
+    // ── 4g. FingerprintCache (Wave 7 P-4) — boot step [7] ────────────────────
+    // Loads index.json from SD into RAM with CRC32 + generation validation.
+    // Non-fatal: matching unavailable if both SD and LittleFS cache absent.
+    const bool cacheReady = gFPCache.init(gLFS, &gSDCard, gCtx.spiMutex);
+    if (cacheReady) {
+        gLogger.info("Cache", "FingerprintCache ready — %u entries",
+                     (unsigned)gFPCache.entryCount());
+    } else {
+        gLogger.warning("Cache", "FingerprintCache unavailable — matching disabled");
+    }
   } else {
     gLogger.warning("LFS", "data mount failed — measurements will not persist");
   }
