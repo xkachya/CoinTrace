@@ -653,16 +653,17 @@ SD:/CoinTrace/                      # Root для всіх даних CoinTrace
 │       ├── front.jpg
 │       └── back.jpg
 │
-├── measurements/                   # Historical archive
-│   ├── 2026/
-│   │   └── 03/
-│   │       └── 2026-03-12.jsonl    # Newline-delimited JSON (compact)
-│   └── export/
-│       └── pending.jsonl           # Queue for community DB submission (future)
+├── measurements/                   # Historical archive (evicted ring-buffer slots)
+│   ├── m_000000.json               # Individual JSON per evicted measurement (globalId)
+│   ├── m_000001.json               # Format: m_%06u.json — zero-padded 6 digits (FAT32 sort)
+│   └── ...                         # globalId = meas_count - RING_SIZE at time of eviction
 │
 └── logs/
-    └── archive/
-        └── 2026-03-12.txt          # Archived logs (copied від LittleFS при ротації)
+    ├── log_0000000725.jsonl        # Rotated LittleFS logs (uptime seconds at rotation)
+    └── log_0000005241.jsonl        # Copied від LittleFS при ротації (batch, ~200 KB/файл)
+
+# Примітка: date-based naming (2026/03/*.jsonl) потребує RTC/NTP (Wave 8+).
+# До появи реального часу використовується globalId / uptime-monotonic naming.
 ```
 
 ### 9.3 Graceful Degradation без SD
@@ -1087,14 +1088,14 @@ void MeasurementStore::save(const Measurement& m) {
 
 **`SDCardManager::writeMeasurement(uint32_t globalId, const uint8_t* buf, size_t len)`:**
 - Нова публічна функція; не знає про LittleFS — тільки SD.
-- Шлях: `SD:/CoinTrace/measurements/m_<globalId>.json`
-- `ensureDir("SD:/CoinTrace/measurements/")` при першому записі.
+- Шлях: `SD:/CoinTrace/measurements/m_%06u.json` (zero-padded 6 digits; забезпечує коректний FAT32 лексикографічний порядок. Max globalId при 20 вимірах/добу × 10 років ≈ 73 000 → 6 цифр з запасом).
+- `ensureDir("/CoinTrace/measurements/")` при першому записі.
 - `spi_vspi_mutex` timeout **50 ms** ([SPI-3]). При timeout: `LOG_WARN("SDCardManager", "spi_vspi_mutex timeout, SD write skipped")` → `return false`.
 - При `!sdAvailable()`: `LOG_WARN("MeasurementStore", "SD unavailable, slot %u lost", slot)` → `return false`.
 - При SD write fail: `LOG_WARN("MeasurementStore", "SD write failed, slot %u lost", slot)` → `return false`.
 - НЕ викликає `Logger::*` під час SD IO (аналогія SPI-3 контракту).
 
-**`MAX_MEAS_JSON`** — константа (рекомендовано 2048 B; типовий `m_XXX.json` ≈ 500–800 B).
+**`MAX_JSON_B`** (`MeasurementStore.h`) — `static constexpr uint32_t MAX_JSON_B = 3800` (INVARIANT 4 upper bound, P-3 Analysis: measurement JSON відкидається якщо > 3800 B. Типовий `m_XXX.json` ≈ 500–800 B. 3800 B гарантує що `readSlotRaw()` ніколи не truncate валідний файл).
 
 **Power-fail поведінка:**
 
@@ -1427,34 +1428,34 @@ GPIO0 має **дві різні ролі** залежно від контекс
 
 | Артефакт | Що робить |
 |---|---|
-| `src/storage/NVSManager.h/.cpp` | Wrapper над Preferences: wifi, sensor, system, storage, ota namespaces |
-| `test/storage/test_nvs_manager.cpp` | Unit tests (native або on-device) |
+| `lib/StorageManager/src/NVSManager.h/.cpp` | Wrapper над Preferences: wifi, sensor, system, storage, ota namespaces |
+| `test/test_nvs_manager/` | Unit tests (native або on-device) |
 
 ### Фаза P-3: LittleFS Layer
 
 | Артефакт | Що робить |
 |---|---|
-| `src/storage/LittleFSManager.h/.cpp` | Mount sys + data partitions, dir creation, error handling |
-| `src/storage/MeasurementStore.h/.cpp` | Ring buffer 250 × m_XXX.json, versioned format |
-| `src/storage/LittleFSTransport.h/.cpp` | Async Logger transport (FreeRTOS queue + log rotation) |
+| `lib/StorageManager/src/LittleFSManager.h/.cpp` | Mount sys + data partitions, dir creation, error handling |
+| `lib/StorageManager/src/MeasurementStore.h/.cpp` | Ring buffer 250 × m_XXX.json, versioned format |
+| `lib/Logger/src/LittleFSTransport.h/.cpp` | Async Logger transport (FreeRTOS queue + log rotation) |
 | `data/config/device.json` | Default plugin config (для uploadfs) |
 | `data/web/` | Web UI placeholder (для uploadfs) |
 
-### Фаза P-4: SD Card Layer
+### Фаза P-4: SD Card Layer ✅ Реалізовано (коміт `0dadfbd`)
 
 | Артефакт | Що робить |
 |---|---|
-| `src/storage/SDCardManager.h/.cpp` | Optional SD mount, graceful failure (VSPI shared з LDC1101, `spi_vspi_mutex` обов'язковий per write) |
-| `src/storage/SDTransport.h/.cpp` | Logger SD async transport (LOGGER_ARCHITECTURE спроектував) |
-| `src/storage/FingerprintCache.h/.cpp` | index.json load → RAM, hash validation, invalidation |
+| `lib/StorageManager/src/SDCardManager.h/.cpp` | Optional SD mount, graceful failure (VSPI shared з LDC1101, `spi_vspi_mutex` обов'язковий per write) |
+| `SDCardManager::copyLogToSD()` | Logger SD archive — hook в `LittleFSTransport::rotate()`, batch copy `log.1.jsonl` → SD (§12.1 Модель S). SDTransport як окремий async transport не додається. |
+| `lib/StorageManager/src/FingerprintCache.h/.cpp` | index.json load → RAM, CRC32 validation, generation-based invalidation |
 
 ### Фаза P-5: StorageManager Facade
 
 | Артефакт | Що робить |
 |---|---|
-| `src/storage/IStorageManager.h` | Interface for injection into Plugin System |
-| `src/storage/StorageManager.h/.cpp` | Facade: routing між Tier 0/1/2, graceful degradation logic |
-| `src/storage/MockStorageManager.h` | Mock для unit tests |
+| `lib/StorageManager/src/IStorageManager.h` | Interface for injection into Plugin System |
+| `lib/StorageManager/src/StorageManager.h/.cpp` | Facade: routing між Tier 0/1/2, graceful degradation logic |
+| `lib/StorageManager/src/MockStorageManager.h` | Mock для unit tests |
 
 ---
 
@@ -1496,7 +1497,8 @@ GPIO0 має **дві різні ролі** залежно від контекс
 *Версія 1.4.0 — [F-02] RING_SIZE 300→250: LittleFS margin 3%→14%; [F-03] ADR-ST-005 timeout text 100→500ms; [F-04] Wire.begin(SDA=GPIO8, SCL=GPIO9) у boot sequence [2.3]; [F-05] §12.1 SDTransport Модель S — не в Logger dispatch chain; [F-06] CRC32 spec: /data/cache/index_crc32.bin (4B little-endian uint32_t).*  
 *Версія 1.4.1 — [FDB-05 Variant G] sd_generation.bin у §8.2 cache tree; boot [7a] generation staleness check після CRC32; buildCache() зберігає sd_generation.bin.*  
 *Версія 1.7.0 — §14.3 Soft Shutdown (Fn+Q, deep sleep, [S1]..[S7] sequence, state machine, edge cases, GPIO0 dual-role); §17.2 boot [1.4] deep sleep wakeup check (skip GPIO0 recovery); CONNECTIVITY_ARCHITECTURE §5.3 shutdown_pending/shutdown_complete WebSocket events.*  
-*Наступний крок: реалізація P-4 (SDCardManager + FingerprintCache)*
+*Версія 1.7.1 — [CrossRef-Audit-P4] doc-sync: §9.2 SD layout (globalId/uptime naming замість date-based — RTC недоступний до Wave 8); §15 артефакти P-2..P-5 оновлено на фактичні шляхи `lib/`; §15 P-4 SDTransport → copyLogToSD hook (ADR погоджено з §12.1 Модель S); ADR-ST-009 `MAX_MEAS_JSON`→`MAX_JSON_B=3800` (INVARIANT 4), explicit `m_%06u.json` format (zero-padded, FAT32 sort safe).*  
+*Наступний крок: реалізація P-4 FingerprintCache (boot step [7], 5 сценаріїв, CRC32 + generation check)*
 
 ---
 
