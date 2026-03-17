@@ -90,7 +90,14 @@ public:
     bool nvsLoadUInt32(const char* key, uint32_t* out, uint32_t defaultVal = 0)   override;
     bool nvsErase     (const char* key)                                            override;
 
-    size_t littleFsFreeBytes() const override { return 0; }  // Wave 8: LittleFSManager
+    // NVSManager is not the primary IStorageManager implementation after Wave 7 P-5.
+    // These stubs satisfy the interface contract; StorageManager delegates correctly.
+    size_t   littleFsFreeBytes() const override { return 0; }
+    bool     isLfsMounted()      const override { return false; }
+    bool     isSdAvailable()     const override { return false; }
+    uint32_t measurementCount()  const override { return getMeasCount(); }
+    uint8_t  queryFingerprint(float, float, float, float, float,
+                              IStorageManager::FPMatch*, uint8_t) override { return 0; }
 
     // ── WiFi namespace ────────────────────────────────────────────────────────
 

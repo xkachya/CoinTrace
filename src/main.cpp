@@ -21,6 +21,7 @@
 #include "MeasurementStore.h"
 #include "SDCardManager.h"      // Wave 7 P-4
 #include "FingerprintCache.h"   // Wave 7 P-4
+#include "StorageManager.h"     // Wave 7 P-5
 
 // ── Logger globals (ініціалізуються першими в setup()) ────────────
 static Logger              gLogger;
@@ -37,6 +38,7 @@ static LittleFSTransport gLfsTransport(gLFS, /*maxLogKB=*/200, /*queue=*/64);
 static MeasurementStore  gMeasStore(gLFS, gNVS);
 static SDCardManager     gSDCard;        // Wave 7 P-4 — optional SD archive tier
 static FingerprintCache  gFPCache;        // Wave 7 P-4 — fingerprint index in RAM
+static StorageManager    gStorage(gNVS, gLFS, gSDCard, gFPCache, gMeasStore);  // Wave 7 P-5 — unified Facade
 // LDC1101Plugin is heap-allocated in setup() so PluginSystem::end()
 // can safely call delete (ownership contract — PLUGIN_ARCHITECTURE.md §3.1).
 // Hold a raw pointer (non-owning) for direct coin-state access in loop().
@@ -133,12 +135,10 @@ void setup() {
   // begin() opens all NVS namespaces. Fatal if NVS is unavailable
   // (indicates flash corruption — device needs reflash).
   if (gNVS.begin()) {
-    gCtx.storage = &gNVS;
     gLogger.info("NVS", "Ready — meas_count=%u slot=%u",
                  gNVS.getMeasCount(), gNVS.getMeasSlot());
   } else {
-    gCtx.storage = nullptr;  // plugins guard with null-check
-    gLogger.error("NVS", "begin() failed — storage unavailable (flash corruption?)");
+    gLogger.error("NVS", "begin() failed — NVS tier unavailable (flash corruption?)");
   }
 
   // ── 4c. LittleFS (Wave 7 P-2) ────────────────────────────────────────────
@@ -191,6 +191,17 @@ void setup() {
   } else {
     gLogger.warning("LFS", "data mount failed — measurements will not persist");
   }
+
+  // ── 4h. StorageManager Facade (Wave 7 P-5) ───────────────────────────────────
+  // Unified entry point for all storage tiers injected into PluginContext.
+  // Graceful degradation is encapsulated here — plugins call ctx->storage
+  // unconditionally; each method handles unavailable tiers internally.
+  gCtx.storage = &gStorage;
+  gLogger.info("Storage", "StorageManager ready — NVS:%s LFS:%s SD:%s FP:%u entries",
+               gNVS.isReady()        ? "ok" : "fail",
+               gLFS.isDataMounted()  ? "ok" : "fail",
+               gSDCard.isAvailable() ? "ok" : "n/a",
+               (unsigned)gFPCache.entryCount());
 
   // ── 5. Plugin system ──────────────────────────────────────────
   gLDC = new LDC1101Plugin();           // PluginSystem owns (deletes on end()); gLDC is non-owning

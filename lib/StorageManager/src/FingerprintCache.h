@@ -83,6 +83,13 @@ public:
     // Number of top candidates returned by query().
     static constexpr uint8_t QUERY_TOP_N = 10;
 
+    // TODO(wave8): Add test_fingerprint_cache/ covering:
+    //   - query() weighted Euclidean distance + insertion sort (top-N ordering)
+    //   - confidence = exp(-d²/σ²): d=0 → 1.0, d=CONFIDENCE_SIGMA → ~0.368
+    //   - query() returns 0 on uninitialised cache (count_==0)
+    //   - maxResults truncation (request 3 from cache of 10)
+    //   Requires a #ifdef UNIT_TEST loadTestEntry() accessor in this class.
+
     // SD source path for index.json.
     static constexpr const char* SD_INDEX_PATH = "/CoinTrace/database/index.json";
 

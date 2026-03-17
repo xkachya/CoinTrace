@@ -32,12 +32,19 @@ public:
     size_t write(const uint8_t*, size_t)         { return 0; }
 
     // ArduinoJson v7 Stream interface (deserializeJson input)
-    int  read()      { return -1; }
-    int  peek()      { return -1; }
-    int  available() { return 0;  }
+    int    read()                           { return -1; }
+    int    peek()                           { return -1; }
+    int    available()                      { return 0;  }
 
-    // Arduino Print helper (used by LittleFSTransport)
-    size_t print(const char*) { return 0; }
+    // Bulk read — used by MeasurementStore, SDCardManager, FingerprintCache
+    size_t read(uint8_t*, size_t)           { return 0;  }
+
+    // Directory check — used by FingerprintCache (always false on native)
+    bool   isDirectory() const              { return false; }
+
+    // Arduino Print helpers — used by LittleFSTransport and FingerprintCache
+    size_t print(const char*)               { return 0; }
+    size_t print(char)                      { return 0; }
 };
 
 // ── fs::LittleFSFS stub ───────────────────────────────────────────────────────
