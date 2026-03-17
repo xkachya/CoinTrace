@@ -417,6 +417,39 @@ firmware starts, entering UART/USB DFU download mode.
 
 ---
 
+### Native tests `ERRORED` — "The process cannot access the file" (Windows only)
+
+```
+Error: *** [test_logger.o] The process cannot access the file because it is
+being used by another process
+native-test:test_logger [ERRORED]
+```
+
+**Cause:** Windows Defender real-time protection scans every `.o`/`.exe` file written to
+`.pio\build\`. When VS Code Test Explorer runs suites back-to-back, Defender holds a read
+lock on the previous suite's object file while the next suite tries to overwrite it.
+
+Does **not** reproduce in terminal (`pio test`) because there the build directories are
+separate per suite and the gap between suites is longer.
+
+**Fix — add `.pio` folder to Defender exclusions (one-time, requires admin):**
+
+Open PowerShell **as Administrator** and run:
+```powershell
+Add-MpPreference -ExclusionPath "D:\GitHub\CoinTrace\.pio"
+```
+
+Or via GUI: **Windows Security → Virus & threat protection → Manage settings →
+Exclusions → Add an exclusion → Folder → `D:\GitHub\CoinTrace\.pio`**
+
+After adding the exclusion, run tests again from VS Code Test Explorer — all suites should
+pass without `ERRORED`.
+
+> ℹ️ This exclusion is safe: `.pio` contains only compiled build artefacts (no source code,
+> no sensitive data). The actual source files in `src/`, `lib/`, `test/` remain protected.
+
+---
+
 ## 9. Useful One-Liners
 
 ```powershell

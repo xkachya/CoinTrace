@@ -1,11 +1,52 @@
+# CoinTrace — Test Suite
 
-This directory is intended for PlatformIO Test Runner and project tests.
+## Structure
 
-Unit Testing is a software testing method by which individual units of
-source code, sets of one or more MCU program modules together with associated
-control data, usage procedures, and operating procedures, are tested to
-determine whether they are fit for use. Unit testing finds problems early
-in the development cycle.
+```
+test/
+├── mocks/                      # Shared native mocks (Arduino, LittleFS, FreeRTOS, NVS)
+├── mock_impl.cpp               # Mock implementations compiled into every native test
+├── test_config_manager/        # ConfigManager unit tests (24 cases)
+├── test_fingerprint_cache/     # FingerprintCache unit tests (6 cases)
+├── test_log_entry/             # LogEntry formatting unit tests (11 cases)
+├── test_logger/                # Logger dispatch + transport unit tests (13 cases)
+├── test_measurement_store/     # MeasurementStore validation unit tests (11 cases)
+├── test_nvs_manager/           # NVSManager round-trip unit tests (9 cases)
+├── test_ring_buffer/           # RingBufferTransport unit tests (16 cases)
+└── test_vector_compute/        # VectorCompute unit tests (9 cases — LDC1101 signal math)
+```
 
-More information about PlatformIO Unit Testing:
-- https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
+Total: **108 test cases** across 8 suites. All run on native (PC) — no device required.
+
+## Running Tests
+
+**From terminal (recommended on Windows):**
+```powershell
+pio test -e native-test
+```
+
+**From VS Code:** PlatformIO sidebar → Test → native-test → ▶ Run All Tests
+
+## Windows: VS Code Test Runner `ERRORED`
+
+If running via VS Code Test Explorer produces:
+```
+Error: *** [test_logger.o] The process cannot access the file because it is
+being used by another process
+native-test:test_logger [ERRORED]
+```
+
+This is a **Windows Defender file lock** on `.pio\build\` object files — not a code bug.
+Fix (one-time, requires admin PowerShell):
+```powershell
+Add-MpPreference -ExclusionPath "D:\GitHub\CoinTrace\.pio"
+```
+
+See `docs/guides/DEBUGGING.md` §8 — "Native tests ERRORED" for full details.
+
+## Adding New Tests
+
+1. Create `test/test_<module>/test_<module>.cpp`
+2. Add a mock in `test/mocks/` if the module uses Arduino/ESP32 APIs
+3. Implement mock stubs in `test/mock_impl.cpp` if needed
+4. Run `pio test -e native-test` — PlatformIO auto-discovers the new suite
