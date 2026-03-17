@@ -1,8 +1,8 @@
 # Wave 8 Roadmap — Connectivity + Infrastructure + Sensor Integration
 
-**Статус:** 📋 Planning  
-**Версія:** 1.1.0  
-**Дата:** 2026-03-17 (оновлено після незалежного аудиту)  
+**Статус:** � In Progress — Фаза 1 (B-1/B-2/B-3/C-3 завершено, A-1 наступний)  
+**Версія:** 1.2.0  
+**Дата:** 2026-03-17 (оновлено після реалізації Wave 8 Phase 1 batch B+C-3)  
 **Попередня хвиля:** Wave 7 — Storage Foundation (`d53a440`, 84/84 native tests, hardware verified)
 
 ---
@@ -47,10 +47,10 @@ Cross-ref: [STORAGE_ARCHITECTURE.md §15](./STORAGE_ARCHITECTURE.md), [CONNECTIV
 | Web UI (HTML/CSS/JS) | ❌ | A-5 | Match screen тестується через manual POST |
 | WebSocket (status+log frames) | ❌ | A-6 | Sensor frames = stub |
 | BLE GATT service | ❌ | A-7 | Опційно, Wave 8 backlog |
-| `test_nvs_manager/` | ❌ | B-1 | Native, Preferences mock готовий |
-| `test_fingerprint_cache/` | ❌ | B-2 | Потребує loadTestEntry() accessor |
-| GPIO0 boot recovery | ❌ | B-3 | Тривіальний setup() fix (§17.2 STORAGE_ARCH) |
-| **Vector computation math** | ❌ | **C-3\*** | **Чиста математика над float[4] — unit-testable зараз!** |
+| `test_nvs_manager/` | ✅ | B-1 | 9/9 native tests PASSED (`bde3c03`) |
+| `test_fingerprint_cache/` | ✅ | B-2 | 6/6 native tests PASSED, `loadTestEntry()` додано |
+| GPIO0 boot recovery | ✅¹ | B-3 | Реалізовано в `src/main.cpp`; ¹потребує hw-верифікації |
+| **Vector computation math** | ✅ | **C-3\*** | **9/9 native tests PASSED, OLS slope верифіковано** |
 | `POST /api/v1/measure/start` | ⚠️ partial | A-3 | Stub: `503 sensor_not_ready` до C-2 |
 | WebSocket sensor frames | ⚠️ partial | A-6 | Stub → real після C-2 |
 | R-01 → real protocol_id | ✅ БЛОК | C-1 | Визначає fSENSOR MIKROE-3240 |
@@ -607,8 +607,8 @@ A-7  BLE GATT (опційно)              ~3-4 дні
 - [ ] OTA: `POST /api/v1/ota/update` без натискання 'O' → 403 Forbidden
 - [ ] OTA: `POST /api/v1/ota/update` після 'O' → успішний flash → reboot → auto-rollback test
 - [ ] `pio run -e uploadfs-sys -t uploadfs` → Web UI оновлюється, LittleFS_data не торкається
-- [ ] Native tests: всі (B-1 + B-2 + C-3 tests) → 100% pass
-- [ ] GPIO0 held at boot → Serial: "formatting LittleFS_data..." → restart
+- [x] Native tests: B-1 (9) + B-2 (6) + C-3 (9) + legacy (84) = **108/108 PASSED** (2026-03-17)
+- [ ] GPIO0 held at boot → Serial: "formatting LittleFS_data..." → restart  ← _потрібен hardware flash_
 - [ ] heap_min > 50 KB після 5 хв роботи з 1 WebSocket клієнтом (зафіксувати фактичне значення для W-10 calibration)
 
 ### Wave 8 фаза 2 (після LDC1101):
@@ -623,4 +623,5 @@ A-7  BLE GATT (опційно)              ~3-4 дні
 ---
 
 *Версія 1.0.0 — Wave 8 initial planning. Constraint: LDC1101 MIKROE-3240 in transit (2026-03-17).*  
-*Версія 1.1.0 — [Wave8-Audit-v1] Впроваджено 9 знахідок зовнішнього аудиту: W-01 QR альтернативи (A-1); W-02 GET /api/v1/sensor/state (A-3, матриця, acceptance); W-03 A-5 split A-5a/A-5b + timeline revision; W-04 WebSocket sensor frame pos field (A-6); W-06 C-1 процедура Eq.6/Eq.11 замість DIG_CONFIG; W-07 rp[3] ADR — STEP_DRIFT + drift validation 5% threshold (C-2); W-08 timeout 120s (C-2); W-09 keyboard advance v1 (C-2); W-10 RAM budget audit note. W-11/W-12 false positive — STORAGE_ARCHITECTURE v1.7.1 вже виправлено.*
+*Версія 1.1.0 — [Wave8-Audit-v1] Впроваджено 9 знахідок зовнішнього аудиту: W-01 QR альтернативи (A-1); W-02 GET /api/v1/sensor/state (A-3, матриця, acceptance); W-03 A-5 split A-5a/A-5b + timeline revision; W-04 WebSocket sensor frame pos field (A-6); W-06 C-1 процедура Eq.6/Eq.11 замість DIG_CONFIG; W-07 rp[3] ADR — STEP_DRIFT + drift validation 5% threshold (C-2); W-08 timeout 120s (C-2); W-09 keyboard advance v1 (C-2); W-10 RAM budget audit note. W-11/W-12 false positive — STORAGE_ARCHITECTURE v1.7.1 вже виправлено.*  
+*Версія 1.2.0 — Phase 1 batch B+C-3 реалізовано: B-3 GPIO0 recovery (`src/main.cpp`); C-3 `VectorCompute.h/.cpp` + OLS slope; B-1 `Preferences.h` in-memory KV mock + `test_nvs_manager/`; B-2 `loadTestEntry()` + `test_fingerprint_cache/`; `platformio.ini` розширено. 108/108 native tests PASSED. B-3 потребує hardware-верифікації (GPIO0 pin hold). Наступний крок: A-1 WiFiManager.*

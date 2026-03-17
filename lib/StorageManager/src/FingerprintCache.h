@@ -83,13 +83,6 @@ public:
     // Number of top candidates returned by query().
     static constexpr uint8_t QUERY_TOP_N = 10;
 
-    // TODO(wave8): Add test_fingerprint_cache/ covering:
-    //   - query() weighted Euclidean distance + insertion sort (top-N ordering)
-    //   - confidence = exp(-d²/σ²): d=0 → 1.0, d=CONFIDENCE_SIGMA → ~0.368
-    //   - query() returns 0 on uninitialised cache (count_==0)
-    //   - maxResults truncation (request 3 from cache of 10)
-    //   Requires a #ifdef UNIT_TEST loadTestEntry() accessor in this class.
-
     // SD source path for index.json.
     static constexpr const char* SD_INDEX_PATH = "/CoinTrace/database/index.json";
 
@@ -122,6 +115,19 @@ public:
 
     // Number of entries currently loaded.
     uint16_t entryCount() const { return count_; }
+
+#ifdef UNIT_TEST
+    // Direct entry injection for unit tests.
+    // Bypasses init() so query() can be tested without SD/LittleFS.
+    // Call loadTestEntry() one or more times, then set ready_ via beginTest().
+    void loadTestEntry(const CacheEntry& e) {
+        if (count_ < MAX_ENTRIES) entries_[count_++] = e;
+    }
+    // Mark the cache ready after injecting test entries.
+    void beginTest() { ready_ = (count_ > 0); }
+    // Reset the cache back to empty.
+    void resetTest() { count_ = 0; ready_ = false; }
+#endif
 
     // Find the top-N closest matches for an input measurement vector.
     //

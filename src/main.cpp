@@ -103,6 +103,26 @@ void setup() {
   gLogger.addTransport(&gSerialTransport);
   gLogger.addTransport(&gRingTransport);
 
+  // ── 1a. GPIO0 boot recovery (Wave 8 B-3) ─────────────────────
+  // STORAGE_ARCHITECTURE.md §17.2 [1.4]: GPIO0 held LOW at boot → format
+  // LittleFS_data (factory data clear).  Skip if waking from deep sleep
+  // (Soft Shutdown Fn+Q — §14.3) to avoid erasing measurements on normal
+  // wake-from-sleep cycle.
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
+    pinMode(0, INPUT_PULLUP);
+    if (digitalRead(0) == LOW) {
+      Serial.println("[BOOT] GPIO0 held LOW — formatting LittleFS_data...");
+      LittleFSManager tmpLfs;
+      if (tmpLfs.mountData()) {
+        tmpLfs.formatData();
+        Serial.println("[BOOT] LittleFS_data formatted — restarting");
+      } else {
+        Serial.println("[BOOT] LittleFS_data mount failed during GPIO0 recovery");
+      }
+      esp_restart();
+    }
+  }
+
   gLogger.info("System", "CoinTrace %s starting", COINTRACE_VERSION);
   gLogger.info("System", "CPU: %d MHz | Heap: %u B | PSRAM: %u MB",
                ESP.getCpuFreqMHz(), ESP.getFreeHeap(),
