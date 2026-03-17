@@ -1,8 +1,8 @@
 # Wave 8 Roadmap — Connectivity + Infrastructure + Sensor Integration
 
 **Статус:** 📋 Planning  
-**Версія:** 1.0.0  
-**Дата:** 2026-03-17  
+**Версія:** 1.1.0  
+**Дата:** 2026-03-17 (оновлено після незалежного аудиту)  
 **Попередня хвиля:** Wave 7 — Storage Foundation (`d53a440`, 84/84 native tests, hardware verified)
 
 ---
@@ -42,6 +42,7 @@ Cross-ref: [STORAGE_ARCHITECTURE.md §15](./STORAGE_ARCHITECTURE.md), [CONNECTIV
 | `GET /api/v1/log` | ❌ | A-3 | RingBufferTransport |
 | `GET /api/v1/database` | ❌ | A-3 | FingerprintCache::entryCount() |
 | **`POST /api/v1/database/match`** | ❌ | A-3 | **Vector у тілі запиту — повністю тестується без сенсора** |
+| `GET /api/v1/sensor/state` | ❌ | A-3 | Proxy до getCoinState(); повертає IDLE_NO_COIN до C-2 |
 | OTA mechanism | ❌ | A-4 | ADR-007 фізична клавіша 'O' |
 | Web UI (HTML/CSS/JS) | ❌ | A-5 | Match screen тестується через manual POST |
 | WebSocket (status+log frames) | ❌ | A-6 | Sensor frames = stub |
@@ -89,6 +90,8 @@ public:
 **Залежності:** `NVSManager::loadWifi()` / `saveWifi()` — Wave 7 ✅  
 **ADR:** ADR-005 (WiFi Provisioning via keyboard), ADR-006 (WiFi + BLE coexistence)  
 **Дисплей:** показати IP + SSID. QR-код `http://192.168.4.1` для AP mode.
+
+> **W-01 (audit):** QR generation на ESP32 потребує бібліотеку (~10 KB RAM). Альтернативи для v1: (a) pre-rendered PNG у `LittleFS_sys/web/qr-ap.png` (статичний, завжди `192.168.4.1`), або (b) `qrcode.js` (15 KB) на клієнті — генерує QR з актуального IP динамічно. Рекомендую варіант (b) для STA mode де IP динамічний.
 
 **main.cpp hook:**
 ```cpp
@@ -150,6 +153,12 @@ POST /api/v1/database/match            ← КЛЮЧОВИЙ для pre-sensor р
      ← 503 якщо FingerprintCache не завантажений
      ← 200 {"match":null} якщо protocol_id не знайдено (не 404)
 
+GET  /api/v1/sensor/state
+     ← {"state":"IDLE_NO_COIN"|"COIN_PRESENT"|"COIN_REMOVED"|"MEASURING_STEP_1"|"MEASURING_STEP_3"|"MEASURING_DRIFT"|"CALIBRATING"}
+     ← До C-2: повертає лише IDLE_NO_COIN/COIN_PRESENT/COIN_REMOVED (базові стани LDC1101Plugin::getCoinState())
+     ← Після C-2: повні стани multi-position state machine
+     ← Критично для Web UI: клієнт polls цей endpoint під час calibrate() (2.5 сек) замість timeout
+
 GET  /api/v1/ota/status
      ← NVS "ota": version, latest, update_available
 
@@ -192,18 +201,25 @@ POST /api/v1/calibrate
 
 **Стек:** Vanilla HTML/CSS/JS без build step або Preact (~3 KB). Цільовий розмір < 200 KB gzip. Розміщення: `data/web/` → `pio run -e uploadfs-sys -t uploadfs` (Wave 7 pipeline вже готовий).
 
-**Екрани:**
+> **W-03 (audit):** Web UI завжди займає більше часу ніж очікується. Розбити на **A-5a (MVP)** і **A-5b (повна версія)** — це зменшує critical path фази 1 на ~2-3 дні.
+
+#### A-5a: MVP (достатньо для Phase 1 acceptance criteria) — ~2 дні
 
 | Екран | Endpoint(s) | Доступний без сенсора |
 |---|---|---|
 | Status | `GET /status` | ✅ |
-| Measurements | `GET /measure/{id}` | ✅ (Wave 7 UNKN виміри) |
 | **Match** | `POST /database/match` | ✅ ← ключовий pre-sensor test |
+
+**Match screen (pre-sensor режим):** форма для ручного введення 5 компонентів вектора → POST → відображення match result + alternatives. Після прибуття сенсора — замінюється автозаповненням з останнього виміру.
+
+#### A-5b: Повна версія — ~3 дні (не в critical path фази 1)
+
+| Екран | Endpoint(s) | Доступний без сенсора |
+|---|---|---|
+| Measurements | `GET /measure/{id}` | ✅ (Wave 7 UNKN виміри) |
 | Log stream | WebSocket `"t":"log"` | ✅ |
 | Settings | `GET/POST` NVS fields | ✅ |
 | Sensor stream | WebSocket `"t":"sensor"` | ⏳ після C-2 |
-
-**Match screen (pre-sensor режим):** форма для ручного введення 5 компонентів вектора → POST → відображення match result + alternatives. Після прибуття сенсора — замінюється автозаповненням з останнього виміру.
 
 ---
 
@@ -221,7 +237,7 @@ POST /api/v1/calibrate
 
 **Frames-стаби (активуються в Track C):**
 ```json
-{"v":1,"t":"sensor","rp":1250.5,"l":18.2,"ts":1234567}
+{"v":1,"t":"sensor","rp":1250.5,"l":18.2,"pos":0,"ts":1234567}
 {"v":1,"t":"result","match":"Ag925","conf":0.94,"vector":{...}}
 {"v":1,"t":"shutdown_pending","hold_ms_remaining":1500}
 {"v":1,"t":"shutdown_complete"}
@@ -336,7 +352,7 @@ if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
 
 **Процедура:**
 1. Підключити LDC1101, запустити пристрій
-2. Читати `REG_DIG_CONFIG` для визначення фактичного поточного fSENSOR
+2. Прочитати boot log: `initialize()` і `calibrate()` обчислюють fSENSOR за Eq.6 (`fSENSOR = fCLKIN × RESP_TIME / (3 × L_DATA)`) та Eq.11 (`fSENSOR = LHR_DATA × 2 × fCLKIN / 2²⁴`); обидва значення логуються в `[LDC1101]` рядках. `REG_DIG_CONFIG` містить RESP_TIME/MIN_FREQ — не fSENSOR напряму.
 3. Зафіксувати у вигляді `protocol_id` за форматом FINGERPRINT_DB §3.2
 4. Оновити NVS "sensor"."proto_id" (в коді та seed data)
 
@@ -353,25 +369,36 @@ if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
 
 **Поточний стан loop():** зберігає вимір при `COIN_REMOVED` з 1 позицією (`pos_count=1`).
 
-**Цільова state machine (4 позиції):**
+**Цільова state machine (4 позиції + drift check):**
 
 ```
 IDLE ──── coin placed ────►  STEP_0   rp[0],l[0]
                                 │
-                         display "Move to 1mm"
+                 keyboard 'ENTER': "Place on 1mm spacer, press ENTER"
+                           (timeout 120s → abort → IDLE)
                                 ▼
                              STEP_1   rp[1],l[1]
                                 │
-                         display "Move to 3mm"
+                 keyboard 'ENTER': "Place on 3mm spacer, press ENTER"
+                           (timeout 120s → abort → IDLE)
                                 ▼
                              STEP_3   rp[2],l[2]    ← назва STEP_3 = дистанція
                                 │
-                         display "Return to 0mm"     (опційно для drift check)
+                 keyboard 'ENTER': "Return to 0mm (no spacer), press ENTER"
+                           (timeout 120s → abort → IDLE)
                                 ▼
+                          STEP_DRIFT  rp[3],l[3]    ← drift check: rp[3] ≈ rp[0]
+                                │
                           STEP_COMPUTE → computeVector() → queryFingerprint() → save()
                                 │
                               IDLE
 ```
+
+**Семантика `rp[3]` (W-07 ADR):** `rp[3]` = reading at 0mm після повернення монети (перевірка дрейфу). Спрощення: якщо `|rp[3] - rp[0]| / rp[0] > 0.05` (5%) → лог WARNING "Sensor drift detected" + зберегти вимір з `conf = 0.0` (не входить у matching). `rp[3]` **не входить** у VectorCompute — тільки rp[0..2].
+
+> **W-08 (audit):** Timeout 120 с (не 60 с) — фізична дія + пошук spacer займає більше часу ніж здається. `esp_timer` або `millis()` від входу в стан.
+>
+> **W-09 (audit):** Step detection v1 = клавіатурне підтвердження 'ENTER' ("Press when ready"). Автоматична детекція через RP threshold (RP при 1mm < RP при 0mm) — v1.5 enhancement.
 
 **Дисплей під час вимірювання:**
 ```
@@ -382,7 +409,7 @@ IDLE ──── coin placed ────►  STEP_0   rp[0],l[0]
    Place on 1mm spacer →
 ```
 
-**Timeout:** якщо наступний крок не виконаний за 60 с → abort → `IDLE`.
+**Timeout:** якщо наступний крок не виконаний за **120 с** → abort → `IDLE`.
 
 ---
 
@@ -524,8 +551,9 @@ gWebSocket.broadcastResult(m, matches, n);
   A-1  WiFiManager AP/STA         ~2 дні
   A-2  AsyncWebServer + mDNS      ~1 день
   A-3  HTTP REST endpoints        ~2 дні    ← database/match тестується одразу
-  A-4  OTA mechanism              ~1 день
-  A-5  Web UI skeleton            ~2-3 дні  ← match screen manual test без сенсора
+  A-4  OTA mechanism              ~2 дні    ← partition swap + rollback потребує тестування
+  A-5a Web UI MVP (Status+Match)  ~2 дні   ← достатньо для фази 1 acceptance
+  A-5b Web UI повна версія        ~3 дні   ← не в critical path
   A-6  WebSocket streaming        ~1 день   (status + log frames; sensor = stub)
 ```
 
@@ -557,6 +585,8 @@ A-7  BLE GATT (опційно)              ~3-4 дні
 | + index.json (200 монет, ~16 KB) | ~282 KB | ~55 KB ✅ |
 | WiFi + BLE + index.json 1000 | ~→ OOM | ❌ не відкривати |
 
+> **W-10 (audit):** Числа базуються на CONNECTIVITY_ARCHITECTURE §8.7 (консервативні оцінки). Детальний перерахунок дає **~113-138 KB вільно** після WiFi+WebServer+WebSocket+200 entries. Різниця через те, що числа §8.7 включали PSRAM overhead відсутній на Cardputer-Adv. **Рекомендація: не обмежувати FP DB до 200 entries завчасно.** Виміряти реальний `heap_min` при Phase 1 acceptance test (після першого WebSocket клієнта). Якщо `heap_min` > 100 KB — 1000 entries без BLE реально.
+
 **Висновок для Wave 8 фази 1:** обмежити FP DB до ~200 монет в RAM або вимикати BLE під час Deep Scan (ADR-006).
 
 **Моніторинг:** `GET /api/v1/status` → поле `heap_min` (`ESP.getMinFreeHeap()`). Перевіряти після кожного підключення першого клієнта та після завантаження index.json.
@@ -567,9 +597,10 @@ A-7  BLE GATT (опційно)              ~3-4 дні
 
 ### Wave 8 фаза 1 (до LDC1101):
 
-- [ ] WiFi AP mode: підключитись телефоном → `http://192.168.4.1` відкриває Web UI
+- [ ] WiFi AP mode: підключитись телефоном → `http://192.168.4.1` відкриває Web UI (A-5a: Status + Match screens)
 - [ ] WiFi STA mode: ввести SSID/pass на клавіатурі → підключитись → `cointrace.local` резолвиться
 - [ ] `GET /api/v1/status` → heap, uptime, wifi state, meas_count — коректні
+- [ ] `GET /api/v1/sensor/state` → `{"state":"IDLE_NO_COIN"}` без монети
 - [ ] `GET /api/v1/measure/{id}` → Wave 7 виміри (UNKN) відображаються в UI
 - [ ] `POST /api/v1/database/match` → вручну введений vector → match result з synthetic DB
 - [ ] WebSocket: Live log stream відображається у Web UI при подіях
@@ -578,16 +609,18 @@ A-7  BLE GATT (опційно)              ~3-4 дні
 - [ ] `pio run -e uploadfs-sys -t uploadfs` → Web UI оновлюється, LittleFS_data не торкається
 - [ ] Native tests: всі (B-1 + B-2 + C-3 tests) → 100% pass
 - [ ] GPIO0 held at boot → Serial: "formatting LittleFS_data..." → restart
-- [ ] heap_min > 50 KB після 5 хв роботи з 1 WebSocket клієнтом
+- [ ] heap_min > 50 KB після 5 хв роботи з 1 WebSocket клієнтом (зафіксувати фактичне значення для W-10 calibration)
 
 ### Wave 8 фаза 2 (після LDC1101):
 
-- [ ] R-01: реальний fSENSOR зафіксований, protocol_id оновлений, synthetic entries видалені
-- [ ] Multi-position: coin placed → 4 кроки → result на дисплеї та в WebSocket result frame
+- [ ] R-01: реальний fSENSOR зафіксований з boot log (Eq.6/Eq.11), protocol_id оновлений, synthetic entries видалені
+- [ ] Multi-position: coin placed → 4 кроки + STEP_DRIFT → result на дисплеї та в WebSocket result frame
+- [ ] Drift check: `|rp[3] - rp[0]| / rp[0] < 5%` для стабільного сенсора; WARNING лог при перевищенні
 - [ ] `queryFingerprint()`: confidence > 0.7 для правильного металу (3 тестові монети)
-- [ ] WebSocket sensor frame: real-time rp/l stream при COIN_PRESENT
+- [ ] WebSocket sensor frame: real-time rp/l/pos stream при COIN_PRESENT
 - [ ] FP DB: мінімум 3 реальні монети різних металів, entryCount() > 0
 
 ---
 
-*Версія 1.0.0 — Wave 8 initial planning. Constraint: LDC1101 MIKROE-3240 in transit (2026-03-17).*
+*Версія 1.0.0 — Wave 8 initial planning. Constraint: LDC1101 MIKROE-3240 in transit (2026-03-17).*  
+*Версія 1.1.0 — [Wave8-Audit-v1] Впроваджено 9 знахідок зовнішнього аудиту: W-01 QR альтернативи (A-1); W-02 GET /api/v1/sensor/state (A-3, матриця, acceptance); W-03 A-5 split A-5a/A-5b + timeline revision; W-04 WebSocket sensor frame pos field (A-6); W-06 C-1 процедура Eq.6/Eq.11 замість DIG_CONFIG; W-07 rp[3] ADR — STEP_DRIFT + drift validation 5% threshold (C-2); W-08 timeout 120s (C-2); W-09 keyboard advance v1 (C-2); W-10 RAM budget audit note. W-11/W-12 false positive — STORAGE_ARCHITECTURE v1.7.1 вже виправлено.*

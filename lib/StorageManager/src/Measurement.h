@@ -9,6 +9,14 @@
 //   rp[0], l[0]     — populated from LDC1101Plugin::read()
 //   rp[1..3], l[1..3] — zero-filled (reserved for P-5+ multi-position fixture)
 //
+// Wave 8 C-2 multi-position semantics (WAVE8_ROADMAP.md §C-2, W-07 ADR):
+//   rp[0], l[0]  — reading at 0mm (contact / no spacer)
+//   rp[1], l[1]  — reading at 1mm spacer
+//   rp[2], l[2]  — reading at 3mm spacer
+//   rp[3], l[3]  — drift check: return-to-0mm reading after STEP_3
+//                  NOT part of VectorCompute (only rp[0..2] enter vector math)
+//                  |rp[3] - rp[0]| / rp[0] > 0.05 → sensor drift warning, conf=0.0
+//
 // JSON layout (write order matters — ADR-ST-006 sentinel-last invariant):
 //   { "ts":…, "device_id":…, "protocol":…, "pos_count":1,
 //     "rp":[…], "l":[…], "metal_code":"UNKN", "coin_name":"Unclassified",
