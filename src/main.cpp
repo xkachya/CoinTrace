@@ -16,6 +16,7 @@
 #include "PluginContext.h"
 #include "LDC1101Plugin.h"
 #include "NVSManager.h"
+#include "WiFiManager.h"     // Wave 8 A-1
 #include "LittleFSManager.h"
 #include "LittleFSTransport.h"
 #include "MeasurementStore.h"
@@ -39,6 +40,7 @@ static MeasurementStore  gMeasStore(gLFS, gNVS);
 static SDCardManager     gSDCard;        // Wave 7 P-4 — optional SD archive tier
 static FingerprintCache  gFPCache;        // Wave 7 P-4 — fingerprint index in RAM
 static StorageManager    gStorage(gNVS, gLFS, gSDCard, gFPCache, gMeasStore);  // Wave 7 P-5 — unified Facade
+static WiFiManager       gWifi;                    // Wave 8 A-1 — AP/STA management
 // LDC1101Plugin is heap-allocated in setup() so PluginSystem::end()
 // can safely call delete (ownership contract — PLUGIN_ARCHITECTURE.md §3.1).
 // Hold a raw pointer (non-owning) for direct coin-state access in loop().
@@ -297,6 +299,19 @@ void setup() {
 
   gLogger.info("System", "CoinTrace ready — %d/%d plugins initialised",
                gPluginSystem.readyCount(), gPluginSystem.pluginCount());
+
+  // ── 6. WiFiManager (Wave 8 A-1) §17.2 [10] ──────────────────────────────
+  // begin() blocks ≤10 s in STA mode, then falls back to AP automatically.
+  gWifi.begin(gNVS);
+  gCtx.wifi = &gWifi;
+  gLogger.info("WiFi", "%s — SSID: %s  IP: %s",
+               gWifi.isAP() ? "AP mode" : "STA mode",
+               gWifi.getSSID(), gWifi.getIP());
+  // Show WiFi status in the bottom section of the splash screen.
+  M5Cardputer.Display.setTextSize(1);
+  M5Cardputer.Display.setTextColor(gWifi.isAP() ? CYAN : GREEN);
+  M5Cardputer.Display.setCursor(5, 107);
+  M5Cardputer.Display.printf("%s  %s", gWifi.getSSID(), gWifi.getIP());
 }
 
 void loop() {
@@ -315,12 +330,19 @@ void loop() {
         const char key = status.word[0];
         LOG_DEBUG(&gLogger, "Input", "Key: %c (0x%02X)", key, (uint8_t)key);
 
-        // Display key on screen
-        M5Cardputer.Display.fillRect(0, M5Cardputer.Display.height() - 20,
-                                       M5Cardputer.Display.width(), 20, BLACK);
-        M5Cardputer.Display.setCursor(10, M5Cardputer.Display.height() - 18);
-        M5Cardputer.Display.setTextColor(YELLOW);
-        M5Cardputer.Display.printf("Key: %c", key);
+        if (key == 'w' || key == 'W') {
+          // Wave 8 A-1: interactive STA provisioning via keyboard ('W' key).
+          // promptSTA() is blocking — reads SSID + password from keyboard,
+          // saves to NVS on success, then reconnects.
+          gWifi.promptSTA(gNVS);
+        } else {
+          // Display key on screen
+          M5Cardputer.Display.fillRect(0, M5Cardputer.Display.height() - 20,
+                                         M5Cardputer.Display.width(), 20, BLACK);
+          M5Cardputer.Display.setCursor(10, M5Cardputer.Display.height() - 18);
+          M5Cardputer.Display.setTextColor(YELLOW);
+          M5Cardputer.Display.printf("Key: %c", key);
+        }
       }
     }
   }

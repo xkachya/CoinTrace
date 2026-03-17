@@ -18,6 +18,7 @@
 class Logger;
 class ConfigManager;
 class IStorageManager;
+class WiFiManager;      // Wave 8 A-1 — CONNECTIVITY_ARCHITECTURE.md §4
 
 /**
  * @brief Container for all shared system resources.
@@ -44,9 +45,11 @@ struct PluginContext {
     ConfigManager*    config;     // Plugin configuration access (never nullptr)
     Logger*           log;        // Logging (never nullptr)
     IStorageManager*  storage;    // Persistence (may be nullptr — check before use)
+    WiFiManager*      wifi;        // WiFi state — AP/STA, getIP(), isConnected() (Wave 8 A-1)
+                                   // nullptr before WiFiManager::begin(); always check.
 
     PluginContext()
         : wire(nullptr), wireMutex(nullptr)
         , spi(nullptr),  spiMutex(nullptr)
-        , config(nullptr), log(nullptr), storage(nullptr) {}
+        , config(nullptr), log(nullptr), storage(nullptr), wifi(nullptr) {}
 };
