@@ -1,6 +1,6 @@
 # Wave 8 Roadmap — Connectivity + Infrastructure + Sensor Integration
 
-**Статус:** 🔄 In Progress — Фаза 1 (B-1/B-2/B-3/C-3/A-1/A-2 завершено, A-3 наступний)  
+**Статус:** 🔄 In Progress — Фаза 1 (B-1/B-2/B-3/C-3/A-1/A-2/A-3 завершено, **A-4 наступний**)  
 **Версія:** 1.5.0  
 **Дата:** 2026-03-18 (оновлено після hw-верифікації A-2 з фінальними вимірами + external review response)
 **Попередня хвиля:** Wave 7 — Storage Foundation (`d53a440`, 84/84 native tests, hardware verified)
@@ -37,14 +37,14 @@ Cross-ref: [STORAGE_ARCHITECTURE.md §15](./STORAGE_ARCHITECTURE.md), [CONNECTIV
 | Компонент | Залежить від LDC1101? | Track | Примітка |
 |---|---|---|---|
 | WiFiManager AP/STA | ✅ | A-1 | ✅ hw-verified 2026-03-17 — AP `CoinTrace-F974`, STA+NVS, promptSTA() |
-| AsyncWebServer + mDNS | ✅ | A-2 | hw-verified 2026-03-17 — REST API на 192.168.4.1, бут-лог через FT232RL EXT 2.54-14P |
-| `GET /api/v1/status` | ❌ | A-3 | heap/uptime/storage stats |
-| `GET /api/v1/measure/{id}` | ❌ | A-3 | Читає Wave 7 MeasurementStore |
-| `GET /api/v1/log` | ❌ | A-3 | RingBufferTransport |
-| `GET /api/v1/database` | ❌ | A-3 | FingerprintCache::entryCount() |
-| **`POST /api/v1/database/match`** | ❌ | A-3 | **Vector у тілі запиту — повністю тестується без сенсора** |
-| `GET /api/v1/sensor/state` | ❌ | A-3 | Proxy до getCoinState(); повертає IDLE_NO_COIN до C-2 |
-| OTA mechanism | ❌ | A-4 | ADR-007 фізична клавіша 'O' |
+| AsyncWebServer + mDNS | ✅ | A-2 | ✅ hw-verified 2026-03-18 — 9/9 hw tests PASSED, STA 192.168.88.53, heap idle 30 KB |
+| `GET /api/v1/status` | ❌ | A-3 | ✅ hw-verified 2026-03-18 — реалізовано в HttpServer.cpp (A-2 сесія) |
+| `GET /api/v1/measure/{id}` | ❌ | A-3 | ✅ реалізовано — MeasurementStore ring-buffer read, 404 для out-of-range |
+| `GET /api/v1/log` | ❌ | A-3 | ✅ реалізовано — RingBufferTransport, params: n/level/since_ms |
+| `GET /api/v1/database` | ❌ | A-3 | ✅ реалізовано — FingerprintCache count + ready flag |
+| **`POST /api/v1/database/match`** | ❌ | A-3 | ✅ hw-verified 2026-03-18 — conf=0.919 (xcu/synthetic), top-5 alternatives |
+| `GET /api/v1/sensor/state` | ❌ | A-3 | ✅ реалізовано — повертає IDLE_NO_COIN (pre-C-2 stub) |
+| OTA mechanism | ❌ | A-4 | ADR-007 фізична клавіша 'O' — **НАСТУПНИЙ** |
 | Web UI (HTML/CSS/JS) | ❌ | A-5 | Match screen тестується через manual POST |
 | WebSocket (status+log frames) | ❌ | A-6 | Sensor frames = stub |
 | BLE GATT service | ❌ | A-7 | Опційно, Wave 8 backlog |
@@ -52,7 +52,7 @@ Cross-ref: [STORAGE_ARCHITECTURE.md §15](./STORAGE_ARCHITECTURE.md), [CONNECTIV
 | `test_fingerprint_cache/` | ✅ | B-2 | 6/6 native tests PASSED, `loadTestEntry()` додано |
 | GPIO0 boot recovery | ✅ | B-3 | Реалізовано в `src/main.cpp`; hw-verified: пристрій перезавантажується при утриманні G0 під час 3s вікна |
 | **Vector computation math** | ✅ | **C-3\*** | **9/9 native tests PASSED, OLS slope верифіковано** |
-| `POST /api/v1/measure/start` | ⚠️ partial | A-3 | Stub: `503 sensor_not_ready` до C-2 |
+| `POST /api/v1/measure/start` | ⚠️ partial | A-3 | ✅ Stub реалізовано: `503 sensor_not_ready` до C-2 |
 | WebSocket sensor frames | ⚠️ partial | A-6 | Stub → real після C-2 |
 | R-01 → real protocol_id | ✅ БЛОК | C-1 | Визначає fSENSOR MIKROE-3240 |
 | Multi-position state machine | ✅ БЛОК | C-2 | Фізичне переміщення по 4 дистанціях |
@@ -173,6 +173,11 @@ private:
 ---
 
 ### A-3: HTTP REST Endpoints
+
+**Статус:** ✅ Реалізовано в рамках A-2 hw-сесії (2026-03-18) — `lib/HttpServer/src/HttpServer.cpp`  
+**Всі 9 ендпоінтів hw-verified:** GET /status, /sensor/state, /database, /log, /measure/{id}, /ota/status; POST /database/match, /measure/start (503), /ota/update (403)
+
+> ℹ️ A-2 і A-3 реалізовані разом як єдиний `HttpServer`. Поділ залишається в роадмапі для архівних цілей.
 
 #### Повністю функціональні без сенсора:
 
@@ -586,18 +591,18 @@ gWebSocket.broadcastResult(m, matches, n);
 ### Фаза 1: LDC1101 в дорозі
 
 ```
-Паралельно:
-  B-1  test_nvs_manager/          ~1 день    (нативні тести, Preferences mock є)
-  B-2  test_fingerprint_cache/    ~1 день    (loadTestEntry() accessor + 5 тестів)
-  B-3  GPIO0 boot recovery        ~2 год     (тривіальний setup() fix)
-  C-3  VectorCompute              ~1 день    (header-only + unit tests)
+Завершено ✅:
+  B-1  test_nvs_manager/          9/9 native tests PASSED
+  B-2  test_fingerprint_cache/    6/6 native tests PASSED
+  B-3  GPIO0 boot recovery        hw-verified (3s splash window)
+  C-3  VectorCompute              9/9 native tests PASSED
+  A-1  WiFiManager AP/STA         hw-verified 2026-03-17
+  A-2  AsyncWebServer + mDNS      hw-verified 2026-03-18 — 9/9 REST tests
+  A-3  HTTP REST endpoints        hw-verified 2026-03-18 (реалізовано з A-2)
 
-Послідовно:
-  A-1  WiFiManager AP/STA         ~2 дні
-  A-2  AsyncWebServer + mDNS      ~1 день
-  A-3  HTTP REST endpoints        ~2 дні    ← database/match тестується одразу
+Наступний ➜ A-4 (OTA):
   A-4  OTA mechanism              ~2 дні    ← partition swap + rollback потребує тестування
-  A-5a Web UI MVP (Status+Match)  ~2 дні   ← достатньо для фази 1 acceptance
+  A-5a Web UI MVP (Status+Match)  ~2 дні    ← достатньо для фази 1 acceptance
   A-5b Web UI повна версія        ~3 дні   ← не в critical path
   A-6  WebSocket streaming        ~1 день   (status + log frames; sensor = stub)
 ```
@@ -634,6 +639,10 @@ A-7  BLE GATT (опційно)              ~3-4 дні
 
 **Висновок для Wave 8 фази 1:** обмежити FP DB до ~200 монет в RAM або вимикати BLE під час Deep Scan (ADR-006).
 
+> **Hw-measured (2026-03-18, STA+HTTP ready, no WebSocket):** heap idle = 30 052 B, heap_max_block = 21 492 B (72%). Детальні дані: `docs/architecture/MEMORY_MAP.md §3`.  
+> mDNS (−15 KB) наразі **вимкнено** (Bug B-03 fix). Re-enable після A-6 heap validation: якщо heap_min > 45 KB з 1 WS клієнтом → mDNS можна ввімкнути.  
+> BLE не тестувалось — залишається теоретичним.
+
 **Моніторинг:** `GET /api/v1/status` → поле `heap_min` (`ESP.getMinFreeHeap()`). Перевіряти після кожного підключення першого клієнта та після завантаження index.json.
 
 ---
@@ -643,18 +652,18 @@ A-7  BLE GATT (опційно)              ~3-4 дні
 ### Wave 8 фаза 1 (до LDC1101):
 
 - [ ] WiFi AP mode: підключитись телефоном → `http://192.168.4.1` відкриває Web UI (A-5a: Status + Match screens)
-- [ ] WiFi STA mode: ввести SSID/pass на клавіатурі → підключитись → `cointrace.local` резолвиться
-- [ ] `GET /api/v1/status` → heap, uptime, wifi state, meas_count — коректні
-- [ ] `GET /api/v1/sensor/state` → `{"state":"IDLE_NO_COIN"}` без монети
-- [ ] `GET /api/v1/measure/{id}` → Wave 7 виміри (UNKN) відображаються в UI
-- [ ] `POST /api/v1/database/match` → вручну введений vector → match result з synthetic DB
-- [ ] WebSocket: Live log stream відображається у Web UI при подіях
-- [ ] OTA: `POST /api/v1/ota/update` без натискання 'O' → 403 Forbidden
-- [ ] OTA: `POST /api/v1/ota/update` після 'O' → успішний flash → reboot → auto-rollback test
+- [ ] WiFi STA mode: ввести SSID/pass на клавіатурі → підключитись → `cointrace.local` резолвиться ⚠️ mDNS вимкнено (B-03), re-enable після A-6 heap validation
+- [x] `GET /api/v1/status` → heap, uptime, wifi state, heap_max_block — hw-verified 2026-03-18
+- [x] `GET /api/v1/sensor/state` → `{"state":"IDLE_NO_COIN"}` — hw-verified 2026-03-18
+- [x] `POST /api/v1/database/match` → вручну введений vector → match result с synthetic DB — hw-verified 2026-03-18 (conf=0.919)
+- [ ] `GET /api/v1/measure/{id}` → Wave 7 виміри (UNKN) відображаються в UI (потребує A-5a)
+- [ ] WebSocket: Live log stream відображається у Web UI при подіях (A-6)
+- [x] OTA stub: `POST /api/v1/ota/update` без натискання 'O' → 403 Forbidden — hw-verified 2026-03-18
+- [ ] OTA full: `POST /api/v1/ota/update` після 'O' → успішний flash → reboot → auto-rollback test (A-4)
 - [ ] `pio run -e uploadfs-sys -t uploadfs` → Web UI оновлюється, LittleFS_data не торкається
-- [x] Native tests: B-1 (9) + B-2 (6) + C-3 (9) + legacy (84) = **108/108 PASSED** (2026-03-17)
-- [ ] GPIO0 held at boot → Serial: "formatting LittleFS_data..." → restart  ← _потрібен hardware flash_
-- [ ] heap_min > 50 KB після 5 хв роботи з 1 WebSocket клієнтом (зафіксувати фактичне значення для W-10 calibration)
+- [x] Native tests: B-1 (9) + B-2 (6) + C-3 (9) + legacy (84) = **108/108 PASSED** (2026-03-18)
+- [ ] GPIO0 held at boot → Serial: "formatting LittleFS_data..." → restart  ← _потребує фізичного flash, ще не перевірено_
+- [ ] heap_min > 50 KB після 5 хв роботи з 1 WebSocket клієнтом (зафіксувати для W-10 calibration + mDNS decision)
 
 ### Wave 8 фаза 2 (після LDC1101):
 
@@ -667,7 +676,7 @@ A-7  BLE GATT (опційно)              ~3-4 дні
 
 ---
 
-*Версія 1.0.0 — Wave 8 initial planning. Constraint: LDC1101 MIKROE-3240 in transit (2026-03-17).*  
+*Версія 1.5.0 — A-2 + A-3 завершено та hw-verified (2026-03-18). 9/9 REST endpoints, 108/108 native tests. heap idle 30 KB, heap_max_block 72%, drift 948 B. LFS task stack 4096→3072 B. MEMORY_MAP.md та HW_TESTING.md додано. mDNS вимкнено (B-03 OOM fix) — рішення після A-6 heap measurement. Наступний: A-4 OTA mechanism.*  
 *Версія 1.1.0 — [Wave8-Audit-v1] Впроваджено 9 знахідок зовнішнього аудиту: W-01 QR альтернативи (A-1); W-02 GET /api/v1/sensor/state (A-3, матриця, acceptance); W-03 A-5 split A-5a/A-5b + timeline revision; W-04 WebSocket sensor frame pos field (A-6); W-06 C-1 процедура Eq.6/Eq.11 замість DIG_CONFIG; W-07 rp[3] ADR — STEP_DRIFT + drift validation 5% threshold (C-2); W-08 timeout 120s (C-2); W-09 keyboard advance v1 (C-2); W-10 RAM budget audit note. W-11/W-12 false positive — STORAGE_ARCHITECTURE v1.7.1 вже виправлено.*  
 *Версія 1.3.0 — B-3 GPIO0 recovery hw-verified: пристрій перезавантажується при утриманні G0 під час 3s splash-вікна; `LittleFSManager::formatData()` додано; `RTC_DATA_ATTR gRtcBootReason` для boot reason tracking; визуальний countdown на дисплеї. Попередня: v1.2.0 — Phase 1 batch B+C-3 реалізовано: B-3 GPIO0 recovery (`src/main.cpp`); C-3 `VectorCompute.h/.cpp` + OLS slope; B-1 `Preferences.h` in-memory KV mock + `test_nvs_manager/`; B-2 `loadTestEntry()` + `test_fingerprint_cache/`; `platformio.ini` розширено. 108/108 native tests PASSED. Наступний крок: A-1 WiFiManager.*  
 *Версія 1.3.1 — [B-3-audit-fix] впроваджено 2 знахідки B3_Delta_Independent_Audit: Fix 1 — early-exit GPIO0 window (200ms quick poll, boot penalty 3000→200ms); Fix 2 — `formatData()` SAFETY comment (R-02 race condition); D-01 portability note (USB-CDC vs UART bridge). STORAGE_ARCHITECTURE → v1.8.1.*  
