@@ -211,6 +211,22 @@
 
 ---
 
+### 13. 🗺️ [WAVE8_ROADMAP.md](./WAVE8_ROADMAP.md) - **Wave 8: Connectivity + Sensor Integration**
+**Для кого:** Розробники, архітектори, технічні ліди що починають Wave 8  
+**Що містить:**
+- Матриця залежностей від LDC1101: 10 розблокованих задач vs 6 hardware-gated
+- **Track A** (connectivity): WiFiManager, AsyncWebServer+mDNS, HTTP REST API, OTA, Web UI, WebSocket, BLE GATT
+- **Track B** (infrastructure): `test_nvs_manager/`, `test_fingerprint_cache/`, GPIO0 boot recovery
+- **Track C** (hardware-gated): R-01 protocol_id, multi-position state machine, VectorCompute, queryFingerprint wiring, σ tuning, real FP DB seeding
+- Ключовий insight: **C-3 VectorCompute** (dRp1/k1/k2/slope/dL1) — доступний зараз, чиста `float[4]` математика без SPI
+- Рекомендована послідовність: Фаза 1 (сенсор у дорозі) + Фаза 2 (після прибуття)
+- RAM бюджет Wave 8: ~96 KB вільно після WiFi init, безпечна межа ~200 FP entries
+- Acceptance Criteria: 7 пунктів Фаза 1 + 6 пунктів Фаза 2
+
+**Прочитати першим якщо ви:** Починаєте Wave 8 реалізацію, або хочете знати яку задачу взяти поки LDC1101 у дорозі
+
+---
+
 ## 🎯 Швидкий старт: Що читати?
 
 ### Якщо ви **Менеджер проекту:**
@@ -426,6 +442,10 @@ ISensorPlugin, IIMUPlugin, IStoragePlugin
 | | | - Формальний контракт система ↔ плагін |
 | | | - `PluginContext`, Thread Safety, Memory limits |
 | | | - Переведено `initialize(PluginContext* ctx)` |
+| 1.2.0 | 2026-03-17 | Додано `WAVE8_ROADMAP.md` |
+| | | - Wave 8 план з урахуванням LDC1101 у дорозі |
+| | | - Track A/B/C матриця залежностей |
+| | | - RAM бюджет + Acceptance Criteria |
 
 ---
 
