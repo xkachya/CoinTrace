@@ -8,7 +8,8 @@
 ## Quick Reference
 
 ```powershell
-# Capture full boot log with hardware reset (recommended)
+# ⚠️ Option A (DTR/RTS reset): ESP32-S3 USB-CDC closes port on any DTR toggle — ReadExisting() may throw
+# Prefer: open port first, power-cycle device manually, then read (see §1 Option A for full details)
 $ser = New-Object System.IO.Ports.SerialPort "COM3",115200,"None",8,"One"
 $ser.Open()
 $ser.RtsEnable = $true ; $ser.DtrEnable = $true ; Start-Sleep -Milliseconds 200
@@ -34,10 +35,15 @@ pio run -e uploadfs-sys -t uploadfs
 
 The most important debugging tool is the UART boot log on COM3 at 115200 baud.
 
-### Option A — PowerShell hardware reset (recommended)
+### Option A — PowerShell hardware reset
 
-Triggers a clean hardware reset via RTS/DTR and captures the full boot sequence,
-including the ESP-ROM bootloader and all `[Nms]` log lines:
+> ⚠️ **ESP32-S3 USB-CDC known limitation:** On ESP32-S3 with native USB-CDC (no external UART
+> bridge chip), any DTR or RTS toggle causes the USB-CDC stack to close the virtual COM port.
+> `ReadExisting()` will throw `InvalidOperationException` (port closed before read completes).
+> **Option A is unreliable on this hardware.** Use Option B or C to capture boot logs.
+> Option A works reliably only on devices with a physical UART bridge chip (CP2102, CH340, etc.).
+
+If you do want to attempt it — triggers a hardware reset via RTS/DTR and captures the boot sequence:
 
 ```powershell
 $ser = New-Object System.IO.Ports.SerialPort "COM3",115200,"None",8,"One"
@@ -68,6 +74,9 @@ rst:0x15 (USB_UART_CHIP_RESET),boot:0xb (SPI_FAST_FLASH_BOOT)
 
 **Tuning the capture window:** if your boot takes longer (SD mount, large cache build),
 increase the `Start-Sleep -Milliseconds 3500` value. 5000–8000 ms is safe for first boot.
+
+**Alternative when Option A fails (USB-CDC port closes):** Use Option B (PIO monitor + physical
+reset button on device) or read LittleFS logs directly via `esptool` — see §3 below.
 
 ---
 
@@ -197,6 +206,35 @@ Check size:
 (Get-ChildItem -Recurse d:\GitHub\CoinTrace\data | Measure-Object -Property Length -Sum).Sum / 1KB
 ```
 
+### Read LittleFS log files via esptool (workaround when Serial is unavailable)
+
+When USB-CDC port cannot be read (Option A DTR issue, or device crashes before log output),
+read the `littlefs_data` partition directly — no device cooperation required:
+
+```powershell
+cd d:\GitHub\CoinTrace
+python -m esptool --chip esp32s3 --port COM3 read_flash 0x610000 0x20000 lfs_dump.bin
+
+# Extract readable JSONL log entries:
+$bytes = [System.IO.File]::ReadAllBytes("lfs_dump.bin")
+$text = [System.Text.Encoding]::ASCII.GetString($bytes) -replace '[^\x20-\x7E\n]', '.'
+$text -split '\n' | Where-Object { $_ -match '^\{' } | Select-Object -First 30
+Remove-Item lfs_dump.bin
+```
+
+**Expected JSONL entries when LittleFS contains logs:**
+```
+{"t":881,"l":1,"c":"LFS","m":"LittleFSTransport started"}
+{"t":897,"l":3,"c":"LDC1101","m":"CHIP_ID mismatch..."}
+```
+
+**Verify partition is valid:** LittleFS magic bytes at offset 0 of the dump:
+`03 04 00 00 ... 6C 69 74 74 6C 65 66 73` (ASCII: `littlefs`).  
+If first bytes are `FF FF FF FF` → partition is blank (never formatted).
+
+> **Note:** `BOOT_REASON` log entry will **not** appear in LittleFS — it is logged before
+> `LittleFSTransport` is added to the pipeline (boot step [5]). Check Serial via Option B instead.
+
 ---
 
 ## 4. NVS State
@@ -283,6 +321,13 @@ If Flash exceeds ~70% → check for unintended large static arrays or string lit
 
 If PlatformIO cannot auto-reset the device (upload fails with "Connecting..."):
 
+> ⚠️ **Do not confuse with B-3 factory data reset.**
+> - **G0 held at power-on** → ROM Download Mode (blank screen, firmware never starts — this section)
+> - **G0 held during 3-second splash window** → B-3 factory `LittleFS_data` format (firmware running)
+>
+> These are two separate mechanisms at different boot stages. If you accidentally enter Download
+> Mode instead of triggering factory reset: power off → power on without holding G0.
+
 1. Power **off** the device (side switch → OFF)
 2. Hold the **G0 button** (bottom-left of keyboard)
 3. Power **on** (side switch → ON)
@@ -356,6 +401,22 @@ Flash will be erased from 0x00510000 to 0x0060ffff    ← CORRECT
 
 ---
 
+### Blank screen when powering on with G0 held
+
+```
+Device enters ROM Download Mode — blank screen, no Serial output, COM port still enumerates.
+```
+
+This is **not a defect** — ESP32-S3 ROM bootloader intercepts GPIO0=LOW at power-on before
+firmware starts, entering UART/USB DFU download mode.
+
+→ To exit: power off → power on without holding G0  
+→ **Do not confuse with B-3 factory reset** (§7 above) — B-3 activates during the 3-second
+  splash window in running firmware, not at power-on  
+→ After accidental Download Mode: device is unaffected, just exit and re-boot normally
+
+---
+
 ## 9. Useful One-Liners
 
 ```powershell
@@ -375,4 +436,7 @@ $s.Open() ; Start-Sleep 2 ; $s.ReadExisting() ; $s.Close()
 # Check git status before committing
 git status --short
 git log --oneline -5
+
+# Dump littlefs_data partition and extract JSONL log entries (when Serial unavailable)
+python -m esptool --chip esp32s3 --port COM3 read_flash 0x610000 0x20000 lfs_dump.bin
 ```

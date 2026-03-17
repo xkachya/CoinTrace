@@ -60,6 +60,7 @@ public:
     bool   mkdir(const char*)                 { return false; }
     bool   remove(const char*)                { return false; }
     bool   rename(const char*, const char*)   { return false; }
+    bool   format()                           { return true;  }
     size_t totalBytes()                       { return 0; }
     size_t usedBytes()                        { return 0; }
     File   open(const char*, const char*)     { return File{}; }

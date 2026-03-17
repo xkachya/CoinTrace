@@ -1,8 +1,8 @@
 # Storage Architecture — CoinTrace™
 
-**Статус:** ✅ Accepted v1.7.0 — [PRE-1]..[PRE-8] вирішено; [F-05] protocol_id placeholder виправлено; P-1 Acceptance Criteria додано; §18 Factory Reset to Stock Firmware додано; §14.3 Soft Shutdown (v1.5 backlog); §17.2 boot [1.4] deep sleep check  
-**Версія:** 1.7.0  
-**Дата:** 2026-03-16  
+**Статус:** ✅ Accepted v1.8.2 — [CrossRef-PreCommit] Wire.begin(8,9) підтверджено per schematic; §14.3 тайминг синхронізовано з impl; попередня: v1.8.1 [B-3-audit-fix1]  
+**Версія:** 1.8.2  
+**Дата:** 2026-03-17  
 **Автор:** Yuriy Kachmaryk
 
 > ⚠️ **КРИТИЧНО:** Рішення щодо partition layout та NVS namespace structure неможливо змінити після
@@ -1371,7 +1371,7 @@ SHUTDOWN_ACTIVE → [S1]..[S7] → DEEP SLEEP (~10 µA)
 #### GPIO0 dual-role (важлива нотатка)
 
 GPIO0 має **дві різні ролі** залежно від контексту:
-- **Boot time** (§17.2 [1.5]): 5-секундний holddown → `LittleFS_data.format()`. Перевіряється **тільки в `setup()`** — не конфліктує з runtime.
+- **Boot time** (§17.2 [1.5]): утримання G0 ≥ 500 ms в межах 3-секундного вікна (kWindowMs=3000, kHoldMs=500) → `LittleFS_data.format()`. Перевіряється **тільки в `setup()`** — не конфліктує з runtime.
 - **Runtime** (fallback): якщо TCA8418 (клавіатура) недоступна → GPIO0 long press (2s) → soft shutdown. Реалізувати разом з TCA8418 fault handling.
 
 #### Edge cases
@@ -1498,6 +1498,9 @@ GPIO0 має **дві різні ролі** залежно від контекс
 *Версія 1.4.1 — [FDB-05 Variant G] sd_generation.bin у §8.2 cache tree; boot [7a] generation staleness check після CRC32; buildCache() зберігає sd_generation.bin.*  
 *Версія 1.7.0 — §14.3 Soft Shutdown (Fn+Q, deep sleep, [S1]..[S7] sequence, state machine, edge cases, GPIO0 dual-role); §17.2 boot [1.4] deep sleep wakeup check (skip GPIO0 recovery); CONNECTIVITY_ARCHITECTURE §5.3 shutdown_pending/shutdown_complete WebSocket events.*  
 *Версія 1.7.1 — [CrossRef-Audit-P4] doc-sync: §9.2 SD layout (globalId/uptime naming замість date-based — RTC недоступний до Wave 8); §15 артефакти P-2..P-5 оновлено на фактичні шляхи `lib/`; §15 P-4 SDTransport → copyLogToSD hook (ADR погоджено з §12.1 Модель S); ADR-ST-009 `MAX_MEAS_JSON`→`MAX_JSON_B=3800` (INVARIANT 4), explicit `m_%06u.json` format (zero-padded, FAT32 sort safe).*  
+*Версія 1.8.0 — [B-3-impl-sync] §17.2 [1.5] синхронізовано з фактичною реалізацією (Wave 8 B-3 hw-verified): виконується ПІСЛЯ display init (ROM bootloader перехоплює GPIO0=LOW при power-on до запуску firmware); 3s вікно + 500ms hold замість instant check; display countdown + progress bar (display IS використовується, попередній коментар [PRE-4] видалено); `LittleFSManager::formatData()` замість `esp_spiffs_format()`; `RTC_DATA_ATTR gRtcBootReason` для persistence через restart; §17.3 таблиця: «GPIO0 held at power-on» → «held ≥ 500ms during 3s splash window».*  
+*Версія 1.8.1 — [B-3-audit-fix1] §17.2 [1.5] early-exit: 200ms quick poll (нормальний boot не чекає 3s вікно якщо G0 не натиснуто; пеналті 3000→200ms); USB-CDC portability note (D-01: GPIO0 behavior ESP32-S3 USB-CDC specific). `formatData()` SAFETY comment (R-02).*  
+*Версія 1.8.2 — [CrossRef-PreCommit] `Wire.begin(2,1)` → `Wire.begin(8,9)` у `main.cpp` step [3] (GPIO8=SDA, GPIO9=SCL per schematic [2.3], потрібно для TCA8418 Wave 8); §14.3 GPIO0 dual-role: «5-секундний» → «3s (kWindowMs=3000) + 500ms hold»; `LittleFSManager.h` docstring `§17.2 [1.4]` → `[1.5]`; TODO(Wave 8 A-2) comment додано для TCA8418::begin().*  
 *Наступний крок: реалізація P-4 FingerprintCache (boot step [7], 5 сценаріїв, CRC32 + generation check)*
 
 ---
@@ -1603,23 +1606,44 @@ Procedures above do **not** touch the SD card. If needed, format it separately o
         ; Резервування: якщо в майбутньому додається timer/GPIO wakeup — guard тут
         Serial.println("[BOOT] Deep sleep wakeup — skip recovery check")
         goto [2]  ; пропустити [1.5] GPIO0 recovery
-[1.5] GPIO0 recovery check                  ; BOOT button (active LOW, підтяжка 10kΩ)
-    ; [PRE-4] display() НЕ використовується — LCD не ініціалізований до кроку [9]
-    ; [PRE-4] delay(5000) → TWDT race → замінено на 50×100ms loop з wdt reset
-    if GPIO0 == LOW:
-        Serial.println("[BOOT] GPIO0 HELD — release within 5s to cancel LittleFS_data format")
-        released = false
-        for i in 0..49:                          ; 50 × 100 ms = 5 seconds
-            esp_task_wdt_reset()
-            delay(100)
-            if digitalRead(GPIO_NUM_0) == HIGH:
-                released = true
-                break
-        if NOT released:
-            Serial.println("[BOOT] Formatting LittleFS_data...")
-            esp_spiffs_format("littlefs_data")   ; IDF API — не потребує попереднього mount()
-            Serial.println("[BOOT] Format done. Restarting.")
-            esp_restart()
+[1.5] GPIO0 recovery check — ПІСЛЯ ініціалізації дисплею (Wave 8 B-3, hw-verified)
+    ; ⚠️  ROM BOOTLOADER INTERCEPT: GPIO0=LOW при power-on → ROM bootloader перехоплює
+    ;     до запуску firmware → blank screen (Download Mode). Тому цей крок виконується
+    ;     ПІСЛЯ M5Stack init + displayStartupInfo(), не на початку setup().
+    ;     Джерело: [B-3-impl-sync] Wave 8 B-3 hardware verification, March 2026.
+    ; Вікно: 3 секунди після splash screen (kWindowMs=3000).
+    ; Trigger: безперервне утримання GPIO0 ≥ 500 ms (kHoldMs=500).
+    ; Display: updateable countdown "G0 reset: Xs" + червона progress bar під час утримання.
+    ; ✔  早 early-exit: if GPIO0 idle for kQuickMs (200ms) — skip window entirely
+    ;     Normal-boot penalty: +200ms. Recovery: full 3s window shown only when G0 active.
+    ;     See B-3 Architecture Delta Fix 1.
+    if esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED:  ; guard вже перевірено в [1.4]
+        g0Active = false
+        for t in 0..kQuickMs step kPollMs:  ; 200ms quick poll
+            if GPIO0 == LOW: g0Active = true; break
+            delay(kPollMs)
+        if g0Active:
+            heldMs = 0; elapsed = 0
+            while elapsed < kWindowMs:
+                display countdown (оновлення лише при зміні секунди, fillRect очищає попередній)
+                if GPIO0 == LOW:
+                    heldMs += kPollMs (50 ms)
+                    display red progress bar (heldMs × 200 / kHoldMs pixels)
+                    if heldMs >= kHoldMs:
+                        LittleFSManager tmpLfs
+                        if tmpLfs.mountData():
+                            tmpLfs.formatData()                          ; fmt LittleFS_data partition
+                            strlcpy(gRtcBootReason, "gpio0_format_ok")   ; RTC memory — survives restart
+                        else:
+                            strlcpy(gRtcBootReason, "gpio0_mount_failed")
+                        esp_restart()
+                else:
+                    heldMs = 0  ; відпустили — скидаємо прогрес
+                delay(kPollMs); elapsed += kPollMs
+        ; else: normal boot — G0 ідльний, skip 3s window (пеналті нормального бута: +200ms)
+    ; gRtcBootReason логується після "CoinTrace X.X starting" через Serial+RingBuffer
+    ; LittleFSTransport ще не в pipeline на цей момент (додається в [5])
+    ; → BOOT_REASON в LittleFS відсутній (прийнята поведінка)
     ; антидот: TCA8418 fail + LFS_data corrupt = stuck boot без виходу
 [2] NVSManager::begin()                      ; NVS open all namespaces
     → якщо FAIL: FATAL MODE (halt + display error)
@@ -1682,7 +1706,7 @@ Procedures above do **not** touch the SD card. If needed, format it separately o
 | Plugin config missing | DEGRADED | Використовується hardcoded default config. LOG_WARN. |
 | Calibration invalid | DEGRADED | Display "Calibration needed". Вимірювання недоступні. |
 | Coredump detected | — | Зберегти: SD (SD:/CoinTrace/coredumps/coredump_mc<meas_count>.json, пріоритет) → LittleFS /data/logs/coredump_mc<meas_count>.json → Serial. — `meas_count` монотонний ідентифікатор, не залежить від RTC ([PRE-7]). Очистити partition, LOG_WARN, продовжити boot. |
-| GPIO0 held at power-on | RECOVERY | `LittleFS_data.format()` + `esp_restart()`. Антидот: TCA8418 fail + LFS_data corrupt → stuck boot loop. |
+| GPIO0 held ≥ 500ms during 3s splash window (post-display init) | RECOVERY | `LittleFSManager::formatData()` + `esp_restart()`. `RTC_DATA_ATTR gRtcBootReason` зберігає причину через restart. G0 held at power-on ≠ цей сценарій (→ ROM Download Mode). Антидот: TCA8418 fail + LFS_data corrupt → stuck boot loop. |
 
 > ⚠️ **FAT32 + power fail (R-09):** SD writes виконуються тільки batch-операціями (при ротації
 > LittleFS лога або при запису в архів), **ніколи** не per-measurement. Зменшує ризик FAT32

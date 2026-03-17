@@ -1,6 +1,9 @@
 # External reference documents (working material — not part of project docs)
 docs/external/
 
+# Hardware test transcripts and runtime logs
+*.log
+
 # Prerequisites
 *.d
 

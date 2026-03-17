@@ -56,6 +56,28 @@ bool LittleFSManager::mountData() {
     return dataMounted_;
 }
 
+bool LittleFSManager::formatData() {
+    // SAFETY: Must be called only during early boot, before FreeRTOS scheduler
+    // starts tasks that may wait on dataMutex_. The vSemaphoreDelete() +
+    // format() sequence is not atomic — calling at runtime with active tasks
+    // is undefined behavior. See B-3 Architecture Delta R-02.
+    // Unmount gracefully if currently mounted.
+    if (dataMounted_) {
+        data_.end();
+        dataMounted_ = false;
+    }
+    if (dataMutex_) {
+        vSemaphoreDelete(dataMutex_);
+        dataMutex_ = nullptr;
+    }
+    // begin() without format_on_fail to set internal partition label, then format().
+    // Even if begin() returns false (filesystem corrupt / empty), format() still works.
+    data_.begin(/*formatOnFail=*/false, MOUNT_DATA, MAX_OPEN_FILES, PARTITION_DATA);
+    const bool ok = data_.format();
+    data_.end();
+    return ok;
+}
+
 // ── Private helpers ───────────────────────────────────────────────────────────
 
 void LittleFSManager::createDataDirs() {

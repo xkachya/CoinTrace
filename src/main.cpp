@@ -44,6 +44,10 @@ static StorageManager    gStorage(gNVS, gLFS, gSDCard, gFPCache, gMeasStore);  /
 // Hold a raw pointer (non-owning) for direct coin-state access in loop().
 static LDC1101Plugin*    gLDC = nullptr;
 
+// RTC memory survives esp_restart() — used to pass boot reason into the
+// normal Logger pipeline (→ LittleFS log) after a recovery restart.
+RTC_DATA_ATTR static char gRtcBootReason[32] = "";
+
 // Display CoinTrace version and configuration on startup
 void displayStartupInfo() {
   M5Cardputer.Display.fillScreen(BLACK);
@@ -83,7 +87,7 @@ void displayStartupInfo() {
   
   M5Cardputer.Display.println();
   M5Cardputer.Display.setTextColor(CYAN);
-  M5Cardputer.Display.println("Press any key...");
+  M5Cardputer.Display.println("Hold G0 to factory reset");
 }
 
 void setup() {
@@ -103,27 +107,11 @@ void setup() {
   gLogger.addTransport(&gSerialTransport);
   gLogger.addTransport(&gRingTransport);
 
-  // ── 1a. GPIO0 boot recovery (Wave 8 B-3) ─────────────────────
-  // STORAGE_ARCHITECTURE.md §17.2 [1.4]: GPIO0 held LOW at boot → format
-  // LittleFS_data (factory data clear).  Skip if waking from deep sleep
-  // (Soft Shutdown Fn+Q — §14.3) to avoid erasing measurements on normal
-  // wake-from-sleep cycle.
-  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
-    pinMode(0, INPUT_PULLUP);
-    if (digitalRead(0) == LOW) {
-      Serial.println("[BOOT] GPIO0 held LOW — formatting LittleFS_data...");
-      LittleFSManager tmpLfs;
-      if (tmpLfs.mountData()) {
-        tmpLfs.formatData();
-        Serial.println("[BOOT] LittleFS_data formatted — restarting");
-      } else {
-        Serial.println("[BOOT] LittleFS_data mount failed during GPIO0 recovery");
-      }
-      esp_restart();
-    }
-  }
-
   gLogger.info("System", "CoinTrace %s starting", COINTRACE_VERSION);
+  if (gRtcBootReason[0] != '\0') {
+    gLogger.info("System", "BOOT_REASON: %s", gRtcBootReason);
+    gRtcBootReason[0] = '\0';  // consume once
+  }
   gLogger.info("System", "CPU: %d MHz | Heap: %u B | PSRAM: %u MB",
                ESP.getCpuFreqMHz(), ESP.getFreeHeap(),
                (unsigned int)(ESP.getPsramSize() / 1024 / 1024));
@@ -132,11 +120,90 @@ void setup() {
   // ── 2. Display startup screen ────────────────────────────────
   displayStartupInfo();
 
+  // ── 2a. GPIO0 boot recovery window (Wave 8 B-3) ──────────────
+  // STORAGE_ARCHITECTURE.md §17.2 [1.5]: hold G0 during 3s splash window
+  // → format LittleFS_data (factory data clear) + restart.
+  // NOTE: GPIO0 CANNOT be checked at power-on — ROM bootloader intercepts
+  // GPIO0=LOW before firmware starts and enters Download Mode. We check
+  // it here, after display init, with a visual countdown.
+  // NOTE: GPIO0 behavior is USB-CDC specific (Cardputer-Adv, no UART bridge).
+  // On boards with external CH343/CP2102 bridge, GPIO0 may reach setup()
+  // even when held at power-on. See B-3 Architecture Delta D-01.
+  // Skip if waking from deep sleep (Soft Shutdown Fn+Q — §14.3).
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
+    pinMode(0, INPUT_PULLUP);
+    constexpr uint32_t kWindowMs  = 3000;
+    constexpr uint32_t kPollMs    = 50;
+    constexpr uint32_t kHoldMs    = 500;  // must be held ≥500 ms to trigger
+    constexpr uint32_t kQuickMs   = 200;  // early-exit: skip window if G0 idle
+    // Quick check: if G0 not active within 200ms, skip the full 3s window.
+    // Normal-boot penalty: +200ms (imperceptible vs ~850ms total boot).
+    // See B-3 Architecture Delta Fix 1 (audit: boot penalty 3000→200ms).
+    bool g0Active = false;
+    for (uint32_t t = 0; t < kQuickMs; t += kPollMs) {
+      if (digitalRead(0) == LOW) { g0Active = true; break; }
+      delay(kPollMs);
+    }
+    if (g0Active) {
+      uint32_t heldMs = 0;
+      uint32_t elapsed = 0;
+      uint32_t lastCountdown = 0;
+      while (elapsed < kWindowMs) {
+        // Update countdown on display every second
+        uint32_t remaining = (kWindowMs - elapsed + 999) / 1000;
+        if (remaining != lastCountdown) {
+          lastCountdown = remaining;
+          M5Cardputer.Display.fillRect(0, 110, 240, 30, BLACK);
+          M5Cardputer.Display.setTextSize(2);
+          M5Cardputer.Display.setTextColor(CYAN);
+          M5Cardputer.Display.setCursor(10, 110);
+          M5Cardputer.Display.print("G0 reset: ");
+          M5Cardputer.Display.print(remaining);
+          M5Cardputer.Display.print("s");
+        }
+        if (digitalRead(0) == LOW) {
+          heldMs += kPollMs;
+          // Show progress bar while held
+          M5Cardputer.Display.fillRect(10, 130, (heldMs * 200) / kHoldMs, 10, RED);
+          if (heldMs >= kHoldMs) {
+            gLogger.info("System", "GPIO0 held — formatting LittleFS_data");
+            Serial.println("[BOOT] GPIO0 held — formatting LittleFS_data...");
+            LittleFSManager tmpLfs;
+            if (tmpLfs.mountData()) {
+              tmpLfs.formatData();
+              strlcpy(gRtcBootReason, "gpio0_format_ok", sizeof(gRtcBootReason));
+              Serial.println("[BOOT] LittleFS_data formatted — restarting");
+            } else {
+              strlcpy(gRtcBootReason, "gpio0_mount_failed", sizeof(gRtcBootReason));
+              Serial.println("[BOOT] LittleFS_data mount failed during GPIO0 recovery");
+            }
+            esp_restart();
+          }
+        } else {
+          if (heldMs > 0) {
+            // Clear progress bar on release
+            M5Cardputer.Display.fillRect(10, 130, 200, 10, BLACK);
+          }
+          heldMs = 0;
+        }
+        delay(kPollMs);
+        elapsed += kPollMs;
+      }
+      // Clear the countdown area before continuing normal boot
+      M5Cardputer.Display.fillRect(0, 105, 240, 40, BLACK);
+    }
+  }
+
   // ── 3. Hardware buses ─────────────────────────────────────────
   // VSPI: SCK=GPIO40, MISO=GPIO39, MOSI=GPIO14
   SPI.begin(40, 39, 14);
-  // Grove I2C: SDA=GPIO2, SCL=GPIO1 (available for future sensors)
-  Wire.begin(2, 1);
+  // Internal I2C bus: SDA=GPIO8, SCL=GPIO9 (per schematic §17.2 [2.3]).
+  // Used by TCA8418 keyboard controller (Wave 8, §17.2 [2.5]).
+  // Grove port (GPIO2/GPIO1) does not require Wire.begin() — it is
+  // on the same hardware I2C peripheral; sensors that need it call begin()
+  // via ctx->wire which is pre-configured to the correct pins.
+  Wire.begin(8, 9);
+  // TODO(Wave 8 A-2): TCA8418::begin(0x34, /*INT=*/GPIO_NUM_11) — §17.2 [2.5]
 
   // ── 4. Plugin context ─────────────────────────────────────────
   gCtx.spi       = &SPI;

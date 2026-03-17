@@ -49,7 +49,7 @@ Cross-ref: [STORAGE_ARCHITECTURE.md §15](./STORAGE_ARCHITECTURE.md), [CONNECTIV
 | BLE GATT service | ❌ | A-7 | Опційно, Wave 8 backlog |
 | `test_nvs_manager/` | ✅ | B-1 | 9/9 native tests PASSED (`bde3c03`) |
 | `test_fingerprint_cache/` | ✅ | B-2 | 6/6 native tests PASSED, `loadTestEntry()` додано |
-| GPIO0 boot recovery | ✅¹ | B-3 | Реалізовано в `src/main.cpp`; ¹потребує hw-верифікації |
+| GPIO0 boot recovery | ✅ | B-3 | Реалізовано в `src/main.cpp`; hw-verified: пристрій перезавантажується при утриманні G0 під час 3s вікна |
 | **Vector computation math** | ✅ | **C-3\*** | **9/9 native tests PASSED, OLS slope верифіковано** |
 | `POST /api/v1/measure/start` | ⚠️ partial | A-3 | Stub: `503 sensor_not_ready` до C-2 |
 | WebSocket sensor frames | ⚠️ partial | A-6 | Stub → real після C-2 |
@@ -624,4 +624,5 @@ A-7  BLE GATT (опційно)              ~3-4 дні
 
 *Версія 1.0.0 — Wave 8 initial planning. Constraint: LDC1101 MIKROE-3240 in transit (2026-03-17).*  
 *Версія 1.1.0 — [Wave8-Audit-v1] Впроваджено 9 знахідок зовнішнього аудиту: W-01 QR альтернативи (A-1); W-02 GET /api/v1/sensor/state (A-3, матриця, acceptance); W-03 A-5 split A-5a/A-5b + timeline revision; W-04 WebSocket sensor frame pos field (A-6); W-06 C-1 процедура Eq.6/Eq.11 замість DIG_CONFIG; W-07 rp[3] ADR — STEP_DRIFT + drift validation 5% threshold (C-2); W-08 timeout 120s (C-2); W-09 keyboard advance v1 (C-2); W-10 RAM budget audit note. W-11/W-12 false positive — STORAGE_ARCHITECTURE v1.7.1 вже виправлено.*  
-*Версія 1.2.0 — Phase 1 batch B+C-3 реалізовано: B-3 GPIO0 recovery (`src/main.cpp`); C-3 `VectorCompute.h/.cpp` + OLS slope; B-1 `Preferences.h` in-memory KV mock + `test_nvs_manager/`; B-2 `loadTestEntry()` + `test_fingerprint_cache/`; `platformio.ini` розширено. 108/108 native tests PASSED. B-3 потребує hardware-верифікації (GPIO0 pin hold). Наступний крок: A-1 WiFiManager.*
+*Версія 1.3.0 — B-3 GPIO0 recovery hw-verified: пристрій перезавантажується при утриманні G0 під час 3s splash-вікна; `LittleFSManager::formatData()` додано; `RTC_DATA_ATTR gRtcBootReason` для boot reason tracking; визуальний countdown на дисплеї. Попередня: v1.2.0 — Phase 1 batch B+C-3 реалізовано: B-3 GPIO0 recovery (`src/main.cpp`); C-3 `VectorCompute.h/.cpp` + OLS slope; B-1 `Preferences.h` in-memory KV mock + `test_nvs_manager/`; B-2 `loadTestEntry()` + `test_fingerprint_cache/`; `platformio.ini` розширено. 108/108 native tests PASSED. Наступний крок: A-1 WiFiManager.*  
+*Версія 1.3.1 — [B-3-audit-fix] впроваджено 2 знахідки B3_Delta_Independent_Audit: Fix 1 — early-exit GPIO0 window (200ms quick poll, boot penalty 3000→200ms); Fix 2 — `formatData()` SAFETY comment (R-02 race condition); D-01 portability note (USB-CDC vs UART bridge). STORAGE_ARCHITECTURE → v1.8.1.*

@@ -113,6 +113,15 @@ public:
     bool isSysMounted()  const { return sysMounted_; }
     bool isDataMounted() const { return dataMounted_; }
 
+    /**
+     * @brief Factory-reset LittleFS_data: erase all measurements, cache, logs.
+     * Unmounts the partition before formatting and does NOT remount.
+     * Caller must call esp_restart() or mountData() afterwards.
+     * Used by: GPIO0 boot recovery (§17.2 [1.5]), future web factory-reset endpoint.
+     * @return true if format succeeded.
+     */
+    bool formatData();
+
     // ── Filesystem handles ──────────────────────────────────────────────────
 
     /**
