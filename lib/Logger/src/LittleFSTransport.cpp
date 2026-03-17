@@ -21,7 +21,9 @@ void LittleFSTransport::startTask(uint8_t coreId, UBaseType_t priority) {
     }
     taskRunning_ = true;
     BaseType_t rc = xTaskCreatePinnedToCore(
-        taskFunc, "lfs_log", /*stack=*/4096, this, priority, &taskHandle_, coreId);
+        taskFunc, "lfs_log", /*stack=*/3072, this, priority, &taskHandle_, coreId);
+    // Stack sizing note: measured watermark = 1332 B free from 4096 B (2026-03-18 hw-test).
+    // → 2764 B used. Stack reduced to 3072 B: 308 B headroom, saves 1024 B heap.
     if (rc != pdPASS) {
         log_e("LFSTransport: xTaskCreate failed");
         taskRunning_ = false;
@@ -37,6 +39,17 @@ void LittleFSTransport::stopTask() {
     // Worst case: 100 ms wait + final processEntry() ~200 ms mutex = ~300 ms.
     vTaskDelay(pdMS_TO_TICKS(500));
     taskHandle_ = nullptr;
+}
+
+uint32_t LittleFSTransport::stackWatermarkBytes() const {
+#ifdef ESP_PLATFORM
+    if (!taskHandle_) return 0;
+    // uxTaskGetStackHighWaterMark() returns words remaining (UBaseType_t).
+    // On ESP32 (Xtensa), StackType_t = uint8_t, so words == bytes.
+    return uxTaskGetStackHighWaterMark(taskHandle_) * sizeof(StackType_t);
+#else
+    return 0;  // Not available on native/host platform (no FreeRTOS)
+#endif
 }
 
 void LittleFSTransport::end() {

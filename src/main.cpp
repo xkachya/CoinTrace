@@ -17,6 +17,7 @@
 #include "LDC1101Plugin.h"
 #include "NVSManager.h"
 #include "WiFiManager.h"     // Wave 8 A-1
+#include "HttpServer.h"      // Wave 8 A-2
 #include "LittleFSManager.h"
 #include "LittleFSTransport.h"
 #include "MeasurementStore.h"
@@ -26,8 +27,12 @@
 
 // ── Logger globals (ініціалізуються першими в setup()) ────────────
 static Logger              gLogger;
-static SerialTransport     gSerialTransport(Serial, SerialTransport::Format::TEXT, 115200);
-static RingBufferTransport gRingTransport(100, /*usePsram=*/false);  // ESP32-S3FN8: NO PSRAM (LA-1)
+// EXT 2.54-14P UART debug: G15=TX (Pin 14), G13=RX (Pin 12), GND (Pin 4).
+// FT232RL on COM4 — independent of USB-CDC (COM3), no DTR-reset issue.
+// See docs/guides/UART_DEBUG_SETUP.md for wiring details.
+static HardwareSerial      gUart1(1);  // UART1 peripheral
+static SerialTransport     gSerialTransport(gUart1, SerialTransport::Format::TEXT, 115200);
+static RingBufferTransport gRingTransport(20, /*usePsram=*/false);  // ESP32-S3FN8: NO PSRAM — 20 entries (20×220=4.4KB) to preserve heap for WiFi+HTTP (LA-1)
 
 // ── Plugin system globals ────────────────────────────────────────
 static ConfigManager gConfig;
@@ -41,6 +46,8 @@ static SDCardManager     gSDCard;        // Wave 7 P-4 — optional SD archive t
 static FingerprintCache  gFPCache;        // Wave 7 P-4 — fingerprint index in RAM
 static StorageManager    gStorage(gNVS, gLFS, gSDCard, gFPCache, gMeasStore);  // Wave 7 P-5 — unified Facade
 static WiFiManager       gWifi;                    // Wave 8 A-1 — AP/STA management
+static AsyncWebServer    gHttpServer(80);           // Wave 8 A-2 — non-blocking HTTP on port 80
+static HttpServer        gHttp;                    // Wave 8 A-2 — REST API + static web UI
 // LDC1101Plugin is heap-allocated in setup() so PluginSystem::end()
 // can safely call delete (ownership contract — PLUGIN_ARCHITECTURE.md §3.1).
 // Hold a raw pointer (non-owning) for direct coin-state access in loop().
@@ -101,6 +108,11 @@ void setup() {
   // Serial.begin() до Logger — SerialTransport використовує вже ініціалізований Serial
   Serial.begin(115200);
   delay(100);
+
+  // ── 0. EXT UART init — до Logger, щоб перший лог вже йшов через FT232RL ──
+  // UART1 mapped to EXT 2.54-14P: TX=G15 (Pin 14), RX=G13 (Pin 12).
+  // COM4 (FT232RL) is open independently of USB-CDC COM3 — no DTR reset.
+  gUart1.begin(115200, SERIAL_8N1, /*rx=*/13, /*tx=*/15);
 
   // ── 1. Logger ПЕРШИМ — до будь-якого іншого коду ─────────────
   // begin() створює FreeRTOS mutex (не можна в конструкторі: він виконується
@@ -277,6 +289,11 @@ void setup() {
     } else {
         gLogger.warning("Cache", "FingerprintCache unavailable — matching disabled");
     }
+    // Struct size audit: verify against FINGERPRINT_DB_ARCHITECTURE.md §6.3 RAM budget.
+    // sizeof(CacheEntry) × MAX_ENTRIES = peak RAM if fully populated.
+    LOG_DEBUG(&gLogger, "Mem", "sizeof(LogEntry)=%u sizeof(CacheEntry)=%u (MAX=%u entries)",
+              (unsigned)sizeof(LogEntry), (unsigned)sizeof(CacheEntry),
+              (unsigned)FingerprintCache::MAX_ENTRIES);
   } else {
     gLogger.warning("LFS", "data mount failed — measurements will not persist");
   }
@@ -302,8 +319,10 @@ void setup() {
 
   // ── 6. WiFiManager (Wave 8 A-1) §17.2 [10] ──────────────────────────────
   // begin() blocks ≤10 s in STA mode, then falls back to AP automatically.
+  LOG_DEBUG(&gLogger, "Heap", "before WiFi: %u B free", (uint32_t)ESP.getFreeHeap());
   gWifi.begin(gNVS);
   gCtx.wifi = &gWifi;
+  LOG_DEBUG(&gLogger, "Heap", "after WiFi:  %u B free", (uint32_t)ESP.getFreeHeap());
   gLogger.info("WiFi", "%s — SSID: %s  IP: %s",
                gWifi.isAP() ? "AP mode" : "STA mode",
                gWifi.getSSID(), gWifi.getIP());
@@ -312,6 +331,16 @@ void setup() {
   M5Cardputer.Display.setTextColor(gWifi.isAP() ? CYAN : GREEN);
   M5Cardputer.Display.setCursor(5, 107);
   M5Cardputer.Display.printf("%s  %s", gWifi.getSSID(), gWifi.getIP());
+
+  // ── 7. HttpServer (Wave 8 A-2) §17.2 [11] ───────────────────────────────
+  // begin() registers all /api/v1/ routes, serves /sys/web/ static files,
+  // and calls AsyncWebServer::begin() internally.
+  // WiFiManager must be initialised before this step (step [10] above).
+  gHttp.begin(gHttpServer, gStorage, gNVS, gWifi, gLFS, gRingTransport,
+              gMeasStore, gFPCache);
+  gCtx.http = &gHttp;
+  LOG_DEBUG(&gLogger, "Heap", "after HTTP:  %u B free", (uint32_t)ESP.getFreeHeap());
+  gLogger.info("HTTP", "REST API ready — http://%s/api/v1/status", gWifi.getIP());
 }
 
 void loop() {
@@ -335,6 +364,10 @@ void loop() {
           // promptSTA() is blocking — reads SSID + password from keyboard,
           // saves to NVS on success, then reconnects.
           gWifi.promptSTA(gNVS);
+        } else if (key == 'o' || key == 'O') {
+          // Wave 8 A-4 placeholder: 'O' key will open the OTA update window.
+          // Not yet implemented — POST /api/v1/ota/update returns 403 until A-4.
+          gLogger.info("OTA", "OTA window not yet implemented (Wave 8 A-4)");
         } else {
           // Display key on screen
           M5Cardputer.Display.fillRect(0, M5Cardputer.Display.height() - 20,
@@ -349,6 +382,17 @@ void loop() {
   
   // Plugin update loop (runs all enabled plugins, ≤ 10 ms each)
   gPluginSystem.update();
+
+  // ── One-time diagnostic: LFS task stack watermark ────────────────────────────
+  // Logged once after 10 s so task has processed all boot-log entries.
+  // Stack was reduced to 3072 B based on 2026-03-18 measurement (watermark=1332B free).
+  // If this log shows < 512 B free → increase stack in LittleFSTransport.cpp.
+  static bool sDiagLogged = false;
+  if (!sDiagLogged && millis() > 10000) {
+      sDiagLogged = true;
+      LOG_DEBUG(&gLogger, "Stack", "LFS task watermark: %u B free (of 3072 B stack)",
+                gLfsTransport.stackWatermarkBytes());
+  }
 
   // ── Wave 7 P-3: Save measurement on COIN_REMOVED ──────────────────
   // COIN_REMOVED is a transient state (1 update() cycle) set after coin lifts.

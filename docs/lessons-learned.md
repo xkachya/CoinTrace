@@ -297,3 +297,35 @@ Flash will be erased from 0x00510000 to 0x0060ffff...
 **Правило:** `board_build.littlefs_partition_label` НЕ працює для uploadfs target. Для multi-partition LittleFS завжди використовуй `post:` скрипт з `env.Replace(FS_START=..., FS_SIZE=...)`.
 
 ---
+## 2026-03-17 — ESP32-S3 USB-CDC: `pio device monitor` пропускає бут-лог
+
+**Середовище:** ESP32-S3FN8 (M5Stack Cardputer-Adv), Native USB-CDC (`ARDUINO_USB_CDC_ON_BOOT=1`), Windows  
+**Симптом:** `pio device monitor` завершується з exit code 1 одразу після підключення. Бут-лог недоступний — весь вивід від `setup()` пропущений.
+
+**Причина:** На ESP32-S3 Native USB-CDC будь-яке відкриття COM-порту перемикає DTR → USB-CDC stack у ESP32-S3 закривається → COM-порт зникає до того як прошивка встигає вивести перший рядок. Це фундаментальна поведінка USB-CDC, не баг PlatformIO.
+
+**Рішення:** Підключити FT232RL (або CH340G/CP2102) до заднього **EXT 2.54-14P** роз'єму:
+- `Pin 14 = G15 = UART_TX` → `RXD` адаптера
+- `Pin 12 = G13 = UART_RX` → `TXD` адаптера
+- `Pin 4 = GND` → `GND` адаптера
+- Джампер адаптера: обов'язково **3.3V** (не 5V)
+
+Зміни в прошивці:
+```cpp
+// main.cpp — перед gLogger.begin()
+static HardwareSerial  gUart1(1);
+static SerialTransport gSerialTransport(gUart1, SerialTransport::Format::TEXT, 115200);
+// ...
+gUart1.begin(115200, SERIAL_8N1, /*rx=*/13, /*tx=*/15);
+```
+
+Зміна в `platformio.ini`:
+```ini
+monitor_port = COM4   ; FT232RL (не USB-CDC COM3)
+```
+
+**Документація:** `docs/guides/UART_DEBUG_SETUP.md` — повний wiring + налаштування  
+**Де в коді:** `src/main.cpp` рядки ~30-33, `platformio.ini` `monitor_port`  
+**Правило:** На ESP32-S3 з Native USB-CDC ніколи не використовуй `Serial` для debug UART якщо потрібен повний бут-лог. Використовуй окремий UART peripheral через зовнішній адаптер.
+
+---

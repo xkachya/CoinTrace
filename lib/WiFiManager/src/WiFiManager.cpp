@@ -67,10 +67,9 @@ bool WiFiManager::startSTA(const char* ssid, const char* pass) {
     strlcpy(ip_, WiFi.localIP().toString().c_str(), sizeof(ip_));
     mode_ = Mode::STA;
 
-    // mDNS: cointrace.local (STA only — AP reachable at fixed 192.168.4.1)
-    if (MDNS.begin(kMDNSHost)) {
-        MDNS.addService("http", "tcp", 80);   // announced even before A-2 adds WebServer
-    }
+    // mDNS: disabled to preserve heap on ESP32-S3FN8 (no PSRAM).
+    // MDNS.begin() uses ~15 KB — too expensive when free heap after WiFi is ~29 KB.
+    // Will re-enable in A-3 once PSRAM variant is available or heap budget reviewed.
     return true;
 }
 
@@ -144,15 +143,18 @@ static bool readLine(const char* prompt, char* buf, size_t maxLen, bool masked) 
         M5Cardputer.update();
         if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
             const auto& ks = M5Cardputer.Keyboard.keysState();
-            if (!ks.word.empty()) {
+            // M5Cardputer KeysState: special keys are in dedicated bool fields,
+            // NOT in ks.word. ks.word contains only printable ASCII chars.
+            if (ks.enter) {
+                return pos > 0;                    // Enter: confirm (must be non-empty)
+            } else if (ks.fn) {
+                return false;                      // Fn key alone: cancel/escape
+            } else if (ks.del && pos > 0) {
+                buf[--pos] = '\0';
+                redraw();
+            } else if (!ks.word.empty()) {
                 const char c = ks.word[0];
-                if (c == '\r' || c == '\n') {
-                    return pos > 0;           // Enter: confirm (must be non-empty)
-                }
-                if (c == '\x1b') return false;  // Escape: cancel
-                if ((c == '\b' || c == 0x7f) && pos > 0) {
-                    buf[--pos] = '\0';
-                } else if (c >= 0x20 && c < 0x7f && pos < maxLen - 1u) {
+                if (c >= 0x20 && c < 0x7f && pos < maxLen - 1u) {
                     buf[pos++] = c;
                     buf[pos]   = '\0';
                 }

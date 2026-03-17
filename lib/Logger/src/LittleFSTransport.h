@@ -66,6 +66,11 @@ public:
     void startTask(uint8_t coreId = 0, UBaseType_t priority = 2);
     void stopTask();
 
+    // Diagnostic: returns minimum free stack space observed since task creation,
+    // in bytes. Call ≥10 s after startTask() for a representative value.
+    // Returns 0 if task has not been started. Useful for tuning stack size.
+    uint32_t stackWatermarkBytes() const;
+
     // Inject optional SD card manager for log archival on rotation (P-4).
     // Call in setup() after gSDCard.tryMount(). sd may be null (hook is a no-op).
     void setSDCardManager(SDCardManager* sd) { sdMgr_ = sd; }

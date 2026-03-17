@@ -132,3 +132,7 @@ memory_usage.txt
 # Temporary CLI output files
 build_output.txt
 test_output.txt
+
+# Throwaway debug scripts (use scripts/hw_test.py instead)
+mon_reset.py
+boot_monitor.log

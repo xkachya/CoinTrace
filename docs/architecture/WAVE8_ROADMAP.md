@@ -1,9 +1,10 @@
 # Wave 8 Roadmap — Connectivity + Infrastructure + Sensor Integration
 
-**Статус:** 🔄 In Progress — Фаза 1 (B-1/B-2/B-3/C-3/A-1 завершено, A-2 наступний)  
-**Версія:** 1.4.0  
-**Дата:** 2026-03-17 (оновлено після реалізації A-1 WiFiManager)
+**Статус:** 🔄 In Progress — Фаза 1 (B-1/B-2/B-3/C-3/A-1/A-2 завершено, A-3 наступний)  
+**Версія:** 1.5.0  
+**Дата:** 2026-03-18 (оновлено після hw-верифікації A-2 з фінальними вимірами + external review response)
 **Попередня хвиля:** Wave 7 — Storage Foundation (`d53a440`, 84/84 native tests, hardware verified)
+**Cross-ref:** `docs/architecture/MEMORY_MAP.md` — детальна карта Flash/SRAM/Heap (hw-verified 2026-03-18)
 
 ---
 
@@ -36,7 +37,7 @@ Cross-ref: [STORAGE_ARCHITECTURE.md §15](./STORAGE_ARCHITECTURE.md), [CONNECTIV
 | Компонент | Залежить від LDC1101? | Track | Примітка |
 |---|---|---|---|
 | WiFiManager AP/STA | ✅ | A-1 | ✅ hw-verified 2026-03-17 — AP `CoinTrace-F974`, STA+NVS, promptSTA() |
-| AsyncWebServer + mDNS | ❌ | A-2 | Port 80, CORS header |
+| AsyncWebServer + mDNS | ✅ | A-2 | hw-verified 2026-03-17 — REST API на 192.168.4.1, бут-лог через FT232RL EXT 2.54-14P |
 | `GET /api/v1/status` | ❌ | A-3 | heap/uptime/storage stats |
 | `GET /api/v1/measure/{id}` | ❌ | A-3 | Читає Wave 7 MeasurementStore |
 | `GET /api/v1/log` | ❌ | A-3 | RingBufferTransport |
@@ -103,6 +104,50 @@ gCtx.wifi = &gWifi;  // inject into PluginContext (Wave 8 extension)
 ---
 
 ### A-2: AsyncWebServer + mDNS
+
+**Статус:** ✅ hw-verified 2026-03-18 — 9/9 hw tests PASSED (STA mode, IP 192.168.88.53)  
+**Build:** RAM 61.5% (201676/327680 B) · Flash 56.0% (1468377/2621440 B) · `cointrace-dev`  
+**Бут-лог (STA mode, FT232RL COM3):**
+```
+[   835ms] INFO  System  | CoinTrace 1.0.0-dev starting
+[   835ms] INFO  System  | CPU: 240 MHz | Heap: 165216 B | PSRAM: 0 MB
+[  1073ms] INFO  NVS     | Ready — meas_count=0 slot=0
+[  1095ms] INFO  LFS     | sys mounted — free: 976 KB
+[  1484ms] INFO  Cache   | FingerprintCache ready — 5 entries
+[  1484ms] DEBUG Mem     | sizeof(LogEntry)=220 sizeof(CacheEntry)=140 (MAX=1000 entries)
+[  1642ms] DEBUG Heap    | before WiFi: 107408 B free
+[  2059ms] DEBUG Heap    | after WiFi:  54488 B free
+[  2059ms] INFO  WiFi    | STA mode — SSID: YuKa  IP: 192.168.88.53
+[  2092ms] DEBUG Heap    | after HTTP:  34844 B free
+[  2092ms] INFO  HTTP    | REST API ready — http://192.168.88.53/api/v1/status
+[ 10005ms] DEBUG Stack  | LFS task watermark: 1332 B free (of 4096 B stack)
+```
+**Фінальні виміри (hw_test.py — 9/9 PASSED):**
+| Метрика | Значення |
+|---------|----------|
+| heap idle | 30052 B |
+| heap_min (boot) | 30044 B |
+| heap_max_block idle | 21492 B = 72% → no fragmentation |
+| heap after POST /database/match | 29104 B |
+| heap_max_block after POST | 18420 B = 63% → healthy |
+| heap drift (9 tests) | 948 B < 1 KB → no memory leak |
+| sizeof(CacheEntry) | **140 B** confirmed (1000 entries = 140 KB SRAM) |
+| LFS task stack used | 2764 B of 4096 → reduced to **3072 B** (saves 1 KB heap) |
+| Boot → HTTP ready | 2092 ms (STA mode) |
+| Fingerprint match confidence | 0.919 (xcu/synthetic) |
+
+**Реалізовані рекомендації External Review (2026-03-17):**
+- `heap_max_block` (ESP.getMaxAllocHeap()) додано до GET /status — детектує фрагментацію
+- heap diagnostic logs INFO → LOG_DEBUG (не засмічують INFO-лог)
+- `sizeof(LogEntry/CacheEntry/MAX_ENTRIES)` — one-time boot diagnostic
+- LFS task `stackWatermarkBytes()` — one-time loop() log post 10 s
+
+**Відхилені рекомендації (з обґрунтуванням):**
+- `load()` retry з `delay()` → `delay()` блокує lwIP thread → відкладено до A-3 (MainLoop queue)
+- snprintf flat JSON → ризик injection для user strings → відкладено до A-3
+- Regex engine removal → ризик > 2 KB gain → відхилено
+
+**UART debug:** FT232RL на EXT 2.54-14P G15/G13 → COM3 (docs/guides/UART_DEBUG_SETUP.md)  
 
 **Нові артефакти:** `lib/HttpServer/src/HttpServer.h/.cpp`
 

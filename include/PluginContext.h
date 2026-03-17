@@ -19,6 +19,7 @@ class Logger;
 class ConfigManager;
 class IStorageManager;
 class WiFiManager;      // Wave 8 A-1 — CONNECTIVITY_ARCHITECTURE.md §4
+class HttpServer;       // Wave 8 A-2 — CONNECTIVITY_ARCHITECTURE.md §5.2
 
 /**
  * @brief Container for all shared system resources.
@@ -47,9 +48,11 @@ struct PluginContext {
     IStorageManager*  storage;    // Persistence (may be nullptr — check before use)
     WiFiManager*      wifi;        // WiFi state — AP/STA, getIP(), isConnected() (Wave 8 A-1)
                                    // nullptr before WiFiManager::begin(); always check.
+    HttpServer*       http;        // REST API server (Wave 8 A-2) — nullptr before begin().
 
     PluginContext()
         : wire(nullptr), wireMutex(nullptr)
         , spi(nullptr),  spiMutex(nullptr)
-        , config(nullptr), log(nullptr), storage(nullptr), wifi(nullptr) {}
+        , config(nullptr), log(nullptr), storage(nullptr)
+        , wifi(nullptr), http(nullptr) {}
 };

@@ -1,7 +1,11 @@
 # Debugging Guide — CoinTrace Firmware
 
 **Applies to:** CoinTrace firmware, M5Stack Cardputer-Adv (ESP32-S3FN8), Windows  
-**Cross-ref:** `docs/guides/development-setup.md`, `docs/guides/UPLOADFS_GUIDE.md`
+**Cross-ref:** `docs/guides/development-setup.md`, `docs/guides/UPLOADFS_GUIDE.md`, `docs/guides/UART_DEBUG_SETUP.md`
+
+> **Looking for REST API / heap diagnostics / hw_test.py?**  
+> Script is at `scripts/hw_test.py`.  
+> See `docs/guides/HW_TESTING.md` — REST API verification, memory diagnostics, automated test pipeline.
 
 ---
 
@@ -307,13 +311,14 @@ Remove before committing — these flood the serial output.
 pio run -e cointrace-dev 2>&1 | Select-String "RAM:|Flash:"
 ```
 
-Current baseline:
+Current baseline (2026-03-18, Wave 8 A-2):
 ```
-RAM:   [=         ]   8.4% (used 27 KB / 320 KB)
-Flash: [==        ]  20.5% (used 536 KB / 2.5 MB)
+RAM:   [======    ]  61.5% (used 201676 bytes from 327680 bytes)
+Flash: [======    ]  56.0% (used 1468381 bytes from 2621440 bytes)
 ```
 
-If Flash exceeds ~70% → check for unintended large static arrays or string literals.
+If Flash exceeds ~75% → check for unintended large static arrays or string literals.
+For a full size breakdown see `docs/guides/HW_TESTING.md §2`.
 
 ---
 
