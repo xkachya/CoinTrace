@@ -669,19 +669,33 @@ A-7  BLE GATT (опційно)              ~3-4 дні
 
 ### Wave 8 фаза 1 (до LDC1101):
 
+**Connectivity & REST API:**
 - [ ] WiFi AP mode: підключитись телефоном → `http://192.168.4.1` відкриває Web UI (A-5a: Status + Match screens)
-- [ ] WiFi STA mode: ввести SSID/pass на клавіатурі → підключитись → `cointrace.local` резолвиться ⚠️ mDNS вимкнено (B-03), re-enable після A-6 heap validation
+- [ ] WiFi STA mode: ввести SSID/pass на клавіатурі → IP відображається на дисплеї та `GET /status` повертає 200
+  > mDNS (`cointrace.local`) вимкнено — Bug B-03 OOM fix. Re-enable після A-6 heap validation якщо heap_min > 45 KB.
 - [x] `GET /api/v1/status` → heap, uptime, wifi state, heap_max_block — hw-verified 2026-03-18
 - [x] `GET /api/v1/sensor/state` → `{"state":"IDLE_NO_COIN"}` — hw-verified 2026-03-18
-- [x] `POST /api/v1/database/match` → вручну введений vector → match result с synthetic DB — hw-verified 2026-03-18 (conf=0.919)
+- [x] `POST /api/v1/database/match` → вручну введений vector → match result з synthetic DB — hw-verified 2026-03-18 (conf=0.919)
 - [ ] `GET /api/v1/measure/{id}` → Wave 7 виміри (UNKN) відображаються в UI (потребує A-5a)
-- [ ] WebSocket: Live log stream відображається у Web UI при подіях (A-6)
-- [x] OTA stub: `POST /api/v1/ota/update` без натискання 'O' → 403 Forbidden — hw-verified 2026-03-18
-- [ ] OTA full: `POST /api/v1/ota/update` після 'O' → успішний flash → reboot → auto-rollback test (A-4)
-- [ ] `pio run -e uploadfs-sys -t uploadfs` → Web UI оновлюється, LittleFS_data не торкається
-- [x] Native tests: B-1 (9) + B-2 (6) + C-3 (9) + legacy (84) = **108/108 PASSED** (2026-03-18)
-- [ ] GPIO0 held at boot → Serial: "formatting LittleFS_data..." → restart  ← _потребує фізичного flash, ще не перевірено_
-- [ ] heap_min > 50 KB після 5 хв роботи з 1 WebSocket клієнтом (зафіксувати для W-10 calibration + mDNS decision)
+
+**OTA:**
+- [x] OTA stub: `POST /api/v1/ota/update` без 'O' → 403 `ota_window_not_active` — hw-verified 2026-03-18
+- [x] OTA full: flash → reboot into new firmware — hw-verified 2026-03-18 (`1.0.0-dev` → `1.0.1-ota-test`)
+- [x] OTA rollback: 60s без 'O' → auto-rollback до попередньої прошивки — hw-verified 2026-03-18
+- [x] OTA confirm: 'O' після reboot → `confirmed=true`, нова прошивка стійка після reset — hw-verified 2026-03-18
+
+**Web UI (A-5a MVP):**
+- [ ] `data/web/index.html` + `app.js` + `style.css` — Status screen та Match screen реалізовані
+- [ ] `pio run -e uploadfs-sys -t uploadfs` → Web UI завантажено на пристрій, `LittleFS_data` не торкається
+- [ ] AP mode: `http://192.168.4.1` відкриває index.html; STA mode: `http://<IP>` відкриває index.html
+
+**WebSocket (A-6):**
+- [ ] Live log stream відображається у Web UI при подіях (`{"t":"log"}` frames)
+- [ ] heap_min > 50 KB після 5 хв роботи з 1 WebSocket клієнтом (W-10: mDNS + FP DB size decision)
+
+**Infrastructure:**
+- [x] Native tests: B-1 (9) + B-2 (6) + C-3 (9) + A-4 OTA NVS (14) + legacy (84) + A-4 config (14) = **136/136 PASSED** (2026-03-18)
+- [x] GPIO0 held at boot → Serial: "formatting LittleFS_data..." → restart — hw-verified (B-3, 3s splash window)
 
 ### Wave 8 фаза 2 (після LDC1101):
 
@@ -694,6 +708,7 @@ A-7  BLE GATT (опційно)              ~3-4 дні
 
 ---
 
+*Версія 1.6.0 — A-4 OTA hw-verified (2026-03-18): flash ✅ confirm ✅ auto-rollback 60s ✅ (commits `1530deb` + `9801023` + `c0e9e3d`). Acceptance Criteria оновлено: OTA 4/4 пункти [x]; native tests 108→136/136; mDNS reформульовано (B-03 рішення зберігається до A-6); GPIO0 відмічено як hw-verified (B-3). Наступний: A-5a Web UI MVP.*  
 *Версія 1.5.0 — A-2 + A-3 завершено та hw-verified (2026-03-18). 9/9 REST endpoints, 108/108 native tests. heap idle 30 KB, heap_max_block 72%, drift 948 B. LFS task stack 4096→3072 B. MEMORY_MAP.md та HW_TESTING.md додано. mDNS вимкнено (B-03 OOM fix) — рішення після A-6 heap measurement. Наступний: A-4 OTA mechanism.*  
 *Версія 1.1.0 — [Wave8-Audit-v1] Впроваджено 9 знахідок зовнішнього аудиту: W-01 QR альтернативи (A-1); W-02 GET /api/v1/sensor/state (A-3, матриця, acceptance); W-03 A-5 split A-5a/A-5b + timeline revision; W-04 WebSocket sensor frame pos field (A-6); W-06 C-1 процедура Eq.6/Eq.11 замість DIG_CONFIG; W-07 rp[3] ADR — STEP_DRIFT + drift validation 5% threshold (C-2); W-08 timeout 120s (C-2); W-09 keyboard advance v1 (C-2); W-10 RAM budget audit note. W-11/W-12 false positive — STORAGE_ARCHITECTURE v1.7.1 вже виправлено.*  
 *Версія 1.3.0 — B-3 GPIO0 recovery hw-verified: пристрій перезавантажується при утриманні G0 під час 3s splash-вікна; `LittleFSManager::formatData()` додано; `RTC_DATA_ATTR gRtcBootReason` для boot reason tracking; визуальний countdown на дисплеї. Попередня: v1.2.0 — Phase 1 batch B+C-3 реалізовано: B-3 GPIO0 recovery (`src/main.cpp`); C-3 `VectorCompute.h/.cpp` + OLS slope; B-1 `Preferences.h` in-memory KV mock + `test_nvs_manager/`; B-2 `loadTestEntry()` + `test_fingerprint_cache/`; `platformio.ini` розширено. 108/108 native tests PASSED. Наступний крок: A-1 WiFiManager.*  
