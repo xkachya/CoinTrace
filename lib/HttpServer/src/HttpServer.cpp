@@ -99,6 +99,8 @@ void HttpServer::registerApiRoutes() {
             doc["wifi"]          = wifi_->isAP() ? "ap" : (wifi_->isSTA() ? "sta" : "off");
             doc["ip"]            = wifi_->getIP();
             doc["ble"]           = "off";  // BLE not implemented yet (Wave 8 future)
+            // WAVE8_ROADMAP A-5b: meas_count enables Measurements tab navigation in Web UI.
+            doc["meas_count"]    = storage_->measurementCount();
 
             String body;
             serializeJson(doc, body);

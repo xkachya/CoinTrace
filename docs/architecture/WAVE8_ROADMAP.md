@@ -1,6 +1,6 @@
 # Wave 8 Roadmap — Connectivity + Infrastructure + Sensor Integration
 
-**Статус:** 🔄 In Progress — Фаза 1 (B-1/B-2/B-3/C-3/A-1/A-2/A-3/A-4 завершено, **A-5 наступний**)  
+**Статус:** 🔄 In Progress — Фаза 1 (B-1/B-2/B-3/C-3/A-1/A-2/A-3/A-4/A-5a завершено, **A-5b наступний**)  
 **Версія:** 1.6.0  
 **Дата:** 2026-03-18 (оновлено після hw-верифікації A-4 OTA: flash ✅ confirm ✅ auto-rollback ✅)
 **Попередня хвиля:** Wave 7 — Storage Foundation (`d53a440`, 84/84 native tests, hardware verified)
@@ -271,23 +271,35 @@ POST /api/v1/calibrate
 
 > **W-03 (audit):** Web UI завжди займає більше часу ніж очікується. Розбити на **A-5a (MVP)** і **A-5b (повна версія)** — це зменшує critical path фази 1 на ~2-3 дні.
 
-#### A-5a: MVP (достатньо для Phase 1 acceptance criteria) — ~2 дні
+#### A-5a: MVP — ✅ hw-verified 2026-03-18 (commit `1905a43`)
 
-| Екран | Endpoint(s) | Доступний без сенсора |
+| Екран | Endpoint(s) | Статус |
 |---|---|---|
-| Status | `GET /status` | ✅ |
-| **Match** | `POST /database/match` | ✅ ← ключовий pre-sensor test |
+| Status | `GET /status` + `/ota/status` + `/database` + `/sensor/state` | ✅ HW-verified STA |
+| Match | `POST /database/match` | ✅ HW-verified STA |
 
-**Match screen (pre-sensor режим):** форма для ручного введення 5 компонентів вектора → POST → відображення match result + alternatives. Після прибуття сенсора — замінюється автозаповненням з останнього виміру.
+**Реалізовано:** `data/web/index.html` + `app.js` + `style.css` (19.9 KB total, dark theme, vanilla JS).  
+**Status tab:** 5-секундний polling 4 endpoints, heap warning < 20 KB, conf color-coding.  
+**Match tab:** форма 5 полів (`dRp1`, `k1`, `k2`, `slope_rp_per_mm_lr`, `dL1`), result card + alternatives bar chart.  
+**AP mode `http://192.168.4.1`:** ❌ не перевірено — зробити при наступному підключенні до AP `CoinTrace-F974`.
 
-#### A-5b: Повна версія — ~3 дні (не в critical path фази 1)
+**Firmware зміна (A-5b prep):** `GET /api/v1/status` тепер повертає поле `meas_count` (commit A-5b-prep) — необхідно для навігації по Measurements tab.
 
-| Екран | Endpoint(s) | Доступний без сенсора |
-|---|---|---|
-| Measurements | `GET /measure/{id}` | ✅ (Wave 7 UNKN виміри) |
-| Log stream | WebSocket `"t":"log"` | ✅ |
-| Settings | `GET/POST` NVS fields | ✅ |
-| Sensor stream | WebSocket `"t":"sensor"` | ⏳ після C-2 |
+#### A-5b: Повна версія — ~2 дні (не в critical path фази 1)
+
+| Екран | Endpoint(s) | Доступний без сенсора | Залежності |
+|---|---|---|---|
+| Measurements | `GET /measure/{id}` + `meas_count` з `/status` | ✅ (Wave 7 UNKN виміри) | `meas_count` додано ✅ |
+| Log | `GET /api/v1/log` (REST poll 3s) | ✅ | — |
+| Settings | `GET/POST` NVS fields | ⚠️ endpoints відсутні в HttpServer | потребує firmware |
+| Sensor stream | WebSocket `"t":"sensor"` | ⏳ | після A-6 |
+
+**A-5b рекомендований scope (без Settings та WS):**
+- Вкладка **Measurements**: показує останні N записів, навігація prev/next по `meas_count`; поля: ts, metal_code, coin_name, conf, rp[], l[]
+- Вкладка **Log**: GET /api/v1/log polling, autoscroll, level filter (DEBUG/INFO/WARN/ERROR)
+
+**Settings відкладено:** потребує нових firmware endpoints (`GET/POST /api/v1/settings`). Не в critical path фази 1; реалізація разом з A-6 або після.  
+**Sensor stream відкладено:** stub → real після C-2 + A-6 WebSocket.
 
 ---
 
@@ -618,10 +630,12 @@ gWebSocket.broadcastResult(m, matches, n);
   A-2  AsyncWebServer + mDNS      hw-verified 2026-03-18 — 9/9 REST tests
   A-3  HTTP REST endpoints        hw-verified 2026-03-18 (реалізовано з A-2)
 
-Наступний ➜ A-4 (OTA):
-  A-4  OTA mechanism              ~2 дні    ← partition swap + rollback потребує тестування
-  A-5a Web UI MVP (Status+Match)  ~2 дні    ← достатньо для фази 1 acceptance
-  A-5b Web UI повна версія        ~3 дні   ← не в critical path
+Завершено ✅:
+  A-4  OTA mechanism              hw-verified 2026-03-18 (`1530deb`)
+  A-5a Web UI MVP (Status+Match)  hw-verified 2026-03-18 (`1905a43`)
+
+Наступний ➜ A-5b (Measurements + Log tabs):
+  A-5b Web UI Measurements+Log    ~2 дні   ← не в critical path фази 1
   A-6  WebSocket streaming        ~1 день   (status + log frames; sensor = stub)
 ```
 
@@ -685,9 +699,10 @@ A-7  BLE GATT (опційно)              ~3-4 дні
 - [x] OTA confirm: 'O' після reboot → `confirmed=true`, нова прошивка стійка після reset — hw-verified 2026-03-18
 
 **Web UI (A-5a MVP):**
-- [ ] `data/web/index.html` + `app.js` + `style.css` — Status screen та Match screen реалізовані
-- [ ] `pio run -e uploadfs-sys -t uploadfs` → Web UI завантажено на пристрій, `LittleFS_data` не торкається
-- [ ] AP mode: `http://192.168.4.1` відкриває index.html; STA mode: `http://<IP>` відкриває index.html
+- [x] `data/web/index.html` + `app.js` + `style.css` — Status screen та Match screen реалізовані — hw-verified 2026-03-18 (`1905a43`)
+- [x] `pio run -e uploadfs-sys -t uploadfs` → Web UI завантажено на пристрій, `LittleFS_data` не торкається — hw-verified 2026-03-18
+- [x] STA mode: `http://192.168.88.53` відкриває index.html, uptime auto-refresh підтверджено — hw-verified 2026-03-18
+- [ ] AP mode: `http://192.168.4.1` відкриває index.html — ❌ потребує hw-тесту (підключитись до `CoinTrace-F974`)
 
 **WebSocket (A-6):**
 - [ ] Live log stream відображається у Web UI при подіях (`{"t":"log"}` frames)
@@ -708,6 +723,7 @@ A-7  BLE GATT (опційно)              ~3-4 дні
 
 ---
 
+*Версія 1.7.0 — A-5a Web UI MVP hw-verified (2026-03-18, commit `1905a43`): Status tab (4-endpoint poll, heap warning, OTA/DB/sensor cards) + Match tab (5-field form, conf bar, alternatives). 19.9 KB total. STA hw-verified. AP mode pending. `GET /status` розширено полем `meas_count` (A-5b prep). A-5b scope уточнено: Measurements + Log (REST poll), Settings відкладено (потребує firmware endpoints). Прийняте рішення: Settings реалізується з A-6 або після.*  
 *Версія 1.6.0 — A-4 OTA hw-verified (2026-03-18): flash ✅ confirm ✅ auto-rollback 60s ✅ (commits `1530deb` + `9801023` + `c0e9e3d`). Acceptance Criteria оновлено: OTA 4/4 пункти [x]; native tests 108→136/136; mDNS reформульовано (B-03 рішення зберігається до A-6); GPIO0 відмічено як hw-verified (B-3). Наступний: A-5a Web UI MVP.*  
 *Версія 1.5.0 — A-2 + A-3 завершено та hw-verified (2026-03-18). 9/9 REST endpoints, 108/108 native tests. heap idle 30 KB, heap_max_block 72%, drift 948 B. LFS task stack 4096→3072 B. MEMORY_MAP.md та HW_TESTING.md додано. mDNS вимкнено (B-03 OOM fix) — рішення після A-6 heap measurement. Наступний: A-4 OTA mechanism.*  
 *Версія 1.1.0 — [Wave8-Audit-v1] Впроваджено 9 знахідок зовнішнього аудиту: W-01 QR альтернативи (A-1); W-02 GET /api/v1/sensor/state (A-3, матриця, acceptance); W-03 A-5 split A-5a/A-5b + timeline revision; W-04 WebSocket sensor frame pos field (A-6); W-06 C-1 процедура Eq.6/Eq.11 замість DIG_CONFIG; W-07 rp[3] ADR — STEP_DRIFT + drift validation 5% threshold (C-2); W-08 timeout 120s (C-2); W-09 keyboard advance v1 (C-2); W-10 RAM budget audit note. W-11/W-12 false positive — STORAGE_ARCHITECTURE v1.7.1 вже виправлено.*  
