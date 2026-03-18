@@ -242,3 +242,36 @@ bool NVSManager::hardReset() {
     ok &= plugin_.clear();
     return ok;
 }
+
+// ── OTA namespace (Wave 8 A-4) ────────────────────────────────────────────────
+
+bool NVSManager::saveOtaMeta(const char* preVersion) {
+    if (!ready_ || !preVersion) return false;
+    bool ok = true;
+    ok &= (ota_.putString("pre_ver",   preVersion) != 0);
+    ok &= (ota_.putBool  ("pending",   true)       != 0);
+    ok &= (ota_.putBool  ("confirmed", false)      != 0);
+    return ok;
+}
+
+bool NVSManager::loadOtaMeta(OtaMeta& out) const {
+    memset(&out, 0, sizeof(out));
+    if (!ready_) return false;
+    ota_.getString("pre_ver", out.pre_version, sizeof(out.pre_version));
+    out.pending   = ota_.getBool("pending",   false);
+    out.confirmed = ota_.getBool("confirmed", false);
+    return ota_.isKey("pending");
+}
+
+bool NVSManager::setOtaConfirmed() {
+    if (!ready_) return false;
+    return ota_.putBool("confirmed", true) != 0;
+}
+
+bool NVSManager::clearOtaMeta() {
+    if (!ready_) return false;
+    bool ok = true;
+    ok &= (ota_.putBool("pending",   false) != 0);
+    ok &= (ota_.putBool("confirmed", false) != 0);
+    return ok;
+}

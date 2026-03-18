@@ -174,6 +174,40 @@ public:
      */
     bool hardReset();
 
+    // ── OTA namespace (Wave 8 A-4) ────────────────────────────────────────────
+
+    struct OtaMeta {
+        char pre_version[16];  // firmware version before OTA apply
+        bool pending;          // true once flash completes; cleared on confirm/rollback
+        bool confirmed;        // true after user presses 'O' on the new firmware
+    };
+
+    /**
+     * @brief Persist pre-OTA version and mark update as pending.
+     * Write-only — safe to call from the lwIP task (no NVS get+put race).
+     * @param preVersion  COINTRACE_VERSION string at flash time.
+     */
+    bool saveOtaMeta(const char* preVersion);
+
+    /**
+     * @brief Read OTA metadata from NVS.
+     * @param out  Populated with stored values; zero-initialised on failure.
+     * @return true if the "pending" key exists (OTA was ever applied).
+     */
+    bool loadOtaMeta(OtaMeta& out) const;
+
+    /**
+     * @brief Set confirmed=true — cancels the in-flight rollback timer.
+     * Called from main.cpp loop when user presses 'O' after OTA boot.
+     */
+    bool setOtaConfirmed();
+
+    /**
+     * @brief Clear pending/confirmed so the rollback path is not re-entered.
+     * Called from main.cpp after rollback esp_restart() path.
+     */
+    bool clearOtaMeta();
+
 private:
     bool ready_ = false;
 

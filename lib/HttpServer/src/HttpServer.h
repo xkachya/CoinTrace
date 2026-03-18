@@ -54,6 +54,21 @@ private:
     // Sends a JSON error with standard envelope {\"error\":\"...\"}
     static void sendError(AsyncWebServerRequest* req, int code, const char* error);
 
+    // OTA window state — written by MainLoop ('O' key), read by lwIP handlers.
+    // setOtaWindow() must be called once after begin().
+    // Both pointers are written exclusively from MainLoop task; reads from lwIP
+    // are safe because volatile guarantees visiblity (no torn reads on 32-bit ESP32).
+    volatile bool*     otaWindowFlag_   = nullptr;  // true = window open
+    volatile uint32_t* otaWindowOpenMs_ = nullptr;  // millis() when window opened
+
+public:
+    // Inject OTA window state from main.cpp after begin().
+    void setOtaWindow(volatile bool* windowFlag, volatile uint32_t* windowOpenMs) {
+        otaWindowFlag_   = windowFlag;
+        otaWindowOpenMs_ = windowOpenMs;
+    }
+
+private:
     // Dependencies — stored for use inside route handler lambdas.
     AsyncWebServer*      server_  = nullptr;
     IStorageManager*     storage_ = nullptr;

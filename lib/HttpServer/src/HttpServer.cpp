@@ -15,6 +15,7 @@
 
 #include "HttpServer.h"
 #include <Arduino.h>
+#include <Update.h>          // Wave 8 A-4 — ESP32 OTA flash writer
 #include <ArduinoJson.h>
 #include "LogEntry.h"    // LogEntry::levelToString()
 #include "LogLevel.h"    // LogLevel enum
@@ -136,23 +137,110 @@ void HttpServer::registerApiRoutes() {
     );
 
     // ── GET /api/v1/ota/status ───────────────────────────────────────────────
-    // A-4 will expand this with the NVS "ota" namespace.
-    // For now returns safe default: no pending OTA.
+    // Reports OTA window state (open/closed + countdown) and NVS pending flag.
     server_->on("/api/v1/ota/status", HTTP_GET,
         [this](AsyncWebServerRequest* req) {
-            AsyncWebServerResponse* resp = req->beginResponse(
-                200, "application/json", "{\"pending\":false}"
-            );
+            const bool windowOpen = (otaWindowFlag_ && *otaWindowFlag_);
+            uint32_t secsLeft = 0;
+            if (windowOpen && otaWindowOpenMs_) {
+                const uint32_t elapsed = millis() - *otaWindowOpenMs_;
+                secsLeft = (elapsed < 30000UL) ? (30000UL - elapsed) / 1000UL : 0;
+            }
+
+            NVSManager::OtaMeta meta;
+            const bool hasMeta = nvs_->loadOtaMeta(meta);
+
+            JsonDocument doc;
+            doc["ota_window"]  = windowOpen;
+            doc["seconds_left"] = secsLeft;
+            doc["pending"]     = hasMeta && meta.pending;
+            doc["confirmed"]   = hasMeta && meta.confirmed;
+            if (hasMeta && meta.pre_version[0] != '\0') {
+                doc["pre_version"] = meta.pre_version;
+            }
+
+            String body;
+            serializeJson(doc, body);
+            AsyncWebServerResponse* resp = req->beginResponse(200, "application/json", body);
             addCors(resp);
             req->send(resp);
         }
     );
 
-    // ── POST /api/v1/ota/update ──────────────────────────────────────────────
-    // 403 — no physical OTA window is active (WAVE8_ROADMAP A-4 TBD).
+    // ── POST /api/v1/ota/update ────────────────────────────────────────────────
+    // Accepts raw firmware binary (Content-Type: application/octet-stream).
+    // ADR-007: requires physical OTA window active ('O' key, 30-second window).
+    // Memory-safe: each body chunk (~1–4 KB) is written directly to flash and
+    // discarded — the full ~1.4 MB binary NEVER lives in heap simultaneously.
+    //
+    // On success: NVS pending=true, confirmed=false → esp_restart().
+    // On error:   503 with Update.errorString() detail, flash state reset.
+    //
+    // [ThreadSafety] nvs_->saveOtaMeta(): write-only NVS calls — safe from lwIP
+    // task (no get+put race; "ota" namespace is written only from this handler).
     server_->on("/api/v1/ota/update", HTTP_POST,
+        // ─ request handler — all body chunks already written to flash ───────────
         [this](AsyncWebServerRequest* req) {
-            sendError(req, 403, "ota_window_not_active");
+            if (!otaWindowFlag_ || !(*otaWindowFlag_)) {
+                sendError(req, 403, "ota_window_not_active");
+                return;
+            }
+            if (Update.hasError()) {
+                // Flash write failed during body chunks — report error and clean up.
+                char buf[96];
+                snprintf(buf, sizeof(buf),
+                         "{\"error\":\"flash_write_failed\",\"detail\":\"%s\"}",
+                         Update.errorString());
+                AsyncWebServerResponse* resp = req->beginResponse(
+                    500, "application/json", buf);
+                addCors(resp);
+                req->send(resp);
+                Update.abort();
+                return;
+            }
+            // Flash complete — save OTA metadata before reboot.
+            nvs_->saveOtaMeta(COINTRACE_VERSION);
+            // Close the OTA window immediately to block concurrent requests.
+            if (otaWindowFlag_) *otaWindowFlag_ = false;
+
+            AsyncWebServerResponse* resp = req->beginResponse(
+                200, "application/json",
+                "{\"status\":\"ok\",\"action\":\"rebooting\"}");
+            addCors(resp);
+            req->send(resp);
+            // Brief delay: lets AsyncTCP drain the response buffer before reset.
+            delay(500);
+            ESP.restart();
+        },
+        nullptr,   // upload handler — not used (raw octet-stream, not multipart)
+        // ─ body chunk handler — streams directly to flash ──────────────────
+        [this](AsyncWebServerRequest* req,
+               uint8_t* data, size_t len,
+               size_t index, size_t total) {
+            if (!otaWindowFlag_ || !(*otaWindowFlag_)) {
+                // Window closed or never opened — abort silently.
+                Update.abort();
+                return;
+            }
+            if (total == 0) {
+                // No Content-Length — cannot size the OTA partition write.
+                Update.abort();
+                return;
+            }
+            if (index == 0) {
+                // First chunk: open flash partition for writing.
+                // UPDATE_INT_FLASH writes the application partition
+                // (app1 whern running app0, app0 when running app1).
+                if (!Update.begin(total, U_FLASH)) {
+                    log_e("OTA Update.begin failed: %s", Update.errorString());
+                }
+            }
+            if (!Update.isRunning()) return;   // begin() failed — no-op remaining chunks
+            Update.write(data, len);
+            if (index + len >= total) {
+                // Last chunk: finalise and verify CRC.
+                Update.end(true);
+            }
         }
     );
 

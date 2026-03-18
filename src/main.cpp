@@ -7,6 +7,7 @@
 #include <M5Cardputer.h>
 #include <Wire.h>
 #include <SPI.h>
+#include <esp_ota_ops.h>    // Wave 8 A-4 — OTA partition ops (rollback)
 #include "Logger.h"
 #include "SerialTransport.h"
 #include "RingBufferTransport.h"
@@ -56,6 +57,21 @@ static LDC1101Plugin*    gLDC = nullptr;
 // RTC memory survives esp_restart() — used to pass boot reason into the
 // normal Logger pipeline (→ LittleFS log) after a recovery restart.
 RTC_DATA_ATTR static char gRtcBootReason[32] = "";
+
+// ── OTA window state (Wave 8 A-4) ADR-007 ───────────────────────────────
+// sOtaWindowOpen is written by MainLoop ('O' key) and read by the lwIP task
+// (HttpServer handlers). volatile ensures visiblity across FreeRTOS tasks on
+// the same core (ESP32-S3 single-core lwIP on core 0; MainLoop on core 1).
+static volatile bool     sOtaWindowOpen   = false; // true = 30-s upload window active
+static volatile uint32_t sOtaWindowOpenMs = 0;     // millis() when window was opened
+constexpr uint32_t kOtaWindowMs = 30000;           // 30-second upload window
+
+// Rollback timer: set if firmware booted from a pending (unconfirmed) OTA.
+// MainLoop cancels it when user presses 'O' to confirm. If it fires, we
+// revert to app0 via esp_ota_set_boot_partition() and restart.
+static bool     sOtaRollbackPending = false;
+static uint32_t sOtaBootMs         = 0;
+constexpr uint32_t kOtaRollbackMs  = 60000;       // 60-second confirm deadline
 
 // Display CoinTrace version and configuration on startup
 void displayStartupInfo() {
@@ -242,6 +258,19 @@ void setup() {
     gLogger.error("NVS", "begin() failed — NVS tier unavailable (flash corruption?)");
   }
 
+  // A-4: Check for unconfirmed OTA on this boot.
+  // If the previous boot applied an OTA but user never confirmed ('O' key),
+  // start the 60-second rollback timer now.
+  {
+    NVSManager::OtaMeta otaMeta;
+    if (gNVS.loadOtaMeta(otaMeta) && otaMeta.pending && !otaMeta.confirmed) {
+      sOtaRollbackPending = true;
+      sOtaBootMs = millis();
+      gLogger.warning("OTA", "Unconfirmed OTA — press 'O' within %us to keep, then auto-rollback",
+                      kOtaRollbackMs / 1000);
+    }
+  }
+
   // ── 4c. LittleFS (Wave 7 P-2) ────────────────────────────────────────────
   // mountSys():  read-only partition, no auto-format. Requires uploadfs-sys
   //              to be run once before /sys/config/device.json is available.
@@ -338,9 +367,21 @@ void setup() {
   // WiFiManager must be initialised before this step (step [10] above).
   gHttp.begin(gHttpServer, gStorage, gNVS, gWifi, gLFS, gRingTransport,
               gMeasStore, gFPCache);
+  gHttp.setOtaWindow(&sOtaWindowOpen, &sOtaWindowOpenMs);  // A-4: inject window flags
   gCtx.http = &gHttp;
   LOG_DEBUG(&gLogger, "Heap", "after HTTP:  %u B free", (uint32_t)ESP.getFreeHeap());
   gLogger.info("HTTP", "REST API ready — http://%s/api/v1/status", gWifi.getIP());
+
+  // A-4: Show rollback banner if an unconfirmed OTA is pending.
+  if (sOtaRollbackPending) {
+    M5Cardputer.Display.fillRect(0, 50, 240, 40, BLACK);
+    M5Cardputer.Display.setTextSize(1);
+    M5Cardputer.Display.setTextColor(YELLOW);
+    M5Cardputer.Display.setCursor(5, 53);
+    M5Cardputer.Display.print("New FW booted — press O to keep");
+    M5Cardputer.Display.setCursor(5, 63);
+    M5Cardputer.Display.printf("Auto-rollback in %us", kOtaRollbackMs / 1000);
+  }
 }
 
 void loop() {
@@ -365,9 +406,25 @@ void loop() {
           // saves to NVS on success, then reconnects.
           gWifi.promptSTA(gNVS);
         } else if (key == 'o' || key == 'O') {
-          // Wave 8 A-4 placeholder: 'O' key will open the OTA update window.
-          // Not yet implemented — POST /api/v1/ota/update returns 403 until A-4.
-          gLogger.info("OTA", "OTA window not yet implemented (Wave 8 A-4)");
+          // Wave 8 A-4 (ADR-007): physical OTA key.
+          //   Case 1 — unconfirmed OTA pending: confirm it ('O' pressed post-reboot).
+          //   Case 2 — normal state: open 30-second upload window.
+          if (sOtaRollbackPending) {
+            // Confirm the OTA that just booted — cancel rollback timer.
+            gNVS.setOtaConfirmed();
+            sOtaRollbackPending = false;
+            gLogger.info("OTA", "OTA confirmed — new firmware accepted");
+            M5Cardputer.Display.fillRect(0, 50, 240, 40, BLACK);
+            M5Cardputer.Display.setTextSize(1);
+            M5Cardputer.Display.setTextColor(GREEN);
+            M5Cardputer.Display.setCursor(5, 58);
+            M5Cardputer.Display.print("OTA confirmed ✔");
+          } else {
+            // Open upload window.
+            sOtaWindowOpen   = true;
+            sOtaWindowOpenMs = millis();
+            gLogger.info("OTA", "OTA window opened — 30 seconds");
+          }
         } else {
           // Display key on screen
           M5Cardputer.Display.fillRect(0, M5Cardputer.Display.height() - 20,
@@ -417,6 +474,55 @@ void loop() {
         }
       }
     }
+  }
+
+  // ── A-4: OTA window timeout ─────────────────────────────────────────────────
+  // Close the upload window 30 s after 'O' was pressed.
+  if (sOtaWindowOpen && (millis() - sOtaWindowOpenMs > kOtaWindowMs)) {
+    sOtaWindowOpen = false;
+    gLogger.info("OTA", "OTA window expired");
+  }
+
+  // ── A-4: OTA countdown display ──────────────────────────────────────────────
+  // Update display banner once per second while window is open or just closed.
+  static uint32_t sOtaDisplayLastSec = UINT32_MAX;
+  if (sOtaWindowOpen) {
+    const uint32_t elapsed   = millis() - sOtaWindowOpenMs;
+    const uint32_t secsLeft  = (elapsed < kOtaWindowMs) ? (kOtaWindowMs - elapsed) / 1000 : 0;
+    if (secsLeft != sOtaDisplayLastSec) {
+      sOtaDisplayLastSec = secsLeft;
+      M5Cardputer.Display.fillRect(0, 50, 240, 55, BLACK);
+      M5Cardputer.Display.setTextSize(2);
+      M5Cardputer.Display.setTextColor(ORANGE);
+      M5Cardputer.Display.setCursor(5, 53);
+      M5Cardputer.Display.printf("OTA Ready  %2us", secsLeft);
+      M5Cardputer.Display.setTextSize(1);
+      M5Cardputer.Display.setTextColor(WHITE);
+      M5Cardputer.Display.setCursor(5, 75);
+      M5Cardputer.Display.print("POST /api/v1/ota/update");
+      M5Cardputer.Display.setCursor(5, 87);
+      M5Cardputer.Display.print(gWifi.getIP());
+    }
+  } else if (sOtaDisplayLastSec != UINT32_MAX) {
+    sOtaDisplayLastSec = UINT32_MAX;   // clear banner on close
+    M5Cardputer.Display.fillRect(0, 50, 240, 55, BLACK);
+  }
+
+  // ── A-4: OTA rollback timer ─────────────────────────────────────────────────
+  // If OTA was applied but user never pressed 'O' to confirm within 60 s,
+  // revert to the previous firmware partition and restart.
+  if (sOtaRollbackPending && (millis() - sOtaBootMs > kOtaRollbackMs)) {
+    gLogger.warning("OTA", "Rollback timeout \u2014 reverting to previous firmware");
+    gNVS.clearOtaMeta();
+    strlcpy(gRtcBootReason, "ota_rollback", sizeof(gRtcBootReason));
+    // Revert boot partition to OTA_0 (the known-good slot before our upload).
+    // We always upload to OTA_1 (app1), so rolling back means forcing OTA_0.
+    const esp_partition_t* app0 = esp_partition_find_first(
+        ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_0, nullptr);
+    if (app0) {
+      esp_ota_set_boot_partition(app0);
+    }
+    esp_restart();
   }
 
   delay(10);
