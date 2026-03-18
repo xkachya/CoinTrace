@@ -185,6 +185,15 @@ void HttpServer::registerApiRoutes() {
                 sendError(req, 403, "ota_window_not_active");
                 return;
             }
+            // Guard: body chunk handler must have completed Update.end(true) successfully.
+            // Without this check, a 0-byte body (no Content-Length / empty stream)
+            // would skip Update.begin() entirely, yet Update.hasError() returns false,
+            // causing a spurious reboot with no firmware written to flash.
+            if (!otaFlashComplete_) {
+                sendError(req, 400, "no_firmware_received");
+                Update.abort();
+                return;
+            }
             if (Update.hasError()) {
                 // Flash write failed during body chunks — report error and clean up.
                 char buf[96];
@@ -196,20 +205,24 @@ void HttpServer::registerApiRoutes() {
                 addCors(resp);
                 req->send(resp);
                 Update.abort();
+                otaFlashComplete_ = false;
                 return;
             }
             // Flash complete — save OTA metadata before reboot.
             nvs_->saveOtaMeta(COINTRACE_VERSION);
             // Close the OTA window immediately to block concurrent requests.
             if (otaWindowFlag_) *otaWindowFlag_ = false;
+            otaFlashComplete_ = false;  // reset for next attempt
 
             AsyncWebServerResponse* resp = req->beginResponse(
                 200, "application/json",
                 "{\"status\":\"ok\",\"action\":\"rebooting\"}");
             addCors(resp);
             req->send(resp);
-            // Brief delay: lets AsyncTCP drain the response buffer before reset.
-            delay(500);
+            // 1500 ms: gives AsyncTCP time to flush response to client TCP buffer
+            // before esp_restart() tears down all connections.
+            // urllib with 90s timeout will receive the 200 before the connection drops.
+            delay(1500);
             ESP.restart();
         },
         nullptr,   // upload handler — not used (raw octet-stream, not multipart)
@@ -228,9 +241,9 @@ void HttpServer::registerApiRoutes() {
                 return;
             }
             if (index == 0) {
-                // First chunk: open flash partition for writing.
-                // UPDATE_INT_FLASH writes the application partition
-                // (app1 whern running app0, app0 when running app1).
+                // First chunk: reset the completion flag and open flash partition.
+                otaFlashComplete_ = false;
+                // U_FLASH: write to OTA app slot (app1 when running app0, vice versa).
                 if (!Update.begin(total, U_FLASH)) {
                     log_e("OTA Update.begin failed: %s", Update.errorString());
                 }
@@ -239,7 +252,11 @@ void HttpServer::registerApiRoutes() {
             Update.write(data, len);
             if (index + len >= total) {
                 // Last chunk: finalise and verify CRC.
-                Update.end(true);
+                if (Update.end(true)) {
+                    otaFlashComplete_ = true;  // mark success — request handler may now reboot
+                } else {
+                    log_e("OTA Update.end failed: %s", Update.errorString());
+                }
             }
         }
     );

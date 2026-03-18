@@ -60,6 +60,10 @@ private:
     // are safe because volatile guarantees visiblity (no torn reads on 32-bit ESP32).
     volatile bool*     otaWindowFlag_   = nullptr;  // true = window open
     volatile uint32_t* otaWindowOpenMs_ = nullptr;  // millis() when window opened
+    // Set to true by body chunk handler ONLY after Update.end(true) succeeds.
+    // Reset to false at first chunk (index==0). Checked by request handler before
+    // committing the NVS metadata and rebooting. Prevents reboot on 0-byte body.
+    volatile bool      otaFlashComplete_ = false;
 
 public:
     // Inject OTA window state from main.cpp after begin().

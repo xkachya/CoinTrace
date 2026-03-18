@@ -374,13 +374,35 @@ void setup() {
 
   // A-4: Show rollback banner if an unconfirmed OTA is pending.
   if (sOtaRollbackPending) {
-    M5Cardputer.Display.fillRect(0, 50, 240, 40, BLACK);
+    NVSManager::OtaMeta _bannerMeta;
+    gNVS.loadOtaMeta(_bannerMeta);
+    const uint32_t sketchKB = ESP.getSketchSize() / 1024;
+
+    M5Cardputer.Display.fillRect(0, 46, 240, 58, BLACK);
     M5Cardputer.Display.setTextSize(1);
+    // Line 1: new version + size
+    M5Cardputer.Display.setTextColor(CYAN);
+    M5Cardputer.Display.setCursor(5, 49);
+    M5Cardputer.Display.printf("New: v%s  (%u KB)", COINTRACE_VERSION, sketchKB);
+    // Line 2: previous version
+    M5Cardputer.Display.setTextColor(WHITE);
+    M5Cardputer.Display.setCursor(5, 59);
+    if (_bannerMeta.pre_version[0] != '\0') {
+      M5Cardputer.Display.printf("Prev: v%s", _bannerMeta.pre_version);
+    } else {
+      M5Cardputer.Display.print("Prev: unknown");
+    }
+    // Line 3: action prompt + countdown
     M5Cardputer.Display.setTextColor(YELLOW);
-    M5Cardputer.Display.setCursor(5, 53);
-    M5Cardputer.Display.print("New FW booted — press O to keep");
-    M5Cardputer.Display.setCursor(5, 63);
-    M5Cardputer.Display.printf("Auto-rollback in %us", kOtaRollbackMs / 1000);
+    M5Cardputer.Display.setCursor(5, 69);
+    M5Cardputer.Display.printf("Press O to keep  (rollback %us)", kOtaRollbackMs / 1000);
+    // Line 4: chip id / partition slot for quick sanity check
+    M5Cardputer.Display.setTextColor(DARKGREY);
+    M5Cardputer.Display.setCursor(5, 79);
+    const esp_partition_t* running = esp_ota_get_running_partition();
+    if (running) {
+      M5Cardputer.Display.printf("Slot: %s  @ 0x%06X", running->label, running->address);
+    }
   }
 }
 
@@ -413,12 +435,16 @@ void loop() {
             // Confirm the OTA that just booted — cancel rollback timer.
             gNVS.setOtaConfirmed();
             sOtaRollbackPending = false;
-            gLogger.info("OTA", "OTA confirmed — new firmware accepted");
-            M5Cardputer.Display.fillRect(0, 50, 240, 40, BLACK);
+            gLogger.info("OTA", "OTA confirmed — new firmware v%s (%u KB) accepted",
+                         COINTRACE_VERSION, ESP.getSketchSize() / 1024);
+            M5Cardputer.Display.fillRect(0, 46, 240, 58, BLACK);
             M5Cardputer.Display.setTextSize(1);
             M5Cardputer.Display.setTextColor(GREEN);
-            M5Cardputer.Display.setCursor(5, 58);
-            M5Cardputer.Display.print("OTA confirmed ✔");
+            M5Cardputer.Display.setCursor(5, 56);
+            M5Cardputer.Display.printf("OTA confirmed \x84  v%s", COINTRACE_VERSION);
+            M5Cardputer.Display.setTextColor(WHITE);
+            M5Cardputer.Display.setCursor(5, 66);
+            M5Cardputer.Display.printf("%u KB  — rollback cancelled", ESP.getSketchSize() / 1024);
           } else {
             // Open upload window.
             sOtaWindowOpen   = true;
