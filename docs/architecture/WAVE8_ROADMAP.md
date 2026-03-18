@@ -1,8 +1,8 @@
 # Wave 8 Roadmap — Connectivity + Infrastructure + Sensor Integration
 
-**Статус:** 🔄 In Progress — Фаза 1 (B-1/B-2/B-3/C-3/A-1/A-2/A-3 завершено, **A-4 наступний**)  
-**Версія:** 1.5.0  
-**Дата:** 2026-03-18 (оновлено після hw-верифікації A-2 з фінальними вимірами + external review response)
+**Статус:** 🔄 In Progress — Фаза 1 (B-1/B-2/B-3/C-3/A-1/A-2/A-3/A-4 завершено, **A-5 наступний**)  
+**Версія:** 1.6.0  
+**Дата:** 2026-03-18 (оновлено після hw-верифікації A-4 OTA: flash ✅ confirm ✅ auto-rollback ✅)
 **Попередня хвиля:** Wave 7 — Storage Foundation (`d53a440`, 84/84 native tests, hardware verified)
 **Cross-ref:** `docs/architecture/MEMORY_MAP.md` — детальна карта Flash/SRAM/Heap (hw-verified 2026-03-18)
 
@@ -44,8 +44,8 @@ Cross-ref: [STORAGE_ARCHITECTURE.md §15](./STORAGE_ARCHITECTURE.md), [CONNECTIV
 | `GET /api/v1/database` | ❌ | A-3 | ✅ реалізовано — FingerprintCache count + ready flag |
 | **`POST /api/v1/database/match`** | ❌ | A-3 | ✅ hw-verified 2026-03-18 — conf=0.919 (xcu/synthetic), top-5 alternatives |
 | `GET /api/v1/sensor/state` | ❌ | A-3 | ✅ реалізовано — повертає IDLE_NO_COIN (pre-C-2 stub) |
-| OTA mechanism | ❌ | A-4 | ADR-007 фізична клавіша 'O' — **НАСТУПНИЙ** |
-| Web UI (HTML/CSS/JS) | ❌ | A-5 | Match screen тестується через manual POST |
+| OTA mechanism | ❌ | A-4 | ✅ hw-verified 2026-03-18 — flash ✅ confirm ✅ auto-rollback 60s ✅ (`1530deb`) |
+| Web UI (HTML/CSS/JS) | ❌ | A-5 | Match screen тестується через manual POST — **НАСТУПНИЙ** |
 | WebSocket (status+log frames) | ❌ | A-6 | Sensor frames = stub |
 | BLE GATT service | ❌ | A-7 | Опційно, Wave 8 backlog |
 | `test_nvs_manager/` | ✅ | B-1 | 9/9 native tests PASSED (`bde3c03`) |
@@ -234,14 +234,32 @@ POST /api/v1/calibrate
 
 ### A-4: OTA Firmware Update
 
+**Статус:** ✅ hw-verified 2026-03-18 — commit `1530deb` (6 файлів, 488 insertions)
+
+**Build:** RAM 61.6% (201900/327680 B) · Flash 56.3% (1474605/2621440 B)
+
+**Реалізовано:**
+- `NVSManager`: `OtaMeta` struct + `saveOtaMeta()`, `loadOtaMeta()`, `setOtaConfirmed()`, `clearOtaMeta()`
+- `HttpServer`: `GET /ota/status` (ota_window, seconds_left, pending, confirmed, pre_version) + `POST /ota/update` (chunked flash via `Update.h`)
+- `main.cpp`: OTA state machine — window (30s), ORANGE countdown display, confirm `'O'`, rollback timer (60s), `esp_ota_set_boot_partition(app0)` + `esp_restart()`
+- `test/test_ota_nvs/`: 14/14 native tests PASSED (136/136 total no regressions)
+- `scripts/test_ota_flash.py`: `--env` arg, dynamic firmware path, version change check, Windows URLError/timeout handled
+- `platformio.ini`: `cointrace-ota-test` env (version `1.0.1-ota-test`) для верифікації version bump
+
+**HW-verified acceptance criteria:**
+| Тест | Результат |
+|------|-----------|
+| POST без O → 403 | ✅ |
+| O → window відкривається, countdown display | ✅ |
+| OTA flash → device reboots into new firmware | ✅ (×2) |
+| 60s без O → auto-rollback до попередньої прошивки | ✅ |
+| O після reboot → confirmed=true, нова прошивка залишається | ✅ |
+| Version change: `1.0.0-dev` → `1.0.1-ota-test` | ✅ |
+
 **Механіка (ADR-007):**
 1. Клавіша `'O'` → 30-секундне вікно + зворотний відлік на дисплеї
 2. `POST /api/v1/ota/update` (Content-Type: application/octet-stream) → ESP-IDF OTA partition swap
 3. Reboot → auto-rollback якщо не підтвердив `'O'` знову протягом 60с
-
-**NVS integration:**
-- `saveOtaMetadata(preVersion, confirmed=false)` перед `Update.apply()`
-- `markOtaConfirmed()` після успішного boot + фізичного підтвердження
 
 **Backlog v2:** ECDSA підпис firmware binary (в v1 ризик прийнято — фізичний доступ = авторизація).
 

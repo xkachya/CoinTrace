@@ -136,3 +136,8 @@ test_output.txt
 # Throwaway debug scripts (use scripts/hw_test.py instead)
 mon_reset.py
 boot_monitor.log
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+*.pyo
