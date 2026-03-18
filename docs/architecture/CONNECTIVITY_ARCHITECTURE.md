@@ -948,9 +948,12 @@ RAW:      CFF322C3-6E5C-4008-996C-7A08BDAD4C53
 **Висновок:** BLE + index.json (1000 монет) одночасно = критичний OOM ризик (~20–35 KB вільно, фрагментація → crash). WiFi + index.json без BLE = **~80 KB вільно** — достатньо для Deep Scan. Phase 2 SD reads (~2 KB sequential) не змінюють бюджет. 
 
 **Варіанти (ADR-006):**
-- BLE вимикається після завантаження index.json — **обраний для v1**
-- Обрізати index.json до ~400 монет для BLE-режиму
-- M5Stack CoreS3 (8 MB PSRAM) як цільова платформа для повного stack (backlog)
+- BLE вимикається після завантаження index.json — **відхилено: OOM навіть без index.json**
+- ⛔ **BLE відкладено до v2 PSRAM** (2026-03-18, hw-measured decision):
+  - Поточний idle heap після WiFi+HTTP: ~30 KB; NimBLE потребує ~50 KB → дефіцит ~20 KB
+  - З PSRAM: FingerprintCache (140 KB) переноситься у PSRAM → звільняється ~140 KB internal DRAM → BLE поміщається
+  - Target hardware: ESP32-S3R8 (8 MB PSRAM) або M5Stack CoreS3
+- M5Stack CoreS3 (8 MB PSRAM) як цільова платформа для повного stack (v2)
 
 ---
 

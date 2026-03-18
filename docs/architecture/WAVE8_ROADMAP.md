@@ -47,7 +47,7 @@ Cross-ref: [STORAGE_ARCHITECTURE.md §15](./STORAGE_ARCHITECTURE.md), [CONNECTIV
 | OTA mechanism | ❌ | A-4 | ✅ hw-verified 2026-03-18 — flash ✅ confirm ✅ auto-rollback 60s ✅ (`1530deb`) |
 | Web UI (HTML/CSS/JS) | ❌ | A-5 | Match screen тестується через manual POST — **НАСТУПНИЙ** |
 | WebSocket (status+log frames) | ❌ | A-6 | Sensor frames = stub |
-| BLE GATT service | ❌ | A-7 | Опційно, Wave 8 backlog |
+| BLE GATT service | ❌ | A-7 | ⛔ Відкладено до v2 (PSRAM) — ~30 KB вільно, NimBLE потребує ~50 KB |
 | `test_nvs_manager/` | ✅ | B-1 | 9/9 native tests PASSED (`bde3c03`) |
 | `test_fingerprint_cache/` | ✅ | B-2 | 6/6 native tests PASSED, `loadTestEntry()` додано |
 | GPIO0 boot recovery | ✅ | B-3 | Реалізовано в `src/main.cpp`; hw-verified: пристрій перезавантажується при утриманні G0 під час 3s вікна |
@@ -339,10 +339,39 @@ POST /api/v1/calibrate
 
 ---
 
-### A-7: BLE GATT Service (опційно, Wave 8 backlog)
+### A-7: BLE GATT Service — ⛔ Відкладено до v2 (PSRAM hardware)
 
-Визначено в CONNECTIVITY_ARCHITECTURE.md §5.4. UUIDs зафіксовані назавжди (ADR-004):
+**Рішення (2026-03-18, hw-measured):** BLE не реалізується в Wave 8 на поточному hardware.
 
+**RAM аналіз:**
+
+| Стан | Internal DRAM вільно |
+|---|---|
+| Після WiFi + HTTP (hw-виміряно) | ~30 KB |
+| Після A-6 WebSocket server | ~22–25 KB |
+| Після 1 WS клієнта | ~16–19 KB |
+| BLE NimBLE (мінімум) потребує | **~35–50 KB** |
+| **Дефіцит** | **~15–34 KB → hard OOM** |
+
+**Чому PSRAM не рятує напряму:**  
+BLE stack вимагає **internal DRAM** (DMA буфери, time-critical алокації). PSRAM не підходить.
+
+**Шлях до BLE через PSRAM (непрямий):**  
+`FingerprintCache::entries_[1000]` = **140 KB BSS у internal DRAM** → перенести на PSRAM:  
+```cpp
+// v2: heap_caps_malloc(sizeof(CacheEntry) * MAX_ENTRIES, MALLOC_CAP_SPIRAM)
+```
+Це звільнить ~140 KB internal DRAM → BLE NimBLE поміщається (~50 KB) з ~90 KB залишком.
+
+**Чому BLE не потрібен для v1 функціонально:**
+| BLE Use Case | Альтернатива в v1 |
+|---|---|
+| Field use без роутера | ✅ WiFi AP mode (`192.168.4.1`) |
+| Real-time streaming | ✅ WebSocket (A-6) |
+| WiFi provisioning | ✅ Keyboard (`promptSTA()`) — унікальна перевага Cardputer |
+| Телефон без інсталяції | ✅ Web UI в браузері через WiFi AP |
+
+**UUIDs зафіксовані назавжди** (ADR-004, не змінювати навіть у v2):
 ```
 Service:  D589804A-228E-4171-BE8B-872534A652C6
 MEASURE:  5AF690DC-5EA5-4166-80B4-2138AC7CF491  Write
@@ -352,7 +381,8 @@ LOG:      CAB81902-EF36-410E-A8AE-3891C00375CD  Notify
 RAW:      CFF322C3-6E5C-4008-996C-7A08BDAD4C53  Notify
 ```
 
-**Пріоритет:** Низький для Wave 8 фази 1 (A-1..A-6). BLE не потрібен поки WiFi AP покриває всі use cases. Реалізувати після верифікації WiFi stack + heap budget.
+**Target platform v2:** ESP32-S3R8 (8 MB PSRAM варіант) або M5Stack CoreS3.  
+**Передумови для v2:** FingerprintCache → PSRAM міграція + heap budget re-measurement.
 
 ---
 
@@ -659,7 +689,7 @@ C-5  σ tuning                         ~1 день (реальні монети)
 C-6  Real FP DB seeding               ~2 дні (Python CLI tool)
 A-x  WebSocket sensor frames (live)   ~0.5 дні (стаби → real)
 A-x  POST /measure/start (full)       ~0.5 дні (C-2 готово)
-A-7  BLE GATT (опційно)              ~3-4 дні
+A-7  BLE GATT → відкладено до v2 PSRAM    (current hw: ~30 KB free, NimBLE needs ~50 KB)
 ```
 
 ---
