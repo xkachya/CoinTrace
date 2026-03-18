@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CoinTrace</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>Coin<span>Trace</span></h1>
+  <span id="conn-badge">Connecting…</span>
+</header>
+
+<nav>
+  <button class="active" data-tab="status">Status</button>
+  <button data-tab="match">Match</button>
+</nav>
+
+<main>
+
+  <!-- ── Status page ──────────────────────────────────────────── -->
+  <div id="page-status" class="page active">
+
+    <div class="refresh-row">
+      <button class="secondary" id="refresh-btn">Refresh</button>
+      <span id="s-updated"></span>
+    </div>
+
+    <!-- Device -->
+    <div class="card">
+      <div class="card-title">Device</div>
+      <div class="stat-grid">
+        <div class="stat-item">
+          <label>FIRMWARE</label>
+          <div class="val small" id="s-version">—</div>
+        </div>
+        <div class="stat-item">
+          <label>UPTIME</label>
+          <div class="val" id="s-uptime">—</div>
+        </div>
+        <div class="stat-item">
+          <label>WIFI</label>
+          <div class="val small" id="s-wifi">—</div>
+        </div>
+        <div class="stat-item">
+          <label>IP</label>
+          <div class="val small" id="s-ip">—</div>
+        </div>
+        <div class="stat-item">
+          <label>BLE</label>
+          <div class="val small" id="s-ble">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Heap -->
+    <div class="card">
+      <div class="card-title">Memory</div>
+      <div class="stat-grid">
+        <div class="stat-item">
+          <label>FREE HEAP</label>
+          <div class="val" id="s-heap">—</div>
+        </div>
+        <div class="stat-item">
+          <label>MIN EVER</label>
+          <div class="val small" id="s-heap-min">—</div>
+        </div>
+        <div class="stat-item">
+          <label>MAX BLOCK</label>
+          <div class="val small" id="s-heap-block">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sensor & DB -->
+    <div class="card">
+      <div class="card-title">Sensor &amp; Database</div>
+      <div class="stat-grid">
+        <div class="stat-item">
+          <label>SENSOR</label>
+          <div class="val small" id="s-sensor">—</div>
+        </div>
+        <div class="stat-item">
+          <label>DB RECORDS</label>
+          <div class="val" id="s-db-count">—</div>
+        </div>
+        <div class="stat-item">
+          <label>DB STATUS</label>
+          <div class="val small" id="s-db-ready">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- OTA -->
+    <div class="card">
+      <div class="card-title">OTA</div>
+      <div class="stat-grid">
+        <div class="stat-item">
+          <label>WINDOW</label>
+          <div class="val small" id="s-ota">—</div>
+        </div>
+        <div class="stat-item">
+          <label>PREV VERSION</label>
+          <div class="val small" id="s-ota-pre">—</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /page-status -->
+
+  <!-- ── Match page ───────────────────────────────────────────── -->
+  <div id="page-match" class="page">
+
+    <div class="card">
+      <div class="card-title">Measurement Vector</div>
+      <form id="match-form" autocomplete="off">
+        <div class="field-grid">
+          <div>
+            <label for="f-dRp1">dRp1 (Ω)</label>
+            <input id="f-dRp1" type="number" step="any" placeholder="e.g. 250.0" required>
+          </div>
+          <div>
+            <label for="f-k1">k1</label>
+            <input id="f-k1" type="number" step="any" placeholder="e.g. 0.82" required>
+          </div>
+          <div>
+            <label for="f-k2">k2</label>
+            <input id="f-k2" type="number" step="any" placeholder="e.g. 0.91" required>
+          </div>
+          <div>
+            <label for="f-slope">slope_rp_per_mm_lr</label>
+            <input id="f-slope" type="number" step="any" placeholder="e.g. -0.128" required>
+          </div>
+          <div>
+            <label for="f-dL1">dL1 (µH)</label>
+            <input id="f-dL1" type="number" step="any" placeholder="e.g. 450.0" required>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="primary" id="match-btn">Match</button>
+          <span id="match-status"></span>
+        </div>
+      </form>
+    </div>
+
+    <div id="match-result"></div>
+
+  </div><!-- /page-match -->
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
