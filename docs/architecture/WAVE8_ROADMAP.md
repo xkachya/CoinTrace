@@ -291,14 +291,16 @@ POST /api/v1/calibrate
 |---|---|---|---|
 | Measurements | `GET /measure/{id}` + `meas_count` з `/status` | ✅ (Wave 7 UNKN виміри) | `meas_count` додано ✅ |
 | Log | `GET /api/v1/log` (REST poll 3s) | ✅ | — |
-| Settings | `GET/POST` NVS fields | ⚠️ endpoints відсутні в HttpServer | потребує firmware |
-| Sensor stream | WebSocket `"t":"sensor"` | ⏳ | після A-6 |
+| Settings | `GET /api/v1/settings` + `POST /api/v1/settings` | ✅ (NVS вже має усі getter/setter) | firmware endpoint потрібен (частина A-5b) |
+| Sensor stream | WebSocket `"t":"sensor"` | ⏳ | після A-6 + C-2 |
 
-**A-5b рекомендований scope (без Settings та WS):**
-- Вкладка **Measurements**: показує останні N записів, навігація prev/next по `meas_count`; поля: ts, metal_code, coin_name, conf, rp[], l[]
+**A-5b повний scope:**
+- Firmware: `GET /api/v1/settings` → JSON з `dev_name`, `lang`, `display_rot`, `brightness`, `log_level`
+- Firmware: `POST /api/v1/settings` → оновлює NVS поля через NVSManager setters (вже існують)
+- Вкладка **Measurements**: є виміри, навігація prev/next по `meas_count`; поля: ts, metal_code, coin_name, conf, rp[], l[]
 - Вкладка **Log**: GET /api/v1/log polling, autoscroll, level filter (DEBUG/INFO/WARN/ERROR)
+- Вкладка **Settings**: dev_name, lang, display_rot, brightness, log_level; save → POST + повідомлення про перезавантаження (display_rot вимагає reboot)
 
-**Settings відкладено:** потребує нових firmware endpoints (`GET/POST /api/v1/settings`). Не в critical path фази 1; реалізація разом з A-6 або після.  
 **Sensor stream відкладено:** stub → real після C-2 + A-6 WebSocket.
 
 ---
@@ -723,7 +725,7 @@ A-7  BLE GATT (опційно)              ~3-4 дні
 
 ---
 
-*Версія 1.7.0 — A-5a Web UI MVP hw-verified (2026-03-18, commit `1905a43`): Status tab (4-endpoint poll, heap warning, OTA/DB/sensor cards) + Match tab (5-field form, conf bar, alternatives). 19.9 KB total. STA hw-verified. AP mode pending. `GET /status` розширено полем `meas_count` (A-5b prep). A-5b scope уточнено: Measurements + Log (REST poll), Settings відкладено (потребує firmware endpoints). Прийняте рішення: Settings реалізується з A-6 або після.*  
+*Версія 1.7.0 — A-5a Web UI MVP hw-verified (2026-03-18, commit `1905a43`): Status tab (4-endpoint poll, heap warning, OTA/DB/sensor cards) + Match tab (5-field form, conf bar, alternatives). 19.9 KB total. STA hw-verified. AP mode pending. `GET /status` розширено полем `meas_count` (A-5b prep). A-5b scope: Measurements + Log + Settings (REST); Settings не залежить від A-6 або сенсора — NVSManager getters/setters вже існують, потрібні лише firmware endpoints в HttpServer.*  
 *Версія 1.6.0 — A-4 OTA hw-verified (2026-03-18): flash ✅ confirm ✅ auto-rollback 60s ✅ (commits `1530deb` + `9801023` + `c0e9e3d`). Acceptance Criteria оновлено: OTA 4/4 пункти [x]; native tests 108→136/136; mDNS reформульовано (B-03 рішення зберігається до A-6); GPIO0 відмічено як hw-verified (B-3). Наступний: A-5a Web UI MVP.*  
 *Версія 1.5.0 — A-2 + A-3 завершено та hw-verified (2026-03-18). 9/9 REST endpoints, 108/108 native tests. heap idle 30 KB, heap_max_block 72%, drift 948 B. LFS task stack 4096→3072 B. MEMORY_MAP.md та HW_TESTING.md додано. mDNS вимкнено (B-03 OOM fix) — рішення після A-6 heap measurement. Наступний: A-4 OTA mechanism.*  
 *Версія 1.1.0 — [Wave8-Audit-v1] Впроваджено 9 знахідок зовнішнього аудиту: W-01 QR альтернативи (A-1); W-02 GET /api/v1/sensor/state (A-3, матриця, acceptance); W-03 A-5 split A-5a/A-5b + timeline revision; W-04 WebSocket sensor frame pos field (A-6); W-06 C-1 процедура Eq.6/Eq.11 замість DIG_CONFIG; W-07 rp[3] ADR — STEP_DRIFT + drift validation 5% threshold (C-2); W-08 timeout 120s (C-2); W-09 keyboard advance v1 (C-2); W-10 RAM budget audit note. W-11/W-12 false positive — STORAGE_ARCHITECTURE v1.7.1 вже виправлено.*  
