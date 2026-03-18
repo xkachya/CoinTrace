@@ -1,8 +1,8 @@
 # Wave 8 Roadmap — Connectivity + Infrastructure + Sensor Integration
 
-**Статус:** 🔄 In Progress — Фаза 1 (B-1/B-2/B-3/C-3/A-1/A-2/A-3/A-4/A-5a завершено, **A-5b наступний**)  
-**Версія:** 1.6.0  
-**Дата:** 2026-03-18 (оновлено після hw-верифікації A-4 OTA: flash ✅ confirm ✅ auto-rollback ✅)
+**Статус:** 🔄 In Progress — Фаза 1 (B-1/B-2/B-3/C-3/A-1/A-2/A-3/A-4/A-5a/A-5b завершено, **A-6 наступний**)  
+**Версія:** 1.7.0  
+**Дата:** 2026-03-18 (оновлено після hw-верифікації A-5b Web UI full version)
 **Попередня хвиля:** Wave 7 — Storage Foundation (`d53a440`, 84/84 native tests, hardware verified)
 **Cross-ref:** `docs/architecture/MEMORY_MAP.md` — детальна карта Flash/SRAM/Heap (hw-verified 2026-03-18)
 
@@ -285,21 +285,29 @@ POST /api/v1/calibrate
 
 **Firmware зміна (A-5b prep):** `GET /api/v1/status` тепер повертає поле `meas_count` (commit A-5b-prep) — необхідно для навігації по Measurements tab.
 
-#### A-5b: Повна версія — ~2 дні (не в critical path фази 1)
+#### A-5b: Повна версія — ✅ hw-verified 2026-03-18
 
-| Екран | Endpoint(s) | Доступний без сенсора | Залежності |
-|---|---|---|---|
-| Measurements | `GET /measure/{id}` + `meas_count` з `/status` | ✅ (Wave 7 UNKN виміри) | `meas_count` додано ✅ |
-| Log | `GET /api/v1/log` (REST poll 3s) | ✅ | — |
-| Settings | `GET /api/v1/settings` + `POST /api/v1/settings` | ✅ (NVS вже має усі getter/setter) | firmware endpoint потрібен (частина A-5b) |
-| Sensor stream | WebSocket `"t":"sensor"` | ⏳ | після A-6 + C-2 |
+| Екран | Endpoint(s) | Статус |
+|---|---|---|
+| Measurements | `GET /measure/{id}` + `meas_count` з `/status` | ✅ HW-verified |
+| Log | `GET /api/v1/log` (REST poll 3s, `since_ms` cursor) | ✅ HW-verified |
+| Settings | `GET /api/v1/settings` + `POST /api/v1/settings` | ✅ HW-verified |
+| Sensor stream | WebSocket `"t":"sensor"` | ⏳ після A-6 + C-2 |
 
-**A-5b повний scope:**
-- Firmware: `GET /api/v1/settings` → JSON з `dev_name`, `lang`, `display_rot`, `brightness`, `log_level`
-- Firmware: `POST /api/v1/settings` → оновлює NVS поля через NVSManager setters (вже існують)
-- Вкладка **Measurements**: є виміри, навігація prev/next по `meas_count`; поля: ts, metal_code, coin_name, conf, rp[], l[]
-- Вкладка **Log**: GET /api/v1/log polling, autoscroll, level filter (DEBUG/INFO/WARN/ERROR)
-- Вкладка **Settings**: dev_name, lang, display_rot, brightness, log_level; save → POST + повідомлення про перезавантаження (display_rot вимагає reboot)
+**HW-verified acceptance criteria:**
+| Тест | Результат |
+|---|---|
+| `GET /settings` → 200 з `dev_name, lang, display_rot, brightness, log_level` | ✅ |
+| `POST /settings` partial update (brightness, lang) → `{ok:true, needs_restart:false}` | ✅ |
+| `POST /settings` невалідний lang="fr" → 400 | ✅ |
+| `POST /settings` display_rot=9 → 400 | ✅ |
+| `POST /settings` display_rot зміна → `needs_restart:true` | ✅ |
+| Round-trip: значення persist після reboot (lang=uk, brightness=200) | ✅ |
+| Log tab: `since_ms` cursor — дублювання відсутнє | ✅ (bug fix: `next_ms = lastMs + 1`) |
+| Log tab: level filter INFO → DEBUG рядки зникають | ✅ |
+| Log tab: Clear → 0 lines, cursor reset | ✅ |
+| OTA status badge: Confirmed ✓ зелений / ⚠ Unconfirmed червоний | ✅ (bug fix) |
+| Web total size: ~36 KB (`app.js` + `index.html` + `style.css`) | ✅ |
 
 **Sensor stream відкладено:** stub → real після C-2 + A-6 WebSocket.
 

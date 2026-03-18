@@ -364,7 +364,7 @@ void HttpServer::registerApiRoutes() {
                 e["msg"]   = buf[i].message;      // §5.2: "msg"  (not "message")
                 lastMs = buf[i].timestampMs;
             }
-            doc["next_ms"] = lastMs;  // §5.2: pagination cursor for next since_ms
+            doc["next_ms"] = (lastMs > 0) ? lastMs + 1 : 0;  // §5.2: exclusive cursor — next poll starts strictly after lastMs
             delete[] buf;
 
             String body;
@@ -496,6 +496,128 @@ void HttpServer::registerApiRoutes() {
     server_->on("/api/v1/calibrate", HTTP_POST,
         [this](AsyncWebServerRequest* req) {
             sendError(req, 503, "sensor_not_ready");
+        }
+    );
+
+    // ── GET /api/v1/settings ─────────────────────────────────────────────────
+    // Returns all user-facing NVS "system" namespace fields.
+    // Pure NVS reads — safe from lwIP thread (no in-memory mutation).
+    // WAVE8_ROADMAP §2 A-5b
+    server_->on("/api/v1/settings", HTTP_GET,
+        [this](AsyncWebServerRequest* req) {
+            JsonDocument doc;
+            doc["dev_name"]    = nvs_->getDevName();
+            doc["lang"]        = nvs_->getLang();
+            doc["display_rot"] = nvs_->getDisplayRot();
+            doc["brightness"]  = nvs_->getBrightness();
+            doc["log_level"]   = nvs_->getLogLevel();
+
+            String body;
+            serializeJson(doc, body);
+            AsyncWebServerResponse* resp = req->beginResponse(200, "application/json", body);
+            addCors(resp);
+            req->send(resp);
+        }
+    );
+
+    // ── POST /api/v1/settings ────────────────────────────────────────────────
+    // Partial update: only provided JSON keys are written to NVS "system" namespace.
+    // Accepted fields: dev_name (str, 1-32), lang ("en"|"uk"),
+    //   display_rot (0-3), brightness (0-255), log_level (0-4).
+    //
+    // [ThreadSafety] Setters are pure NVS writes (no read+write race on the
+    // "system" namespace) — safe from lwIP thread per OTA endpoint precedent.
+    // [PRE-10] does NOT apply here: setter pattern is put-only, unlike
+    // incrementMeasCount() which does get+put.
+    //
+    // display_rot requires device restart to take effect (M5Cardputer driver
+    // caches orientation at boot). Caller is informed via needs_restart=true.
+    constexpr size_t kMaxSettingsBodyB = 256;
+    server_->on("/api/v1/settings", HTTP_POST,
+        // ─ request handler ────────────────────────────────────────────────────
+        [this](AsyncWebServerRequest* req) {
+            if (!req->_tempObject) {
+                sendError(req, 400, "missing_body");
+                return;
+            }
+            const char* bodyStr = static_cast<const char*>(req->_tempObject);
+
+            JsonDocument parsed;
+            if (deserializeJson(parsed, bodyStr) != DeserializationError::Ok) {
+                sendError(req, 400, "invalid_json");
+                return;
+            }
+
+            bool needsRestart = false;
+
+            if (parsed["dev_name"].is<const char*>()) {
+                const char* v = parsed["dev_name"].as<const char*>();
+                const size_t len = strlen(v);
+                if (len == 0 || len > 32) {
+                    sendError(req, 400, "invalid_dev_name");
+                    return;
+                }
+                nvs_->setDevName(v);
+            }
+            if (parsed["lang"].is<const char*>()) {
+                const char* v = parsed["lang"].as<const char*>();
+                if (strcmp(v, "en") != 0 && strcmp(v, "uk") != 0) {
+                    sendError(req, 400, "invalid_lang");
+                    return;
+                }
+                nvs_->setLang(v);
+            }
+            if (parsed["display_rot"].is<int>()) {
+                const int v = parsed["display_rot"].as<int>();
+                if (v < 0 || v > 3) {
+                    sendError(req, 400, "invalid_display_rot");
+                    return;
+                }
+                nvs_->setDisplayRot((uint8_t)v);
+                needsRestart = true;  // M5Cardputer caches orientation at boot
+            }
+            if (parsed["brightness"].is<int>()) {
+                const int v = parsed["brightness"].as<int>();
+                if (v < 0 || v > 255) {
+                    sendError(req, 400, "invalid_brightness");
+                    return;
+                }
+                nvs_->setBrightness((uint8_t)v);
+            }
+            if (parsed["log_level"].is<int>()) {
+                const int v = parsed["log_level"].as<int>();
+                if (v < 0 || v > 4) {
+                    sendError(req, 400, "invalid_log_level");
+                    return;
+                }
+                nvs_->setLogLevel((uint8_t)v);
+            }
+
+            JsonDocument respDoc;
+            respDoc["ok"]            = true;
+            respDoc["needs_restart"] = needsRestart;
+            String body;
+            serializeJson(respDoc, body);
+            AsyncWebServerResponse* resp = req->beginResponse(200, "application/json", body);
+            addCors(resp);
+            req->send(resp);
+        },
+        nullptr,  // upload handler — not used
+        // ─ body chunk handler ─────────────────────────────────────────────────
+        [kMaxSettingsBodyB](AsyncWebServerRequest* req,
+                             uint8_t* data, size_t len,
+                             size_t index, size_t /*total*/) {
+            if (index == 0) {
+                req->_tempObject = malloc(kMaxSettingsBodyB);
+                if (req->_tempObject) static_cast<char*>(req->_tempObject)[0] = '\0';
+            }
+            if (!req->_tempObject) return;
+            char*        buf       = static_cast<char*>(req->_tempObject);
+            const size_t already   = strlen(buf);
+            const size_t remaining = kMaxSettingsBodyB - already - 1;
+            const size_t toCopy    = (len < remaining) ? len : remaining;
+            memcpy(buf + already, data, toCopy);
+            buf[already + toCopy] = '\0';
         }
     );
 }

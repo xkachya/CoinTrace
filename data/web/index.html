@@ -9,13 +9,16 @@
 <body>
 
 <header>
-  <h1>Coin<span>Trace</span></h1>
+  <h1>Coin<span>Trace</span><sup>TM</sup></h1>
   <span id="conn-badge">Connecting…</span>
 </header>
 
 <nav>
   <button class="active" data-tab="status">Status</button>
   <button data-tab="match">Match</button>
+  <button data-tab="meas">Measurements</button>
+  <button data-tab="log">Log</button>
+  <button data-tab="settings">Settings</button>
 </nav>
 
 <main>
@@ -148,6 +151,94 @@
     <div id="match-result"></div>
 
   </div><!-- /page-match -->
+
+  <!-- ── Measurements page ─────────────────────────────────────── -->
+  <div id="page-meas" class="page">
+
+    <div class="nav-row">
+      <button class="secondary" id="meas-prev" disabled>← Prev</button>
+      <span class="nav-label" id="meas-nav">— / —</span>
+      <button class="secondary" id="meas-next" disabled>Next →</button>
+    </div>
+
+    <div id="meas-result"></div>
+
+  </div><!-- /page-meas -->
+
+  <!-- ── Log page ────────────────────────────────────────────── -->
+  <div id="page-log" class="page">
+
+    <div class="log-toolbar">
+      <select id="log-level-select">
+        <option value="DEBUG">All levels</option>
+        <option value="INFO">INFO+</option>
+        <option value="WARNING">WARN+</option>
+        <option value="ERROR">ERROR+</option>
+      </select>
+      <button class="secondary" id="log-clear-btn">Clear</button>
+      <span id="log-count">0 lines</span>
+    </div>
+
+    <div id="log-output" class="log-output"></div>
+
+  </div><!-- /page-log -->
+
+  <!-- ── Settings page ─────────────────────────────────────────── -->
+  <div id="page-settings" class="page">
+
+    <div id="restart-banner" class="restart-banner">
+      ⚠️ Display rotation change requires a device restart to take effect.
+    </div>
+
+    <div class="card">
+      <div class="card-title">Device Settings</div>
+      <form id="settings-form" autocomplete="off">
+        <div class="settings-grid">
+          <div>
+            <label for="s-devname">Device Name</label>
+            <input id="s-devname" type="text" maxlength="32" placeholder="CoinTrace">
+          </div>
+          <div>
+            <label for="s-lang">Language</label>
+            <select id="s-lang">
+              <option value="en">English</option>
+              <option value="uk">Українська</option>
+            </select>
+          </div>
+          <div>
+            <label for="s-displayrot">Display Rotation</label>
+            <select id="s-displayrot">
+              <option value="0">0°</option>
+              <option value="1">90° (default)</option>
+              <option value="2">180°</option>
+              <option value="3">270°</option>
+            </select>
+          </div>
+          <div>
+            <label for="s-loglevel">Log Level</label>
+            <select id="s-loglevel">
+              <option value="0">DEBUG</option>
+              <option value="1">INFO</option>
+              <option value="2">WARNING</option>
+              <option value="3">ERROR</option>
+              <option value="4">FATAL</option>
+            </select>
+          </div>
+          <div style="grid-column: 1 / -1">
+            <label for="s-brightness">Brightness (<span id="s-brightness-val">128</span>)</label>
+            <div class="range-row">
+              <input id="s-brightness" type="range" min="0" max="255" value="128">
+            </div>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="primary" id="settings-save">Save</button>
+          <span id="settings-status"></span>
+        </div>
+      </form>
+    </div>
+
+  </div><!-- /page-settings -->
 
 </main>
 
