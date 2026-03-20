@@ -188,3 +188,57 @@ void app_main() {
 Автор та джерела
 - TI LDC1101 Datasheet
 - ESP-IDF peripherals documentation
+
+---
+
+10. Wiring & PCB Integration (detailed)
+
+This section is intended for PCB designers and hardware integrators. It expands the short checklist above into actionable steps that must be completed and documented before production.
+
+10.1 Board mapping and metadata
+- For every supported carrier board add a JSON metadata entry under `boards/` (or the equivalent board config) containing at least:
+
+```json
+{
+    "board": "m5cardputer-adv",
+    "ldc1101": {
+        "clk_in_gpio": 21,          // verified GPIO number for mikroBUS Pin 16
+        "spi_cs_pin": 5,
+        "jp1_required_position": "left",
+        "clkin_source_default": "spi"
+    }
+}
+```
+
+10.2 PCB routing checklist (to include in PCB review)
+- Place the LDC1101 as close as possible to the mikroBUS connector.
+- Route `CLKIN` as a short single-ended trace on the top layer; target < 50 mm trace length.
+- Provide a continuous ground plane directly beneath `CLKIN` route; avoid splits under the trace.
+- Add a 22–47 Ω series resistor near the MCU output pin (for traces > 20 mm).
+- Minimize vias on the `CLKIN` net; if unavoidable, keep via count low and place vias near source side.
+- Keep `CLKIN` away from switching regulators, USB data, or high-current traces.
+- Place the 0.1 µF decoupling capacitor within 1–2 mm of the LDC1101 VDD pin.
+
+10.3 Connector and cable guidance
+- If an external cable is used to connect the Click board, use a short well-grounded cable and pair `CLKIN` with its ground return.
+- Do not rely on long ribbon cables for `CLKIN` (high jitter and reflections).
+
+10.4 Test points and production checks
+- Add labeled test points: `TP_LDC1101_CLKIN`, `TP_LDC1101_CS`, `TP_LDC1101_MISO`, `TP_LDC1101_SCLK`.
+- Production bring-up test steps:
+    1. With LDC1101 unpopulated, enable MCU generator and verify 16 MHz at `TP_LDC1101_CLKIN` (scope): 3.3 V TTL, ±0.5% freq.
+    2. Populate LDC1101 and verify SPI `DEVICE_ID` == 0xD4.
+    3. Run `calibrate()` for LHR and confirm `lhrRaw` stability and plausible `fSENSOR`.
+
+10.5 Firmware integration actions
+- Add board-init code that reads board metadata and starts the chosen `clkin_source` (`spi` or `ledc`) during bring-up.
+- Provide runtime diagnostic that logs `clkin_freq_hz` and whether the chosen generator is running. Example log entry: `LDC1101 CLKIN: source=spi, gpio=21, freq=16MHz, status=running`.
+- Add an optional self-test that toggles the generator and records a short SPI read of `DEVICE_ID` to confirm synchronous behavior.
+
+10.6 Documentation and traceability
+- Link `LDC1101_CLKIN_INTEGRATION.md` from main `LDC1101_ARCHITECTURE.md` §2 and ADR-LHR-001.
+- Store the per-board `CLKIN_GPIO` mapping and the results of the oscilloscope acceptance test in the board's revision notes in `boards/`.
+
+---
+
+End of integration additions.

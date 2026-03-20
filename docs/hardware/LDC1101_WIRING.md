@@ -58,6 +58,63 @@ Pin  4  GND       ──────────────────→ GND 
  CS ✅      G5   13 ● ● 14  G15      UART TX (debug)
 ```
 
+---
+
+## 3. CLKIN (mikroBUS Pin 16) — wiring & PCB checklist
+
+This section gives precise wiring and PCB rules to ensure a reliable 16 MHz CLKIN for LHR mode.
+
+- Physical mapping:
+  - mikroBUS Pin 16 is labeled **PWM** on the mikroBUS header — this is the `CLKIN` input for LDC1101 when used in LHR mode.
+  - Determine the board-specific GPIO ↔ mikroBUS mapping for your carrier board and record it as `CLKIN_GPIO` in the board hardware README. Do NOT assume a GPIO number across boards.
+
+- Electrical rules:
+  - Voltage: **3.3 V TTL** only. Do not drive CLKIN with 5 V. If your source is 5 V, use a level shifter.
+  - Series resistor: add a small series resistor (22–47 Ω) in the CLKIN line close to the MCU pin to dampen reflections when routing >20 mm.
+  - Avoid pull-ups/pull-downs on the CLKIN net; the LDC1101 expects a clean clock input.
+
+- Routing rules (PCB):
+  - Route CLKIN as a single short trace; keep it as short as practicable (target < 50 mm).
+  - Keep CLKIN trace on the top layer with a continuous ground plane on the adjacent layer underneath to reduce EMI and jitter.
+  - Avoid vias on the CLKIN net where possible; if unavoidable, minimize via count and keep them close to the source.
+  - Do not route CLKIN underneath noisy power circuitry (switching regulators) or adjacent to high-speed switching nets (USB, high-current traces).
+  - If CLDO (chip clock output) is to be exposed on a custom board, treat it the same as CLKIN for routing (short, ground plane, series resistor optional).
+
+- Decoupling and power:
+  - Place the LDC1101 recommended decoupling capacitor (0.1 µF) close to its VDD pin per datasheet.
+  - Keep GND return path short from LDC1101 to the ground plane.
+
+- JP1 jumper check (MIKROE-3240):
+  - JP1 **MUST** be Left (SDO) for SPI operation. Document this on the assembly drawing and BOM for production.
+
+- Mechanical / connector notes:
+  - If using a header cable to connect the Click board, avoid long loose ribbon cables for CLKIN; use short shielded or twisted pair wiring and keep CLKIN paired with its ground return.
+
+- Test points and debugging:
+  - Add a test pad or small SMA header for CLKIN near the mikroBUS connector for oscilloscope probing during bring-up.
+  - Add a test pad for LDC1101 `DEVICE_ID` (SPI MISO/SCLK/CS accessible) for reading `DEVICE_ID`=0xD4 to confirm SPI comms.
+
+- Acceptance criteria (bring-up):
+  - With MCU generator enabled and no LDC1101 attached: measured on scope at the mikroBUS Pin16 pad: 3.3 V TTL, 16.000 MHz ±0.5%, duty ≈ 50%.
+  - With LDC1101 attached and LHR enabled: `calibrate()` returns stable `lhrRaw` values and `fSENSOR` consistent with expected coil frequency.
+
+---
+
+## 4. CLDO (chip clock output) note
+
+The LDC1101 includes a clock output (CLDO) in some reference schematics. On MIKROE-3240 CLDO is not routed to mikroBUS by default. If you design a custom breakout and expect to use CLDO as a clock source for the MCU, follow the same routing and buffering rules as for CLKIN and ensure level compatibility (CLDO is typically TTL-level but verify per datasheet). Prefer buffering CLDO through a low-skew driver if using it as the MCU system clock input.
+
+---
+
+## 5. Firmware & mapping checklist
+
+- Ensure the board-specific mapping file documents `CLKIN_GPIO` and that the platform bring-up code exports it to `ldc1101.json` or board config.
+- Provide two firmware methods for generating CLKIN (documented in `LDC1101_CLKIN_INTEGRATION.md`): `SPI SCLK + DMA` (preferred) and `LEDC` (fallback). Include a runtime config option `ldc1101.hw.clkin_source = "spi"|"ledc"`.
+
+---
+
+Add these wiring checks to the production assembly checklist and to the `R-01 hardware test` procedure (ADR-LDC-001).
+
 **✅ = піни LDC1101 SPI шини — всі знаходяться на лівій стороні (pins 7, 9, 11, 13)**
 
 > **Перевірка:** ці ж GPIO підтверджені в коді:
