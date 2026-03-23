@@ -175,52 +175,57 @@ raw_code = 57344 = 0xE000
 > **Примітка:** `calibrate()` не логує L_DATA окремо. Для точного розрахунку fSENSOR
 > потрібно додати окреме читання `REG_INTB_MSB/LSB` (L_DATA) після Step-0.
 
-**Розрахунок fSENSOR (потребує L_DATA):**
+**Розрахунок fSENSOR (верифіковано в S-4):**
 
 ```
 fSENSOR = (fCLKIN × RESP_TIME_cycles) / (3 × L_DATA)
-        = (16,000,000 × 6144) / (3 × ____ )
-        = ______ Hz ≈ _____ kHz
+        = (16,000,000 × 6144) / (3 × 36042)
+        = 98,304,000,000 / 108,126
+        = 909,148 Hz ≈ 909.2 kHz  ✅
 
-Статус: ⏳ PENDING — потрібен L_DATA з burst read
-Очікуваний діапазон: 200–500 kHz (LC-котушка MIKROE-3240)
+Статус: ✅ VERIFIED — виміряно в S-4 (2026-03-23)
+Примітка: Попередня оцінка 200–500 kHz була неточною.
+          MIKROE-3240 осцилює на ~909 kHz (вищий за очікування — нормально).
 ```
 
 **Висновки:**
 - [x] Baseline RP = 57344 raw (≈21 kΩ)
 - [x] RP_SET=0x26 підходить: **✅**
 - [x] Коливання котушки підтверджено: 20/20 валідних відліків
-- [ ] fSENSOR: **⏳ не визначений** — CLKIN (mikroBUS Pin 16) не підключений (ADR-CLKIN-002). Без CLKIN: L=3 (шум SPI), fSENSOR=неінформативне значення. Firmware LEDC готовий, потрібна фізична проводка G4 → Pin 16.
-- [x] protocol_id base: `p1_MIKROE3240_____mm` *(діаметр котушки уточнити)*
-- [x] LFS task watermark: **212 B ⚠️** (< 512 B рекомендованих)
+- [x] fSENSOR = **909.2 kHz** — виміряно в S-4 ✅
+- [x] protocol_id base: `p1_MIKROE3240_____mm` *(діаметр котушки уточнити в S-5)*
+- [x] LFS task watermark: **212 B** (S-3) → **260 B** (S-4) — покращення після розширення стеку
 
 **Наслідки:**
 - RP_SET=0x26 підтверджений → конфіг не потребує змін
-- fSENSOR вимагає підключення CLKIN (ADR-CLKIN-002). Firmware LEDC реалізовано (`ledcSetup/ledcAttachPin`, `clkin_gpio=4`). Наступний крок: фізично з'єднати **G4 (EXT Pin 3) → mikroBUS Pin 16** (див. S-4).
-- LFS watermark 212 B → відстежити у S-4 (якщо падає < 100 B → збільшити `ldc1101_task_stack`)
-- Готовність до **S-4** (підключення CLKIN та верифікація fSENSOR)
+- fSENSOR=909.2 kHz визначено → котушка придатна для вимірювання монет
+- LFS watermark 260 B (< 512 B рекомендованих, але стабільно — моніторити)
+- Готовність до **S-5 (C-1: protocol_id)**
 
 ---
 
-### Сесія S-4 — CLKIN підключення та верифікація fSENSOR (планується)
+### Сесія S-4 — CLKIN підключення та верифікація fSENSOR ✅ ЗАВЕРШЕНО 2026-03-23
 
-**План:**
-1. Фізично з'єднати: **G4 (EXT Pin 3) → [22Ω опційно] → mikroBUS Pin 16 (PWM/CLKIN)**
-2. Firmware вже готовий: `clkin_gpio=4` в `data/plugins/ldc1101.json`; LEDC `ledcSetup(0, 16MHz, 1-bit)` в `initialize()`
-3. Flash + відкрити UART-монітор (COM4, 115200)
-4. Верифікація бутлогу:
-   - `[LDC1101] CLKIN on GPIO4 at 16000000 Hz (LEDC ch0)` — підтверджує роботу LEDC
-   - `[LDC1101] Calibration OK. Baseline RP=57344  L=XXXX  fSENSOR=XXX.X kHz` — L повинен бути >> 3
-5. Записати L_DATA та fSENSOR в таблицю результатів нижче
+**Виконані дії:**
+1. ✅ Фізично з'єднано: **G4 (EXT Pin 3) → mikroBUS Pin 16 (PWM/CLKIN)** (пайка)
+2. ✅ Знайдено та виправлено root cause: `ConfigManager::loadFromLittleFS()` не реалізовано → `ldc1101.json` ніколи не читався → `clkin_gpio` завжди = -1. Додано крок 4i в `main.cpp` — парсинг JSON через ArduinoJson, завантаження ключів у `gConfig` перед `PluginSystem::begin()`.
+3. ✅ Firmware перепрошито + uploadfs-sys → бутлог підтверджений
 
 **Умови вимірювання:**
-- [ ] CLKIN дріт: G4 → mikroBUS Pin 16 з'[єднано
-- [ ] Монети на котушці відсутні (підтверджено візуально)
-- [ ] RESP_TIME=0x07 (6144 cycles) — максимальна якість
+- [x] CLKIN дріт: G4 → mikroBUS Pin 16 з'єднано
+- [x] Монети на котушці відсутні (підтверджено)
+- [x] RESP_TIME=0x07 (6144 cycles) — максимальна якість
+- [x] `ldc1101.json: 11 keys loaded into ConfigManager` — конфіг завантажено
 
-**Лог (* заповнити після вимірювання):**
+**Лог (hw-verified 2026-03-23):**
 ```
-[заповнити]
+[  1858ms] INFO  Config         | ldc1101.json: 11 keys loaded into ConfigManager
+[  1859ms] INFO  LDC1101        | CLKIN on GPIO4 at 16000000 Hz (LEDC ch0)
+[  1892ms] INFO  LDC1101        | configure_: DIG_CONFIG=0xD7, RP_SET=0x26
+[  1892ms] INFO  LDC1101        | Ready. CS=5, RESP_TIME=0x07, RP_SET=0x26
+[  5958ms] INFO  LDC1101        | Calibration start — remove coin from sensor
+[  8359ms] INFO  LDC1101        | Calibration OK. RP=57344  L=36042  fSENSOR=909.2 kHz (20 samples)
+[ 10001ms] DEBUG Stack          | LFS task watermark: 260 B free (of 3072 B stack)
 ```
 
 **Результати вимірювань:**
@@ -228,13 +233,16 @@ fSENSOR = (fCLKIN × RESP_TIME_cycles) / (3 × L_DATA)
 | Параметр | Значення | Примітки |
 |---|---|---|
 | L_DATA (без CLKIN) | 3 (hw-верифіковано S-3) | шум SPI |
-| L_DATA (з CLKIN) | _заповнити_ | очікування >>100 |
-| fSENSOR (Eq.6, kHz) | _заповнити_ | очікування 200–500 kHz |
-| LFS task watermark | _заповнити_ Б | моніторити |
+| L_DATA (з CLKIN) | **36042** ✅ | в 12000× більше ніж без CLKIN |
+| fSENSOR (Eq.6, kHz) | **909.2 kHz** ✅ | в межах LDC1101 operating range (5kHz–10MHz) |
+| LFS task watermark | **260 B** | покращення від 212 B (S-3) |
 
-**Наслідки:**
-- L_DATA валідний і fSENSOR визначено → Готовність до **S-5 (C-1: protocol_id)**
-- Якщо L_DATA все одно показує сміт → перевірити фізичне з'єднання та JP1 на MIKROE-3240
+**Висновки S-4:**
+- [x] CLKIN на GPIO4 підтверджено осцилографом (14V p-p квадрат 16 MHz → занадто великий рівень; після перевірки: G4 дійсно видавав тільки шум 0.05V доки `ConfigManager` не завантажував JSON). Root cause виявлено і виправлено.
+- [x] L_DATA=36042 — валідне вимірювання індуктивності (vs L=3 без CLKIN)
+- [x] fSENSOR=909.2 kHz — визначено, оцінка 200-500 kHz виявилась заниженою
+- [x] ADR-CLKIN-002: CLKIN задіяно, L_DATA валідний → **закрито**
+- ✅ **Готовність до S-5 (C-1: protocol_id)**
 
 ---
 

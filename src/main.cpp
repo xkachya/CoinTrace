@@ -8,6 +8,7 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <esp_ota_ops.h>    // Wave 8 A-4 — OTA partition ops (rollback)
+#include <ArduinoJson.h>    // Wave 7 Phase 2 — plugin config load from LittleFS
 #include "Logger.h"
 #include "SerialTransport.h"
 #include "RingBufferTransport.h"
@@ -337,6 +338,46 @@ void setup() {
                gLFS.isDataMounted()  ? "ok" : "fail",
                gSDCard.isAvailable() ? "ok" : "n/a",
                (unsigned)gFPCache.entryCount());
+
+  // ── 4i. Load plugin configs from LittleFS sys → ConfigManager ────────────
+  // Parses /plugins/ldc1101.json and populates gConfig with "ldc1101.*" keys.
+  // MUST run AFTER mountSys() and BEFORE gPluginSystem.begin() — plugins read
+  // gConfig inside initialize(). Without this the JSON is ignored and all
+  // parameters fall back to their compiled defaults (ADR-CLKIN-002: clkin_gpio
+  // defaults to -1 → LEDC never started → L_DATA invalid).
+  if (gLFS.isSysMounted()) {
+    const char* pluginJson = "/plugins/ldc1101.json";
+    if (gLFS.sys().exists(pluginJson)) {
+      fs::File f = gLFS.sys().open(pluginJson, FILE_READ);
+      if (f) {
+        JsonDocument doc;
+        DeserializationError jsonErr = deserializeJson(doc, f);
+        f.close();
+        if (!jsonErr) {
+          uint8_t loaded = 0;
+          for (JsonPair kv : doc.as<JsonObject>()) {
+            char cfgKey[48];
+            snprintf(cfgKey, sizeof(cfgKey), "ldc1101.%s", kv.key().c_str());
+            JsonVariant v = kv.value();
+            // ArduinoJson 7: bool and int are distinct stored types; check bool first.
+            if      (v.is<bool>())        { gConfig.setBool  (cfgKey, v.as<bool>());         ++loaded; }
+            else if (v.is<int>())         { gConfig.setInt   (cfgKey, v.as<int32_t>());      ++loaded; }
+            else if (v.is<double>())      { gConfig.setFloat (cfgKey, (float)v.as<double>()); ++loaded; }
+            else if (v.is<const char*>()) { gConfig.setString(cfgKey, v.as<const char*>());  ++loaded; }
+          }
+          gLogger.info("Config", "ldc1101.json: %u keys loaded into ConfigManager", loaded);
+        } else {
+          gLogger.warning("Config", "ldc1101.json parse error: %s", jsonErr.c_str());
+        }
+      } else {
+        gLogger.warning("Config", "ldc1101.json open failed");
+      }
+    } else {
+      gLogger.warning("Config", "ldc1101.json not found — run: pio run -e uploadfs-sys -t uploadfs");
+    }
+  } else {
+    gLogger.warning("Config", "LittleFS_sys not mounted — plugin config unavailable, using compiled defaults");
+  }
 
   // ── 5. Plugin system ──────────────────────────────────────────
   gLDC = new LDC1101Plugin();           // PluginSystem owns (deletes on end()); gLDC is non-owning
