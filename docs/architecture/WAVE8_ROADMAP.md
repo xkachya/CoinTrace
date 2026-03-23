@@ -1,8 +1,8 @@
 # Wave 8 Roadmap — Connectivity + Infrastructure + Sensor Integration
 
-**Статус:** 🔄 In Progress — Фаза 2 — Sensor Integration (S-1/S-2/S-3 виконано, CLKIN firmware готовий → **C-1 наступний**)  
-**Версія:** 1.8.0  
-**Дата:** 2026-03-23 (оновлено після S-3 hw-верифікації: Baseline RP=57344, CLKIN firmware LEDC реалізовано)
+**Статус:** 🔄 In Progress — Фаза 2 — Sensor Integration (S-1..S-4 виконано, fSENSOR=909.2 kHz hw-verified → **C-1 + C-2 наступні**)  
+**Версія:** 1.9.0  
+**Дата:** 2026-03-24 (оновлено після S-4 hw-верифікації: CLKIN active, L=36042, fSENSOR=909.2 kHz, ADR-CLKIN-002 закрито)
 **Попередня хвиля:** Wave 7 — Storage Foundation (`d53a440`, 84/84 native tests, hardware verified)
 **Cross-ref:** `docs/architecture/MEMORY_MAP.md` — детальна карта Flash/SRAM/Heap (hw-verified 2026-03-18)
 
