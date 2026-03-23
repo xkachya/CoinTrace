@@ -34,6 +34,7 @@ Pin  7  G40  SCK  ──────────────────→ SCK 
 Pin  9  G14  MOSI ──────────────────→ MOSI (Bus Pin 6, chip: SDI  — data MCU→sensor)
 Pin 11  G39  MISO ←──────────────────  MISO (Bus Pin 5, chip: SDO  — data sensor→MCU)
 Pin 13  G5   CS   ──────────────────→ CS   (Bus Pin 3, chip: CSB  — active LOW)
+Pin  3  G4   CLKIN──────────────────→ CLKIN (Bus Pin 16, chip: CLKIN — 16 MHz LEDC; ADR-CLKIN-002)
 Pin  4  GND       ──────────────────→ GND  (Bus Pin 8)
 3.3V (¹)          ──────────────────→ 3V3  (Bus Pin 7)
 ```
@@ -65,8 +66,9 @@ Pin  4  GND       ──────────────────→ GND 
 This section gives precise wiring and PCB rules to ensure a reliable 16 MHz CLKIN for LHR mode.
 
 - Physical mapping:
-  - mikroBUS Pin 16 is labeled **PWM** on the mikroBUS header — this is the `CLKIN` input for LDC1101 when used in LHR mode.
-  - Determine the board-specific GPIO ↔ mikroBUS mapping for your carrier board and record it as `CLKIN_GPIO` in the board hardware README. Do NOT assume a GPIO number across boards.
+  - mikroBUS Pin 16 is labeled **PWM** on the mikroBUS header — this is the `CLKIN` input for LDC1101. Required for valid L_DATA in **both RP+L and LHR modes** (ADR-CLKIN-002).
+  - **M5Stack Cardputer-Adv: `CLKIN_GPIO = 4`** (EXT Pin 3, labeled "INT" on the connector — free GPIO, not used by SPI/UART). Wiring: **EXT Pin 3 (G4) → [22Ω optional] → mikroBUS Pin 16**.
+  - Firmware: `ldc1101.clkin_gpio = 4` in `data/plugins/ldc1101.json`. LEDC channel 0 generates 16 MHz, 50% duty from `LDC1101Plugin::initialize()`.
 
 - Electrical rules:
   - Voltage: **3.3 V TTL** only. Do not drive CLKIN with 5 V. If your source is 5 V, use a level shifter.
@@ -108,8 +110,9 @@ The LDC1101 includes a clock output (CLDO) in some reference schematics. On MIKR
 
 ## 5. Firmware & mapping checklist
 
-- Ensure the board-specific mapping file documents `CLKIN_GPIO` and that the platform bring-up code exports it to `ldc1101.json` or board config.
-- Provide two firmware methods for generating CLKIN (documented in `LDC1101_CLKIN_INTEGRATION.md`): `SPI SCLK + DMA` (preferred) and `LEDC` (fallback). Include a runtime config option `ldc1101.hw.clkin_source = "spi"|"ledc"`.
+- Board-specific mapping for M5Stack Cardputer-Adv: `CLKIN_GPIO = 4` (EXT Pin 3). Recorded in `data/plugins/ldc1101.json` as `ldc1101.clkin_gpio`.
+- Firmware implementation: **LEDC** (`ledcSetup` / `ledcAttachPin` / `ledcWrite`, Arduino-ESP32 2.x API) in `LDC1101Plugin::initialize()`. ESP32-S3 APB=80 MHz, 1-bit resolution → exact 16 MHz, 50% duty.
+- SPI SCLK + DMA (lower jitter) reserved as v2 option if LEDC jitter causes fSENSOR instability.
 
 ---
 

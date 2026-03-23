@@ -8,11 +8,15 @@
 //
 // Key facts (LDC1101 datasheet SNOSD01D):
 //   - SPI MODE0, MSBFIRST, max 4 MHz
-//   - Read REG_RP_DATA_LSB (0x21) FIRST — this latches MSB + L_DATA registers
+//   - Read REG_RP_DATA_LSB (0x21) FIRST — this latches MSB + L_DATA shadow registers
+//   - Auto-increment supported: 0x21→0x22→0x23→0x24 in one CS frame is valid (§3 SPI)
 //   - Configure registers only in Sleep mode (REG_START_CONFIG = 0x01)
 //   - CHIP_ID (0x3F) must read 0xD4
 //
 // ADR-COIN-001: dual-threshold hysteresis for coin detect/release
+// ADR-CLKIN-002: L_DATA requires CLKIN on mikroBUS Pin16 — without it L=0 or garbage.
+//   RP_DATA is independent of CLKIN and works correctly without it (amplitude-based).
+//   Current wiring: CLKIN unconnected → L_DATA invalid. RP_DATA valid.
 // SYS-1 fix: read LSB first (MikroE SDK reads MSB first — BUG)
 // M-1: staleFlag_ is a volatile bool — lock-free read from getHealthStatus()
 
@@ -69,6 +73,7 @@ private:
     uint8_t  respTimeBits_        = 0x07;       // RESP_TIME = 6144 cycles (max quality)
     uint8_t  rpSetValue_          = 0x26;       // MIKROE-3240 default (ADR-LDC-001)
     uint32_t clkinFreqHz_         = 16000000UL;
+    int      clkinGpio_           = -1;         // -1 = CLKIN not connected; ≥ 0 = LEDC output (ADR-CLKIN-002)
     float    coinDetectThreshold_ = 0.85f;      // DETECT:  RP < baseline × 0.85
     float    coinReleaseThreshold_= 0.92f;      // RELEASE: RP > baseline × 0.92 (hysteresis gap 7%)
     uint8_t  detectDebounceN_     = 5;          // 5 consecutive → COIN_PRESENT (~100 ms @ 50 Hz)
@@ -99,6 +104,8 @@ private:
 
     // ── Calibration ───────────────────────────────────────────────────────────
     float    calibrationRpBaseline_ = 0.0f;
+    float    calibrationLBaseline_  = 0.0f;  // Average L_DATA from calibrate()
+    float    calibrationFSensor_    = 0.0f;  // Hz: (fCLKIN × RESP_CYCLES) / (3 × L_avg)
     uint32_t lastCalibrationTime_   = 0;  // Reserved: NVS age-check (M-2)
 
     // ── Stale detection (M-1: volatile bool = lock-free on Xtensa LX7) ───────
@@ -137,6 +144,8 @@ public:
     CoinState getCoinState()  const { return coin_.state; }
     bool      isCoinPresent() const { return coin_.state == CoinState::COIN_PRESENT; }
     float     getBaseline()   const { return calibrationRpBaseline_; }
+    float     getLBaseline()  const { return calibrationLBaseline_; }
+    float     getFSensor()    const { return calibrationFSensor_; }   // Hz
 
     // ── IPlugin status ────────────────────────────────────────────────────────
     bool isEnabled() const override { return enabled_; }
@@ -157,6 +166,7 @@ public:
         respTimeBits_          = ctx_->config->getUInt8 ("ldc1101.resp_time_bits",      0x07);
         rpSetValue_            = ctx_->config->getUInt8 ("ldc1101.rp_set",              0x26);
         clkinFreqHz_           = ctx_->config->getUInt32("ldc1101.clkin_freq_hz",  16000000UL);
+        clkinGpio_             = ctx_->config->getInt   ("ldc1101.clkin_gpio",             -1);
         coinDetectThreshold_   = ctx_->config->getFloat ("ldc1101.coin_detect_threshold",  0.85f);
         coinReleaseThreshold_  = ctx_->config->getFloat ("ldc1101.coin_release_threshold", 0.92f);
         detectDebounceN_       = ctx_->config->getUInt8 ("ldc1101.detect_debounce_n",      5);
@@ -164,6 +174,21 @@ public:
 
         if (csPin_ < 0 || !ctx_->spi) {
             return fail_(1, "CS pin or SPI bus not available");
+        }
+
+        // ADR-CLKIN-002: start LEDC 16 MHz on clkin_gpio if configured.
+        // Without CLKIN: RP_DATA valid, L_DATA=0/garbage. With CLKIN: both valid.
+        // Arduino-ESP32 2.x API: ledcSetup/ledcAttachPin/ledcWrite(channel, duty).
+        // Channel 0 is reserved for CLKIN; no other LEDC use in this project.
+        if (clkinGpio_ >= 0) {
+            ledcSetup(0, clkinFreqHz_, 1);   // channel=0, 1-bit resolution (2 levels → 50% duty)
+            ledcAttachPin(clkinGpio_, 0);    // bind GPIO to channel 0
+            ledcWrite(0, 1);                 // duty=1/2^1=50%
+            ctx_->log->info(getName(), "CLKIN on GPIO%d at %lu Hz (LEDC ch0)",
+                            clkinGpio_, (unsigned long)clkinFreqHz_);
+            delay(1);  // allow the clock to stabilize before SPI config
+        } else {
+            ctx_->log->info(getName(), "CLKIN not configured (L_DATA will be invalid — ADR-CLKIN-002)");
         }
 
         pinMode(csPin_, OUTPUT);
@@ -309,13 +334,14 @@ public:
         ctx_->log->info(getName(), "Calibration start — remove coin from sensor");
         delay(2000);
 
-        float    sum = 0.0f;
-        uint32_t ok  = 0;
+        float    rpSum = 0.0f, lSum = 0.0f;
+        uint32_t ok    = 0;
         for (int i = 0; i < 20; i++) {
             delay(convTimeMs_() + 5);
             uint16_t rp, l;
             if (readBurst_(rp, l) && rp > 0 && rp < 65535) {
-                sum += rp;
+                rpSum += rp;
+                lSum  += l;
                 ++ok;
             }
         }
@@ -325,10 +351,33 @@ public:
             return false;
         }
 
-        calibrationRpBaseline_ = sum / ok;
+        calibrationRpBaseline_ = rpSum / ok;
+        calibrationLBaseline_  = lSum  / ok;
         lastCalibrationTime_   = millis();
-        ctx_->log->info(getName(), "Calibration OK. Baseline RP=%.0f (%u samples)",
-                        calibrationRpBaseline_, ok);
+
+        // fSENSOR = (fCLKIN × RESP_TIME_cycles) / (3 × L_avg)  — Eq.6, datasheet §8.6.21
+        // ⚠ Without CLKIN the chip has no reference for L counting — L_DATA = 0 or garbage.
+        //   calibrationFSensor_ will be nonsensical until CLKIN is wired (ADR-CLKIN-002).
+        //   With CLKIN=16 MHz (LEDC on clkinGpio_) this formula gives the true fSENSOR.
+        static const uint32_t kRespCycles[] = {192, 192, 192, 384, 768, 1536, 3072, 6144};
+        const uint32_t respCycles = kRespCycles[respTimeBits_ & 0x07];
+        calibrationFSensor_ = (static_cast<float>(clkinFreqHz_) * respCycles) /
+                               (3.0f * calibrationLBaseline_);
+
+        // fSENSOR validity check: > 5 MHz means L_DATA is garbage (no CLKIN in RP+L mode).
+        // Valid range for MIKROE-3240: 200–500 kHz (LDC1101_ARCHITECTURE.md §Eq.6).
+        // For precise fSENSOR wire CLKIN → mikroBUS Pin 16 and use LHR mode (ADR-LHR-001).
+        const bool fSensorValid = calibrationFSensor_ < 5000000.0f;  // < 5 MHz
+        if (fSensorValid) {
+            ctx_->log->info(getName(),
+                "Calibration OK. RP=%.0f  L=%.0f  fSENSOR=%.1f kHz (%u samples)",
+                calibrationRpBaseline_, calibrationLBaseline_,
+                calibrationFSensor_ / 1000.0f, ok);
+        } else {
+            ctx_->log->info(getName(),
+                "Calibration OK. RP=%.0f  L=%.0f  fSENSOR=n/a (RP+L mode, no CLKIN — ADR-LHR-001) (%u samples)",
+                calibrationRpBaseline_, calibrationLBaseline_, ok);
+        }
         return true;
     }
 
@@ -565,17 +614,23 @@ private:
 
     // ── SPI helpers ───────────────────────────────────────────────────────────
 
-    // Burst read RP_DATA + L_DATA in one transaction (4 bytes, auto-increment).
-    // SYS-1 fix: read LSB (0x21) FIRST — this latches MSB (0x22) and L_DATA (0x23-0x24).
+    // Read RP_DATA (0x21-0x22) + L_DATA (0x23-0x24) in one 4-byte SPI transaction.
+    // SYS-1: REG_RP_DATA_LSB (0x21) MUST be read FIRST — reading LSB triggers the
+    //        shadow latch that freezes MSB and L_DATA for consistent readout.
+    // Auto-increment (§3): LDC1101 increments address after each byte within one CS frame
+    //   → 0x21 → 0x22 → 0x23 → 0x24 in a single transaction is valid per datasheet.
+    // ADR-CLKIN-002: L_DATA is only valid when CLKIN is connected (mikroBUS Pin 16).
+    //   Without CLKIN: lRaw = 0 (CLKIN→GND) or garbage (CLKIN floating).
+    //   RP_DATA is unaffected by CLKIN state.
     bool readBurst_(uint16_t& rpRaw, uint16_t& lRaw) {
         if (!ctx_ || !ctx_->spi || csPin_ < 0) return false;
         ctx_->spi->beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
         digitalWrite(csPin_, LOW);
-        ctx_->spi->transfer(REG_RP_DATA_LSB | 0x80);   // Read bit | 0x21 — FIRST!
-        uint8_t rpLsb = ctx_->spi->transfer(0x00);      // 0x21: RP_DATA_LSB
-        uint8_t rpMsb = ctx_->spi->transfer(0x00);      // 0x22: RP_DATA_MSB
-        uint8_t lLsb  = ctx_->spi->transfer(0x00);      // 0x23: L_DATA_LSB
-        uint8_t lMsb  = ctx_->spi->transfer(0x00);      // 0x24: L_DATA_MSB
+        ctx_->spi->transfer(REG_RP_DATA_LSB | 0x80);  // Read bit | 0x21 — FIRST!
+        uint8_t rpLsb = ctx_->spi->transfer(0x00);    // 0x21: RP_DATA_LSB (latches shadow)
+        uint8_t rpMsb = ctx_->spi->transfer(0x00);    // 0x22: RP_DATA_MSB
+        uint8_t lLsb  = ctx_->spi->transfer(0x00);    // 0x23: L_DATA_LSB
+        uint8_t lMsb  = ctx_->spi->transfer(0x00);    // 0x24: L_DATA_MSB
         digitalWrite(csPin_, HIGH);
         ctx_->spi->endTransaction();
         rpRaw = (static_cast<uint16_t>(rpMsb) << 8) | rpLsb;

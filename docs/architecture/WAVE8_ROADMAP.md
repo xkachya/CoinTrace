@@ -1,8 +1,8 @@
 # Wave 8 Roadmap — Connectivity + Infrastructure + Sensor Integration
 
-**Статус:** 🔄 In Progress — Фаза 1 (B-1/B-2/B-3/C-3/A-1/A-2/A-3/A-4/A-5a/A-5b завершено, **A-6 наступний**)  
-**Версія:** 1.7.0  
-**Дата:** 2026-03-18 (оновлено після hw-верифікації A-5b Web UI full version)
+**Статус:** 🔄 In Progress — Фаза 2 — Sensor Integration (S-1/S-2/S-3 виконано, CLKIN firmware готовий → **C-1 наступний**)  
+**Версія:** 1.8.0  
+**Дата:** 2026-03-23 (оновлено після S-3 hw-верифікації: Baseline RP=57344, CLKIN firmware LEDC реалізовано)
 **Попередня хвиля:** Wave 7 — Storage Foundation (`d53a440`, 84/84 native tests, hardware verified)
 **Cross-ref:** `docs/architecture/MEMORY_MAP.md` — детальна карта Flash/SRAM/Heap (hw-verified 2026-03-18)
 
@@ -471,7 +471,10 @@ if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
 **Очікування:** документація передбачає ~200–500 kHz (НЕ 1 MHz як у placeholder).
 
 **Процедура:**
-1. Підключити LDC1101, запустити пристрій
+0. **Передумова (ADR-CLKIN-002): підключити CLKIN** — фізично з'єднати **G4 (EXT Pin 3) → [22Ω опційно] → mikroBUS Pin 16**.
+   Firmware (вже готовий): `ldc1101.clkin_gpio=4` в `data/plugins/ldc1101.json`, LEDC в `initialize()`.
+   Без цього з'єднання: L_DATA=3 (сміт), fSENSOR=недосяжне значення (вже перевірено S-3).
+1. Підключити LDC1101 і запустити пристрій
 2. Прочитати boot log: `initialize()` і `calibrate()` обчислюють fSENSOR за Eq.6 (`fSENSOR = fCLKIN × RESP_TIME / (3 × L_DATA)`) та Eq.11 (`fSENSOR = LHR_DATA × 2 × fCLKIN / 2²⁴`); обидва значення логуються в `[LDC1101]` рядках. `REG_DIG_CONFIG` містить RESP_TIME/MIN_FREQ — не fSENSOR напряму.
 3. Зафіксувати у вигляді `protocol_id` за форматом FINGERPRINT_DB §3.2
 4. Оновити NVS "sensor"."proto_id" (в коді та seed data)

@@ -346,6 +346,26 @@ void setup() {
   gLogger.info("System", "CoinTrace ready — %d/%d plugins initialised",
                gPluginSystem.readyCount(), gPluginSystem.pluginCount());
 
+  // ── STEP-0 HW VERIFICATION: initial calibrate() baseline measurement ─────
+  // Temporary probe to measure real RP baseline and fSENSOR on actual hardware.
+  // Results to be recorded in docs/hardware/HW_VERIFICATION_JOURNAL.md §Step-0.
+  // REMOVE after C-1 baseline RP is documented (protocol_id determined).
+  // NOTE: calibrate() uses delay() — safe here (setup context, not lwIP thread).
+  if (gLDC && gLDC->isReady()) {
+    gLogger.info("Step0", "=== HW VERIFICATION STEP-0 START ===");
+    gLogger.info("Step0", "Remove ALL coins from sensor, then wait 4s...");
+    delay(4000);  // extra window for the user to clear the coil
+    const bool calOk = gLDC->calibrate();  // logs RP, L, fSENSOR (or "n/a" if no CLKIN)
+    if (calOk) {
+      gLogger.info("Step0", "RP=%.0f  L=%.0f  → §S-3 (fSENSOR needs CLKIN: ADR-CLKIN-002)",
+                   gLDC->getBaseline(), gLDC->getLBaseline());
+    } else {
+      gLogger.error("Step0", "Calibration FAILED — check wiring, RP_SET, coil oscillation");
+    }
+    gLogger.info("Step0", "=== HW VERIFICATION STEP-0 END ===");
+  }
+  // ── END STEP-0 ──────────────────────────────────────────────────────────────
+
   // ── 6. WiFiManager (Wave 8 A-1) §17.2 [10] ──────────────────────────────
   // begin() blocks ≤10 s in STA mode, then falls back to AP automatically.
   LOG_DEBUG(&gLogger, "Heap", "before WiFi: %u B free", (uint32_t)ESP.getFreeHeap());
