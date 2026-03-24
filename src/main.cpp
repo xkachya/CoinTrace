@@ -26,6 +26,7 @@
 #include "SDCardManager.h"      // Wave 7 P-4
 #include "FingerprintCache.h"   // Wave 7 P-4
 #include "StorageManager.h"     // Wave 7 P-5
+#include "VectorCompute.h"      // Wave 8 C-2/C-3 — fingerprint vector
 
 // ── Logger globals (ініціалізуються першими в setup()) ────────────
 static Logger              gLogger;
@@ -73,6 +74,221 @@ constexpr uint32_t kOtaWindowMs = 30000;           // 30-second upload window
 static bool     sOtaRollbackPending = false;
 static uint32_t sOtaBootMs         = 0;
 constexpr uint32_t kOtaRollbackMs  = 60000;       // 60-second confirm deadline
+
+// ── C-2 Multi-position Measurement State Machine ────────────────────────────
+// WAVE8_ROADMAP.md §C-2 — 4-position fingerprint acquisition.
+// Positions: tray-floor (d≈1.5mm) → +1mm spacer → +3mm spacer → drift-check.
+// Trigger: fresh coin placement (edge IDLE_NO_COIN → COIN_PRESENT).
+// Advance:  ENTER key captures current RP/L reading and moves to next step.
+// Abort:    Backspace or 120-second step timeout → IDLE.
+enum class MeasState : uint8_t {
+    IDLE,        // awaiting fresh coin placement (auto-start on COIN_PRESENT edge)
+    STEP_BASE,   // coin on tray floor (d≈1.5mm) — press ENTER → rp[0]/l[0]
+    STEP_1,      // +1mm spacer       (d≈2.5mm) — press ENTER → rp[1]/l[1]
+    STEP_3,      // +3mm spacer       (d≈4.5mm) — press ENTER → rp[2]/l[2]
+    STEP_DRIFT,  // remove spacers, back on tray  — press ENTER → rp[3] (drift)
+    COMPUTE      // auto: vector → FP query → save → show result → IDLE
+};
+
+struct MeasSession {
+    MeasState   state     = MeasState::IDLE;
+    Measurement m         = {};
+    uint32_t    stepMs    = 0;     // millis() when current step was entered
+    bool        driftWarn = false; // true if drift ratio > DRIFT_THRESHOLD
+};
+
+static MeasSession sMeas;
+
+// ── C-2 Display Helpers ──────────────────────────────────────────────────────
+// drawMeasIdle()       — full-screen idle state (shown after session ends)
+// drawMeasStep_full()  — full-screen redraw on each state transition
+// drawMeasResult()     — full-screen result view after COMPUTE step
+// doMeasCompute()      — runs vector math, FP query, save; called on STEP_DRIFT capture
+
+static void drawMeasIdle() {
+    M5Cardputer.Display.fillScreen(BLACK);
+    M5Cardputer.Display.setTextSize(2);
+    M5Cardputer.Display.setTextColor(GREEN);
+    M5Cardputer.Display.setCursor(10, 10);
+    M5Cardputer.Display.print("CoinTrace");
+    M5Cardputer.Display.setTextSize(1);
+    M5Cardputer.Display.setTextColor(WHITE);
+    M5Cardputer.Display.setCursor(5, 40);
+    M5Cardputer.Display.print("Place coin on coil to start");
+    M5Cardputer.Display.setTextColor(DARKGREY);
+    M5Cardputer.Display.setCursor(5, 56);
+    M5Cardputer.Display.printf("Meas: %u   %s", gNVS.getMeasCount(), gWifi.getIP());
+}
+
+static void drawMeasStep_full(const MeasSession& s, uint16_t rpLive = 0) {
+    M5Cardputer.Display.fillScreen(BLACK);
+
+    // ── Header ─────────────────────────────────────────────────────────────
+    M5Cardputer.Display.setTextSize(1);
+    M5Cardputer.Display.setTextColor(DARKGREY);
+    M5Cardputer.Display.setCursor(2, 2);
+    M5Cardputer.Display.print("CoinTrace");
+
+    // ── Step indicator ─────────────────────────────────────────────────────
+    // MeasState: STEP_BASE=1 .. STEP_DRIFT=4 map directly to display step 1..4
+    const uint8_t idx = (uint8_t)s.state;
+    M5Cardputer.Display.setTextSize(2);
+    M5Cardputer.Display.setTextColor(CYAN);
+    M5Cardputer.Display.setCursor(5, 12);
+    M5Cardputer.Display.printf("Step %u / 4", idx);
+
+    // ── Instruction ────────────────────────────────────────────────────────
+    M5Cardputer.Display.setTextSize(1);
+    M5Cardputer.Display.setTextColor(WHITE);
+    M5Cardputer.Display.setCursor(5, 36);
+    switch (s.state) {
+        case MeasState::STEP_BASE:  M5Cardputer.Display.print("Coin on tray   (d = 1.5 mm)");    break;
+        case MeasState::STEP_1:     M5Cardputer.Display.print("Add 1mm spacer (d = 2.5 mm)");    break;
+        case MeasState::STEP_3:     M5Cardputer.Display.print("Add 3mm spacer (d = 4.5 mm)");    break;
+        case MeasState::STEP_DRIFT: M5Cardputer.Display.print("Remove spacers (back to tray)");  break;
+        default: break;
+    }
+
+    // ── Action prompt ──────────────────────────────────────────────────────
+    M5Cardputer.Display.setTextColor(GREEN);
+    M5Cardputer.Display.setCursor(5, 50);
+    M5Cardputer.Display.print("Press ENTER to capture");
+
+    // ── Live RP reading ────────────────────────────────────────────────────
+    M5Cardputer.Display.setTextSize(1);
+    M5Cardputer.Display.setTextColor(YELLOW);
+    M5Cardputer.Display.setCursor(5, 66);
+    if (rpLive > 0) {
+        M5Cardputer.Display.printf("RP: %5u", rpLive);
+    } else {
+        M5Cardputer.Display.print("RP: -----");
+    }
+
+    // ── Progress boxes [1][2][3][4] ────────────────────────────────────────
+    for (uint8_t i = 1; i <= 4; i++) {
+        const int16_t bx = 3 + (i - 1) * 28;
+        if      (i < idx)  { M5Cardputer.Display.fillRect(bx, 84, 22, 12, GREEN);    } // done
+        else if (i == idx) { M5Cardputer.Display.drawRect(bx, 84, 22, 12, CYAN);     } // active
+        else               { M5Cardputer.Display.drawRect(bx, 84, 22, 12, DARKGREY); } // future
+    }
+
+    // ── Timeout countdown ──────────────────────────────────────────────────
+    const uint32_t elapsed  = millis() - s.stepMs;
+    const uint32_t secsLeft = elapsed < 120000UL ? (120000UL - elapsed) / 1000 : 0;
+    M5Cardputer.Display.setTextColor(secsLeft < 30 ? ORANGE : DARKGREY);
+    M5Cardputer.Display.setCursor(5, 108);
+    M5Cardputer.Display.printf("Timeout: %3us  Bksp=Abort", secsLeft);
+}
+
+static void drawMeasResult(const MeasSession& s) {
+    M5Cardputer.Display.fillScreen(BLACK);
+
+    // ── Title ──────────────────────────────────────────────────────────────
+    M5Cardputer.Display.setTextSize(2);
+    M5Cardputer.Display.setTextColor(s.driftWarn ? ORANGE : GREEN);
+    M5Cardputer.Display.setCursor(5, 3);
+    M5Cardputer.Display.print(s.driftWarn ? "DRIFT WARN" : "MEASURED");
+
+    // ── Raw RP vector ──────────────────────────────────────────────────────
+    M5Cardputer.Display.setTextSize(1);
+    M5Cardputer.Display.setTextColor(YELLOW);
+    M5Cardputer.Display.setCursor(5, 28);
+    M5Cardputer.Display.printf("RP: %.0f  %.0f  %.0f  %.0f",
+                               s.m.rp[0], s.m.rp[1], s.m.rp[2], s.m.rp[3]);
+
+    // ── Computed fingerprint components ───────────────────────────────────
+    M5Cardputer.Display.setTextColor(WHITE);
+    M5Cardputer.Display.setCursor(5, 40);
+    M5Cardputer.Display.printf("k1=%.3f  k2=%.3f  slope=%.4f",
+                               VectorCompute::k1(s.m),
+                               VectorCompute::k2(s.m),
+                               VectorCompute::slope(s.m));
+
+    // ── Match result ───────────────────────────────────────────────────────
+    M5Cardputer.Display.setCursor(5, 57);
+    if (s.m.conf > 0.01f) {
+        M5Cardputer.Display.setTextColor(GREEN);
+        M5Cardputer.Display.printf("%.6s  conf=%.0f%%", s.m.metal_code, s.m.conf * 100.0f);
+        M5Cardputer.Display.setTextColor(WHITE);
+        M5Cardputer.Display.setCursor(5, 69);
+        M5Cardputer.Display.printf("%.38s", s.m.coin_name);
+    } else {
+        M5Cardputer.Display.setTextColor(DARKGREY);
+        M5Cardputer.Display.print("No match in DB  (metal = UNKN)");
+    }
+
+    // ── Footer ─────────────────────────────────────────────────────────────
+    M5Cardputer.Display.setTextColor(DARKGREY);
+    M5Cardputer.Display.setCursor(5, 95);
+    M5Cardputer.Display.printf("Saved #%u", gNVS.getMeasCount() - 1);
+
+    if (s.driftWarn) {
+        M5Cardputer.Display.setTextColor(ORANGE);
+        M5Cardputer.Display.setCursor(5, 108);
+        M5Cardputer.Display.printf("Drift: %.1f%%  (>5%%)  recheck coil",
+                                   VectorCompute::driftRatio(s.m) * 100.0f);
+    } else {
+        M5Cardputer.Display.setTextColor(DARKGREY);
+        M5Cardputer.Display.setCursor(5, 108);
+        M5Cardputer.Display.print("Remove coin for next measurement");
+    }
+}
+
+static void doMeasCompute() {
+    // ── 1. Drift check (rp[3] vs rp[0]) ───────────────────────────────────
+    const float drift = VectorCompute::driftRatio(sMeas.m);
+    sMeas.driftWarn   = (drift > VectorCompute::DRIFT_THRESHOLD);
+    sMeas.m.pos_count = 4;
+    if (sMeas.driftWarn) {
+        sMeas.m.conf = 0.0f;
+        gLogger.warning("Meas", "Drift %.1f%% > 5%% — conf forced=0", drift * 100.0f);
+    }
+
+    // ── 2. Fingerprint vector ──────────────────────────────────────────────
+    const float dRp1_n = VectorCompute::dRp1_n(sMeas.m);
+    const float k1v    = VectorCompute::k1(sMeas.m);
+    const float k2v    = VectorCompute::k2(sMeas.m);
+    const float slv    = VectorCompute::slope(sMeas.m);
+    const float dL1_n  = VectorCompute::dL1_n(sMeas.m);
+    gLogger.info("Meas", "Vec: dRp1=%.0f  k1=%.3f  k2=%.3f  slope=%.4f  dL1=%.0f",
+                 VectorCompute::dRp1(sMeas.m), k1v, k2v, slv,
+                 VectorCompute::dL1(sMeas.m));
+
+    // ── 3. Fingerprint cache query (skip on drift — unreliable vector) ─────
+    if (gFPCache.isReady() && !sMeas.driftWarn) {
+        QueryResult results[FingerprintCache::QUERY_TOP_N];
+        const uint8_t n = gFPCache.query(dRp1_n, k1v, k2v, slv, dL1_n,
+                                         results, FingerprintCache::QUERY_TOP_N);
+        if (n > 0 && results[0].confidence > 0.01f) {
+            strlcpy(sMeas.m.metal_code, results[0].entry->metal_code,
+                    sizeof(sMeas.m.metal_code));
+            strlcpy(sMeas.m.coin_name,  results[0].entry->coin_name,
+                    sizeof(sMeas.m.coin_name));
+            sMeas.m.conf = results[0].confidence;
+            gLogger.info("Meas", "Match: %s  conf=%.2f  dist=%.4f",
+                         sMeas.m.coin_name, sMeas.m.conf, results[0].distance);
+        }
+    } else if (!gFPCache.isReady()) {
+        gLogger.info("Meas", "FP cache not ready — skipping match");
+    }
+
+    // ── 4. Save measurement ────────────────────────────────────────────────
+    if (gMeasStore.save(sMeas.m)) {
+        gLogger.info("Meas", "Saved #%u — 4pos [%.0f,%.0f,%.0f,%.0f]  conf=%.2f%s",
+                     gNVS.getMeasCount() - 1,
+                     sMeas.m.rp[0], sMeas.m.rp[1], sMeas.m.rp[2], sMeas.m.rp[3],
+                     sMeas.m.conf, sMeas.driftWarn ? " [DRIFT]" : "");
+    } else {
+        gLogger.warning("Meas", "save() failed (RP=%.0f)", sMeas.m.rp[0]);
+    }
+
+    // ── 5. Show result screen ──────────────────────────────────────────────
+    // Screen persists until next fresh coin placement (sPrevCoinState guard).
+    drawMeasResult(sMeas);
+
+    // ── 6. Reset session — next trigger requires coin removal + re-placement
+    sMeas = {};
+}
 
 // Display CoinTrace version and configuration on startup
 void displayStartupInfo() {
@@ -512,6 +728,56 @@ void loop() {
             sOtaWindowOpenMs = millis();
             gLogger.info("OTA", "OTA window opened — 30 seconds");
           }
+        } else if (key == '\r' || key == '\n') {
+          // ── ENTER: advance measurement step ───────────────────────────────
+          if (sMeas.state >= MeasState::STEP_BASE && sMeas.state <= MeasState::STEP_DRIFT) {
+            if (!gLDC || !gLDC->isReady()) {
+              gLogger.warning("Meas", "ENTER: sensor not ready");
+            } else {
+              ISensorPlugin::SensorData d = gLDC->read();
+              if (!d.valid || d.value1 < 1.0f) {
+                gLogger.warning("Meas", "ENTER: bad read (RP=%.0f) — retry", d.value1);
+              } else {
+                switch (sMeas.state) {
+                  case MeasState::STEP_BASE:
+                    sMeas.m.rp[0] = d.value1;  sMeas.m.l[0] = d.value2;
+                    gLogger.info("Meas", "BASE : RP=%.0f  L=%.0f", d.value1, d.value2);
+                    sMeas.state  = MeasState::STEP_1;
+                    sMeas.stepMs = millis();
+                    drawMeasStep_full(sMeas, (uint16_t)d.value1);
+                    break;
+                  case MeasState::STEP_1:
+                    sMeas.m.rp[1] = d.value1;  sMeas.m.l[1] = d.value2;
+                    gLogger.info("Meas", "1mm  : RP=%.0f  L=%.0f", d.value1, d.value2);
+                    sMeas.state  = MeasState::STEP_3;
+                    sMeas.stepMs = millis();
+                    drawMeasStep_full(sMeas, (uint16_t)d.value1);
+                    break;
+                  case MeasState::STEP_3:
+                    sMeas.m.rp[2] = d.value1;  sMeas.m.l[2] = d.value2;
+                    gLogger.info("Meas", "3mm  : RP=%.0f  L=%.0f", d.value1, d.value2);
+                    sMeas.state  = MeasState::STEP_DRIFT;
+                    sMeas.stepMs = millis();
+                    drawMeasStep_full(sMeas, (uint16_t)d.value1);
+                    break;
+                  case MeasState::STEP_DRIFT:
+                    sMeas.m.rp[3] = d.value1;
+                    gLogger.info("Meas", "DRIFT: RP=%.0f", d.value1);
+                    sMeas.state = MeasState::COMPUTE;
+                    doMeasCompute();
+                    break;
+                  default: break;
+                }
+              }
+            }
+          }
+        } else if (key == '\b') {
+          // ── BACKSPACE: abort measurement session ──────────────────────────
+          if (sMeas.state != MeasState::IDLE) {
+            gLogger.info("Meas", "Session aborted (Bksp)");
+            sMeas = {};
+            drawMeasIdle();
+          }
         } else {
           // Display key on screen
           M5Cardputer.Display.fillRect(0, M5Cardputer.Display.height() - 20,
@@ -538,27 +804,67 @@ void loop() {
                 gLfsTransport.stackWatermarkBytes());
   }
 
-  // ── Wave 7 P-3: Save measurement on COIN_REMOVED ──────────────────
-  // COIN_REMOVED is a transient state (1 update() cycle) set after coin lifts.
-  // Must be checked immediately after update() to avoid missing the transition.
-  if (gLDC && gLDC->isReady() && gLFS.isDataMounted()) {
-    if (gLDC->getCoinState() == LDC1101Plugin::CoinState::COIN_REMOVED) {
-      ISensorPlugin::SensorData data = gLDC->read();
-      if (data.valid && data.value1 > 1.0f) {
-        Measurement m = {};
-        m.ts        = millis() / 1000;
-        m.rp[0]     = data.value1;   // LDC1101 Rp raw code
-        m.l[0]      = data.value2;   // LDC1101 L  raw code
-        m.pos_count = 1;             // P-3: single position only
-        strlcpy(m.metal_code, "UNKN",          sizeof(m.metal_code));
-        strlcpy(m.coin_name,  "Unclassified",  sizeof(m.coin_name));
-        m.conf = 0.0f;               // classification deferred to P-5+
-        if (gMeasStore.save(m)) {
-          gLogger.info("Meas", "Saved #%u — RP=%.0f L=%.0f ts=%us",
-                       gNVS.getMeasCount() - 1, m.rp[0], m.l[0], m.ts);
+  // ── C-2 Multi-position Measurement State Machine ─────────────────────────
+  // Trigger: edge IDLE_NO_COIN/COIN_REMOVED → COIN_PRESENT (fresh placement).
+  // Advance: ENTER key (captured in keyboard handler above).
+  // Abort:   Backspace key or 120-second per-step timeout.
+  if (gLDC && gLDC->isReady()) {
+    const LDC1101Plugin::CoinState coinState = gLDC->getCoinState();
+
+    // ── Auto-start on fresh coin placement ────────────────────────────────
+    // Edge detection prevents re-triggering while coin stays present after
+    // a completed session (sPrevCoinState stays COIN_PRESENT → no new edge).
+    static LDC1101Plugin::CoinState sPrevCoinState = LDC1101Plugin::CoinState::IDLE_NO_COIN;
+    if (sMeas.state == MeasState::IDLE &&
+        coinState    == LDC1101Plugin::CoinState::COIN_PRESENT &&
+        sPrevCoinState != LDC1101Plugin::CoinState::COIN_PRESENT &&
+        gLFS.isDataMounted()) {
+      sMeas = {};
+      sMeas.state   = MeasState::STEP_BASE;
+      sMeas.stepMs  = millis();
+      sMeas.m.ts    = millis() / 1000;
+      strlcpy(sMeas.m.metal_code,  "UNKN",                sizeof(sMeas.m.metal_code));
+      strlcpy(sMeas.m.coin_name,   "Unclassified",        sizeof(sMeas.m.coin_name));
+      strlcpy(sMeas.m.protocol_id, "p1_MIKROE3240_024mm", sizeof(sMeas.m.protocol_id));
+      drawMeasStep_full(sMeas);
+      gLogger.info("Meas", "Coin placed — session started (STEP_BASE)");
+    }
+    sPrevCoinState = coinState;
+
+    // ── Periodic live RP + countdown update (every 1 s, no flicker) ───────
+    if (sMeas.state >= MeasState::STEP_BASE && sMeas.state <= MeasState::STEP_DRIFT) {
+      static uint32_t sLiveUpdateMs = 0;
+      if (millis() - sLiveUpdateMs >= 1000) {
+        sLiveUpdateMs = millis();
+        ISensorPlugin::SensorData live = gLDC->read();
+        const uint16_t rpLive = (live.valid && live.value1 > 1.0f)
+                                ? (uint16_t)live.value1 : 0u;
+        // Partial redraw — RP line only (avoids full-screen flicker)
+        M5Cardputer.Display.fillRect(0, 61, 155, 14, BLACK);
+        M5Cardputer.Display.setTextSize(1);
+        M5Cardputer.Display.setTextColor(YELLOW);
+        M5Cardputer.Display.setCursor(5, 66);
+        if (rpLive > 0) {
+          M5Cardputer.Display.printf("RP: %5u", rpLive);
         } else {
-          gLogger.warning("Meas", "save() failed (RP=%.0f)", m.rp[0]);
+          M5Cardputer.Display.print("RP: -----");
         }
+        // Partial redraw — countdown line only
+        const uint32_t el = millis() - sMeas.stepMs;
+        const uint32_t sl = el < 120000UL ? (120000UL - el) / 1000 : 0;
+        M5Cardputer.Display.fillRect(0, 103, 240, 14, BLACK);
+        M5Cardputer.Display.setTextColor(sl < 30 ? ORANGE : DARKGREY);
+        M5Cardputer.Display.setCursor(5, 108);
+        M5Cardputer.Display.printf("Timeout: %3us  Bksp=Abort", sl);
+      }
+    }
+
+    // ── Per-step 120-second timeout ────────────────────────────────────────
+    if (sMeas.state >= MeasState::STEP_BASE && sMeas.state <= MeasState::STEP_DRIFT) {
+      if (millis() - sMeas.stepMs > 120000UL) {
+        gLogger.warning("Meas", "Step %u timeout — session aborted", (uint8_t)sMeas.state);
+        sMeas = {};
+        drawMeasIdle();
       }
     }
   }
