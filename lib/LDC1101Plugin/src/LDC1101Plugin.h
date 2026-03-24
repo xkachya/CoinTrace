@@ -71,6 +71,19 @@ private:
 
     // ── Configuration (loaded from ctx->config in initialize()) ──────────────
     uint8_t  respTimeBits_        = 0x07;       // RESP_TIME = 6144 cycles (max quality)
+    // MIN_FREQ watchdog nibble — DIG_CONFIG[7:4]
+    // Formula (datasheet §8.6.5): fSENSOR_min = 8 MHz / (16 - nibble)
+    // If fSENSOR drops below fSENSOR_min, watchdog restarts oscillator → DRDYB=1 permanently.
+    //
+    // Nibble table for MIKROE-3240 (fSENSOR_baseline = 909 kHz):
+    //   0x0 → fSENSOR_min = 500 kHz  (too low — unlikely to catch real halts)
+    //   0x6 → fSENSOR_min = 800 kHz  (109 kHz below baseline — conservative, hw-verified 2026-03-24 ✓)
+    //   0x7 → fSENSOR_min = 889 kHz  (20 kHz below baseline — optimal, hw-verified 2026-03-24 ✓)
+    //   0xD → fSENSOR_min = 2.67 MHz (MikroE SDK legacy default — intended for small coils)
+    //   0xF → fSENSOR_min = 8.0 MHz  (DANGEROUS: triggers NO_OSC at 909 kHz)
+    //
+    // Config key: ldc1101.min_freq_nibble (default matches this field)
+    uint8_t  minFreqNibble_       = 0x06;       // 800 kHz threshold — 109 kHz margin, hw-verified
     uint8_t  rpSetValue_          = 0x26;       // MIKROE-3240 default (ADR-LDC-001)
     uint32_t clkinFreqHz_         = 16000000UL;
     int      clkinGpio_           = -1;         // -1 = CLKIN not connected; ≥ 0 = LEDC output (ADR-CLKIN-002)
@@ -164,6 +177,7 @@ public:
         // Load configuration — all keys have safe defaults
         csPin_                 = ctx_->config->getInt   ("ldc1101.spi_cs_pin",            5);
         respTimeBits_          = ctx_->config->getUInt8 ("ldc1101.resp_time_bits",      0x07);
+        minFreqNibble_         = ctx_->config->getUInt8 ("ldc1101.min_freq_nibble",     0x06);
         rpSetValue_            = ctx_->config->getUInt8 ("ldc1101.rp_set",              0x26);
         clkinFreqHz_           = ctx_->config->getUInt32("ldc1101.clkin_freq_hz",  16000000UL);
         clkinGpio_             = ctx_->config->getInt   ("ldc1101.clkin_gpio",             -1);
@@ -262,8 +276,8 @@ public:
             // Conversion in progress — normal for Strategy A @ 50 Hz with fast coils
             if (++ds_.staleCount > 10) {
                 ctx_->log->warning(getName(),
-                    "DRDYB=1 for %lu consecutive update() calls — conversion frozen?",
-                    (unsigned long)ds_.staleCount);
+                    "DRDYB=1 for %lu consecutive calls — STATUS=0x%02X (check MIN_FREQ/RESP_TIME)",
+                    (unsigned long)ds_.staleCount, status);
             }
             return;
         }
@@ -588,9 +602,10 @@ private:
             return false;
         }
 
-        // DIG_CONFIG: MIN_FREQ=0xD0 (118 kHz threshold) | RESP_TIME bits[2:0]
-        // 0x00 (500 kHz threshold) causes false halt for fSENSOR < 500 kHz — dangerous
-        uint8_t digCfg = 0xD0 | (respTimeBits_ & 0x07);
+        // DIG_CONFIG: MIN_FREQ nibble[7:4] | RESP_TIME bits[2:0]
+        // 0x0=500kHz, 0xD=118kHz, 0xF≈1kHz (effectively disabled).
+        // Ferromagnetic coins at d≈0 can drop fSENSOR below 118kHz — use lower nibble.
+        uint8_t digCfg = ((minFreqNibble_ & 0x0F) << 4) | (respTimeBits_ & 0x07);
         spiWrite_(REG_DIG_CONFIG, digCfg);
 
         // Fix LA-1: compare full byte, NOT only 3-bit mask (digCfg ∈ [0xD0,0xD7])
