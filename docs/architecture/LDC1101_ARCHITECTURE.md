@@ -158,7 +158,7 @@ RP вимірюється через кількість енергії для п
 
 **Формула:** `ConversionTime = RESP_TIME_cycles / (3 × fSENSOR)`
 
-Для MIKROE-3240 fSENSOR ≈ 200–500 kHz (оцінка: MikroE DIG_CFG MIN_FREQ=118 kHz + LC-формула на PCB spiral coil M-size). При `RESP_TIME = 0x07` (6144 cycles) і fSENSOR=300 kHz: 6144/(3×300 000) ≈ 6.8 мс — в бюджет 20 мс `update()` вкладається. Використовувати `0x07` як стандартне значення.
+Для MIKROE-3240 fSENSOR = **909.2 kHz** (hw-верифіковано S-4, 2026-03-23), L_DATA=36042, C=330pF, L≈92.8μH. При `RESP_TIME = 0x07` (6144 cycles) і fSENSOR=909 kHz: 6144/(3×909 000) ≈ 2.25 мс — значно в межах бюджету 20 мс `update()`. Використовувати `0x07` як стандартне значення.
 
 > ⚠️ **ADR-RESP-001:** Архітектура використовує `RESP_TIME = 6144 cycles` (bits=`0x07`) як default, замість 768 cycles (bits=`0x04`) MikroE SDK.
 >
@@ -175,11 +175,25 @@ RP вимірюється через кількість енергії для п
 | RP_SET  | `0x01` | `0x26` | RP_MAX=24 kΩ / RP_MIN=1.5 kΩ (ADR-LDC-001) |
 | TC1     | `0x02` | `0x1F` | C1=0.75 pF, R1=21.1 kΩ → τ₁=15.8 ns |
 | TC2     | `0x03` | `0x3F` | C2=3 pF, R2=30.5 kΩ → τ₂=91.5 ns |
-| DIG_CFG | `0x04` | `0xD4` | MIN_FREQ=118 kHz (0xD0) + RESP_TIME=768 cycles (0x04) |
+| DIG_CFG | `0x04` | `0xD4` | MIN_FREQ nibble=0xD (MikroE SDK legacy) + RESP_TIME=768 cycles (0x04) |
 
 TC1/TC2 компенсують паразитні ємності і опори PCB доріжок MIKROE-3240. Значення специфічні для цієї плати. Записувати в Sleep mode до переходу в Active mode.
 
-**DIG_CFG=0xD4:** `MIN_FREQ=0xD0` (118 kHz) запобігає false halt при fSENSOR ≈ 200–300 kHz. При `MIN_FREQ=0x00` (500 kHz threshold) конверсія може зупинятись — небезпечно для MIKROE-3240.
+**DIG_CFG=0xD4 (MikroE SDK legacy, НЕ використовувати для MIKROE-3240):** Nibble=0xD задає поріг watchdog-таймера за формулою `fSENSOR_min = 8 MHz / (16 − nibble)` (datasheet §8.6.5): 8 MHz / (16−13) = **2.67 MHz** — це набагато вище за наш baseline 909 kHz, тобто конвертація завжди зупинялась би. Значення 118 kHz у MikroE документації — **помилка перекладу** (hw-верифіковано S-4b).
+
+> ⚠️ **ADR-MINFREQ-001 (hw-verified 2026-03-24):** Використовувати `min_freq_nibble=6` (threshold=800 kHz, фактичний DIG_CONFIG=`0x67`). Це залишає 109 kHz margin нижче baseline fSENSOR=909 kHz, запобігаючи false-halt при незначних змінах індуктивності монетою. Nibble=7 (threshold=889 kHz, margin=20 kHz) — занадто малий запас.
+>
+> **Таблиця nibble → threshold:**
+>
+> | nibble (DIG_CONFIG[7:4]) | threshold = 8 MHz / (16-nibble) | Примітка |
+> |---|---|---|
+> | 0x0 | 500 kHz | — |
+> | 0x6 | **800 kHz** ← ВИКОРИСТОВУЄМО | margin 109 kHz від 909 kHz |
+> | 0x7 | 889 kHz | margin 20 kHz — занадто малий |
+> | 0xD | 2.67 MHz | MikroE SDK legacy — небезпечно |
+> | 0xF | 8.0 MHz | NO_OSC без монети (hw-підтверджено!) |
+>
+> **ADR-SPACER-001 (hw-verified 2026-03-24):** Мінімальний зазор d_min ≥ 1.5mm між феромагнітною монетою (нікель, сталь) і котушкою. При d=0 нікелева оболонка (μr≈600, δ_skin≈10μm) замикає магнітне коло як кришка pot-core: fSENSOR падає з 909 kHz до ~37-91 kHz, переповнює L_DATA (16-bit) і тригерить watchdog одночасно. Лоток забезпечує природній зазор ~2mm — достатньо. Cross-ref: `docs/audit/FERROMAGNETIC_COIN_INVESTIGATION_2026-03-24.md`.
 
 ### Семантика вихідних даних
 
@@ -1205,9 +1219,11 @@ private:
             return false;
         }
 
-        // DIG_CONFIG: MIN_FREQ=0xD0 (118 kHz, MikroE SDK) + RESP_TIME bits[2:0]
-        // 0x00 (500 kHz threshold) спричиняє false halt при fSENSOR < 500 kHz (небезпечно для MIKROE-3240)
-        uint8_t digCfg = 0xD0 | (respTimeBits & 0x07);
+        // DIG_CONFIG: MIN_FREQ nibble[7:4] + RESP_TIME bits[2:0]
+        // Формула watchdog: fSENSOR_min = 8 MHz / (16 - nibble) (datasheet §8.6.5)
+        // nibble=6 (0x60) → threshold=800 kHz, margin=109 kHz від baseline 909 kHz (ADR-MINFREQ-001)
+        // УВАГА: nibble=0xD (MikroE SDK legacy) → threshold=2.67 MHz > 909 kHz → NO_CONV завжди!
+        uint8_t digCfg = ((minFreqNibble_ & 0x0F) << 4) | (respTimeBits_ & 0x07);
         spiWrite(REG_DIG_CONFIG, digCfg);
 
         // Verify DIG_CONFIG write (повний байт: MIN_FREQ[7:4] + RESP_TIME[2:0])
@@ -1340,8 +1356,8 @@ private:
     // Формула: ceiling(cycles / 500kHz) + 2 мс margin. LA-9.
     // ВАЖЛИВО: 500 kHz у знаменнику дає МЕНШИЙ час ніж нижчий реальний fSENSOR.
     // Функція безпечна завдяки +2 мс margin (перекриває різницю при fSENSOR ≥ 200 kHz). (L-1)
-    // Edge case: при fSENSOR=118 kHz (мін. MIN_FREQ) реальний час 17.4 мс > формула 15 мс;
-    //   для MIKROE-3240 fSENSOR ≈ 200–300 kHz — формула достатньо консервативна.
+    // Edge case: при fSENSOR=800 kHz (MIN_FREQ nibble=6, ADR-MINFREQ-001) реальний час 2.56 мс
+    //   << margin 20 мс — формула достатньо консервативна. hw-baseline: fSENSOR=909 kHz (S-4).
     // Значення для Reserved індексів 0,1 встановлені як 192 — safe fallback.
 
     uint32_t convTimeMs() const {

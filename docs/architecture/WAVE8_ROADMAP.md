@@ -495,7 +495,7 @@ if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
 **Цільова state machine (4 позиції + drift check):**
 
 ```
-IDLE ──── coin placed ────►  STEP_0   rp[0],l[0]
+IDLE ──── coin placed ────►  STEP_BASE  rp[0],l[0]   ← монета в лотку (~2mm від котушки)
                                 │
                  keyboard 'ENTER': "Place on 1mm spacer, press ENTER"
                            (timeout 120s → abort → IDLE)
@@ -507,7 +507,7 @@ IDLE ──── coin placed ────►  STEP_0   rp[0],l[0]
                                 ▼
                              STEP_3   rp[2],l[2]    ← назва STEP_3 = дистанція
                                 │
-                 keyboard 'ENTER': "Return to 0mm (no spacer), press ENTER"
+                 keyboard 'ENTER': "Return to base (tray), press ENTER"
                            (timeout 120s → abort → IDLE)
                                 ▼
                           STEP_DRIFT  rp[3],l[3]    ← drift check: rp[3] ≈ rp[0]
@@ -517,7 +517,11 @@ IDLE ──── coin placed ────►  STEP_0   rp[0],l[0]
                               IDLE
 ```
 
-**Семантика `rp[3]` (W-07 ADR):** `rp[3]` = reading at 0mm після повернення монети (перевірка дрейфу). Спрощення: якщо `|rp[3] - rp[0]| / rp[0] > 0.05` (5%) → лог WARNING "Sensor drift detected" + зберегти вимір з `conf = 0.0` (не входить у matching). `rp[3]` **не входить** у VectorCompute — тільки rp[0..2].
+> ⚠️ **ADR-SPACER-001:** Позиція STEP_BASE = монета в лотку (d ≈ 2mm від котушки). **Мінімальний зазор d_min ≥ 1.5mm є обов'язковим для феромагнітних монет** (нікель, сталь). Нульовий зазор (d=0mm) для феромагнітних монет спричиняє ефект pot-core: fSENSOR падає з 909 kHz до ~37-91 kHz → DRDYB=1 storm. Лоток забезпечує природній зазор ~2mm — цього достатньо. **Ніколи не використовувати 0mm як STEP_BASE для реальних вимірювань.**
+>
+> Cross-ref: `docs/audit/FERROMAGNETIC_COIN_INVESTIGATION_2026-03-24.md` §7, LDC1101_ARCHITECTURE.md ADR-SPACER-001
+
+**Семантика `rp[3]` (W-07 ADR):** `rp[3]` = reading at base position після повернення монети (перевірка дрейфу). Спрощення: якщо `|rp[3] - rp[0]| / rp[0] > 0.05` (5%) → лог WARNING "Sensor drift detected" + зберегти вимір з `conf = 0.0` (не входить у matching). `rp[3]` **не входить** у VectorCompute — тільки rp[0..2].
 
 > **W-08 (audit):** Timeout 120 с (не 60 с) — фізична дія + пошук spacer займає більше часу ніж здається. `esp_timer` або `millis()` від входу в стан.
 >
@@ -531,6 +535,8 @@ IDLE ──── coin placed ────►  STEP_0   rp[0],l[0]
    ■□□□ ...
    Place on 1mm spacer →
 ```
+
+> **W-10 (S-4b hw-verified 2026-03-24):** Перед реалізацією C-2 перевірити що `DIG_CONFIG` використовує `min_freq_nibble=6` (threshold=800 kHz, margin 109 kHz від baseline 909 kHz). Значення `nibble=0xD` (MikroE SDK legacy) відповідає порогу 2.67 MHz — **небезпечно для нашої котушки**, спричиняє DRDYB storm навіть при d≥1.5mm зі звичайними монетами. Поточна конфігурація firmware: `DIG_CONFIG=0x67` ✅. Cross-ref: LDC1101_ARCHITECTURE.md §ADR-MINFREQ-001.
 
 **Timeout:** якщо наступний крок не виконаний за **120 с** → abort → `IDLE`.
 

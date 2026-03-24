@@ -246,6 +246,37 @@ fSENSOR = (fCLKIN × RESP_TIME_cycles) / (3 × L_DATA)
 
 ---
 
+### Сесія S-4b — DRDYB=1 розслідування (феромагнітна монета) ✅ ЗАВЕРШЕНО 2026-03-24
+
+**Тригер:** Цинк-нікелева монета 23.5mm / котушка 24mm (покриття 97.9%) при d≈0 спричиняла DRDYB=1 storm.
+
+**Хронологія спроб (всі hw-верифіковано):**
+
+| Крок | Config | DIG_CONFIG | Результат |
+|---|---|---|---|
+| 1 | bits=7 | `0xD7` | DRDYB storm при повному покритті |
+| 2 | bits=5 | `0xD5` | DRDYB storm залишився |
+| 3 | bits=3 | `0xD3` | DRDYB storm залишився |
+| 4 | bits=3 + nibble=15 | `0xF3` | NO_OSC навіть **без монети!** |
+| 5 | bits=7 (revert) + спейсер 1мм | `0xD7` | ✅ Стабільно |
+| 6 | nibble=7 | `0x77` | ✅ hw-verified, margin=20 kHz |
+| 7 | nibble=6 ← **FINAL** | `0x67` | ✅ hw-verified, margin=109 kHz |
+
+**Root cause:** Нікелеве покриття (μr≈600, δ_skin≈10μm @ 909 kHz) при d=0 замикає магнітне коло як кришка pot-core → fSENSOR падає з 909 kHz до ~37-91 kHz → **два незалежних блокування**: переповнення L_DATA (16-bit) + watchdog MIN_FREQ (nibble=0xD → threshold=2.67 MHz).
+
+**Корекція формули MIN_FREQ (з зовнішнього аудиту 2026-03-24):** Документація MikroE SDK вказувала 118 kHz для nibble=0xD — **помилка перекладу**. Правильно: `fSENSOR_min = 8 MHz / (16 − nibble)` (datasheet §8.6.5) → nibble=0xD → **2.67 MHz**.
+
+**Рішення:**
+- Фізичний мінімальний зазор d_min ≥ 1.5mm (лоток ≈ 2mm — достатньо) → **ADR-SPACER-001**
+- `min_freq_nibble=6` (threshold=800 kHz, margin=109 kHz) → **ADR-MINFREQ-001**
+- Фінальна конфігурація: `DIG_CONFIG=0x67` ✅
+
+**Коміт:** `8c0309e`
+
+**Cross-ref:** `docs/audit/FERROMAGNETIC_COIN_INVESTIGATION_2026-03-24.md` (повне розслідування + §11 відповідь на аудит)
+
+---
+
 ### Сесія S-5 — C-1: Визначення protocol_id (планується)
 
 **Передумова:** S-4 (валідний fSENSOR з CLKIN)
@@ -267,8 +298,9 @@ fSENSOR = (fCLKIN × RESP_TIME_cycles) / (3 × L_DATA)
 
 **Що реалізуємо:**
 ```
-IDLE → STEP_0(0mm) → [ENTER] → STEP_1(1mm) → [ENTER] → STEP_3(3mm) → [ENTER] → STEP_DRIFT(0mm) → COMPUTE → save()
+IDLE → STEP_BASE(~2mm, tray) → [ENTER] → STEP_1(1mm) → [ENTER] → STEP_3(3mm) → [ENTER] → STEP_DRIFT(base) → COMPUTE → save()
 ```
+> ⚠️ ADR-SPACER-001: STEP_BASE = монета в лотку (~2mm від котушки), **ніколи не 0mm** для феромагнітних монет.
 
 **Acceptance criteria (перед початком):**
 
