@@ -636,14 +636,17 @@ database/
 
 ## 7. Frozen physical constants
 
-Ці константи заморожуються **per `protocol_id`**: для `p1_1mhz_013mm` їх значення незмінні назавжди. Змінити або поекспериментувати = зареєструвати новий `protocol_id` + власна папка в `database/samples/`. `protocol_ver` при цьому **не зростає**.
+Ці константи заморожуються **per `protocol_id`**: для `p1_MIKROE3240_024mm` їх значення незмінні назавжди. Змінити або поекспериментувати = зареєструвати новий `protocol_id` + власна папка в `database/samples/`. `protocol_ver` при цьому **не зростає**.
 
-| Константа | Поточне значення | де зараз | Ризик |
-|-----------|-----------------|---------|-------|
-| `SINGLE_FREQUENCY` | 1 000 000 Hz | `platformio.ini` | Будь-який розробник може змінити |
-| Measurement distances | [0, 1, 3] мм | Тільки документація | Spacer буде 3D-printed ≠ точно 3.000 мм |
-| `RESP_TIME` default | code 6 | `platformio.ini` | Впливає на noise/speed tradeoff |
-| Котушка | MIKROE-3240 | BOM | Заміна на аналог → інша геометрія |
+> **hw-verified 2026-03-23 (S-4):** `protocol_id = "p1_MIKROE3240_024mm"` — визначено на реальному hardware. Попередній placeholder `"p1_UNKNOWN_013mm"` скасовано. Діаметр котушки 24mm (покриття 97.9% монетою 23.5mm), fSENSOR=909.2 kHz, C=330pF, L≈92.8µH.
+
+| Константа | Значення для `p1_MIKROE3240_024mm` | де зараз | Ризик |
+|-----------|----------------------------------|---------|-------|
+| `fSENSOR` | **909 200 Hz** (hw-verified S-4) | `NVSManager.cpp` default | Змінюється від котушки до котушки |
+| Measurement distances | [base, 1mm, 3mm] мм | Документація + C-2 code | Spacer ≠ точно 1.000 / 3.000 мм |
+| `RESP_TIME` | bits=7 (6144 cycles) | `ldc1101.json` | Впливає на SNR |
+| `min_freq_nibble` | 6 (threshold=800 kHz) | `ldc1101.json` | < 6 ризик DRDYB при феромагн. |
+| Котушка | MIKROE-3240 (24mm) | BOM | Заміна → інша геометрія |
 
 **Конкретний ризик `SINGLE_FREQUENCY`:** Якщо розробник-contributor змінює `SINGLE_FREQUENCY` на 500 000 Hz для кращої глибини проникнення, а потім робить PR з fingerprints — база отримує несумісні records без жодного попередження.
 

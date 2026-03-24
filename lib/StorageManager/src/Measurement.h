@@ -26,11 +26,12 @@
 #include <stdint.h>
 
 struct Measurement {
-    uint32_t ts;             // millis()/1000 at capture (uptime-seconds; not Unix in P-3)
-    float    rp[4];          // Rp raw codes at 4 coil positions (LDC1101: 0–65535)
-    float    l[4];           // L  raw codes at 4 coil positions
-    uint8_t  pos_count;      // Number of valid positions (1 in P-3, up to 4 in P-5+)
-    char     metal_code[8];  // "UNKN" until P-5+ classification
-    char     coin_name[48];  // "Unclassified" until P-5+
-    float    conf;           // 0.0–1.0 classification confidence (0.0 in P-3)
+    uint32_t ts;              // millis()/1000 at capture (uptime-seconds; not Unix in P-3)
+    float    rp[4];           // Rp raw codes at 4 coil positions (LDC1101: 0–65535)
+    float    l[4];            // L  raw codes at 4 coil positions
+    uint8_t  pos_count;       // Number of valid positions (1 in P-3, up to 4 in C-2+)
+    char     metal_code[8];   // "UNKN" until C-4+ classification
+    char     coin_name[48];   // "Unclassified" until C-4+
+    float    conf;            // 0.0–1.0 classification confidence (0.0 in P-3)
+    char     protocol_id[20]; // e.g. "p1_MIKROE3240_024mm" (hw-verified S-4)
 };

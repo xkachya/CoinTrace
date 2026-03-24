@@ -296,13 +296,14 @@ void HttpServer::registerApiRoutes() {
             }
 
             JsonDocument doc;
-            doc["id"]         = id;
-            doc["slot"]       = slot;
-            doc["ts"]         = m.ts;
-            doc["pos_count"]  = m.pos_count;
-            doc["metal_code"] = m.metal_code;
-            doc["coin_name"]  = m.coin_name;
-            doc["conf"]       = m.conf;
+            doc["id"]          = id;
+            doc["slot"]        = slot;
+            doc["ts"]          = m.ts;
+            doc["protocol_id"] = m.protocol_id;
+            doc["pos_count"]   = m.pos_count;
+            doc["metal_code"]  = m.metal_code;
+            doc["coin_name"]   = m.coin_name;
+            doc["conf"]        = m.conf;
             JsonArray rp = doc["rp"].to<JsonArray>();
             JsonArray l  = doc["l"].to<JsonArray>();
             const uint8_t nPos = (m.pos_count > 0 && m.pos_count <= 4) ? m.pos_count : 1;

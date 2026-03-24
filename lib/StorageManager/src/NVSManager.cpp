@@ -120,9 +120,11 @@ bool NVSManager::loadCalibration(SensorCalibration& out) const {
     out.cal_valid = sensor_.getBool ("cal_valid", false);
     sensor_.getString("proto_id", out.proto_id, sizeof(out.proto_id));
 
-    // If proto_id was never written, initialise with the known placeholder.
-    if (out.proto_id[0] == '\0') {
-        strncpy(out.proto_id, "p1_UNKNOWN_013mm", sizeof(out.proto_id) - 1);
+    // If proto_id was never written (or is the old placeholder), set hw-verified value.
+    // coil=MIKROE-3240, diameter=24mm, fSENSOR=909.2kHz — S-4 hw-verified 2026-03-23
+    // Migration: "p1_UNKNOWN_013mm" was the pre-S4 placeholder; replace on first boot.
+    if (out.proto_id[0] == '\0' || strcmp(out.proto_id, "p1_UNKNOWN_013mm") == 0) {
+        strncpy(out.proto_id, "p1_MIKROE3240_024mm", sizeof(out.proto_id) - 1);
         out.proto_id[sizeof(out.proto_id) - 1] = '\0';
     }
 

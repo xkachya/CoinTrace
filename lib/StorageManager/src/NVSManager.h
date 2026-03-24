@@ -57,7 +57,7 @@ public:
         uint32_t freq_hz;       // Operating frequency (placeholder until R-01)
         int64_t  cal_ts;        // Unix timestamp of last calibration (0 = never)
         bool     cal_valid;     // Calibration passed validation
-        char     proto_id[16];  // e.g. "p1_UNKNOWN_013mm" until R-01
+        char     proto_id[20];  // e.g. "p1_MIKROE3240_024mm" (19 chars + \0)
     };
 
     // ── Lifecycle ─────────────────────────────────────────────────────────────

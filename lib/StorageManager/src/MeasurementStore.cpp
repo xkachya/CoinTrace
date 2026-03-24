@@ -81,7 +81,7 @@ bool MeasurementStore::save(const Measurement& m) {
     JsonDocument doc;
     doc["ts"]          = m.ts;
     doc["device_id"]   = deviceId_;
-    doc["protocol_id"] = "p1_UNKNOWN_013mm";  // [F-05] real fSENSOR TBD at R-01
+    doc["protocol_id"] = "p1_MIKROE3240_024mm";  // hw-verified S-4: coil=MIKROE-3240, d=24mm, fSENSOR=909.2kHz
 
     doc["pos_count"]   = m.pos_count;
 
@@ -196,8 +196,10 @@ bool MeasurementStore::load(uint16_t slot, Measurement& out) {
 
     const char* mc = doc["metal_code"] | "UNKN";
     const char* cn = doc["coin_name"]  | "Unclassified";
-    strlcpy(out.metal_code, mc, sizeof(out.metal_code));
-    strlcpy(out.coin_name,  cn, sizeof(out.coin_name));
+    const char* pid = doc["protocol_id"] | "p1_MIKROE3240_024mm";
+    strlcpy(out.metal_code,  mc,  sizeof(out.metal_code));
+    strlcpy(out.coin_name,   cn,  sizeof(out.coin_name));
+    strlcpy(out.protocol_id, pid, sizeof(out.protocol_id));
 
     return true;
 }
