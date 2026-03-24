@@ -795,12 +795,13 @@ void loop() {
 
   // ── One-time diagnostic: LFS task stack watermark ────────────────────────────
   // Logged once after 10 s so task has processed all boot-log entries.
-  // Stack was reduced to 3072 B based on 2026-03-18 measurement (watermark=1332B free).
+  // Stack history: 4096 B (2026-03-18) → 3072 B (watermark 1332 B) → 3584 B (2026-03-24,
+  // watermark 308 B was too thin; +512 B → 820 B headroom, hw-verified).
   // If this log shows < 512 B free → increase stack in LittleFSTransport.cpp.
   static bool sDiagLogged = false;
   if (!sDiagLogged && millis() > 10000) {
       sDiagLogged = true;
-      LOG_DEBUG(&gLogger, "Stack", "LFS task watermark: %u B free (of 3072 B stack)",
+      LOG_DEBUG(&gLogger, "Stack", "LFS task watermark: %u B free (of 3584 B stack)",
                 gLfsTransport.stackWatermarkBytes());
   }
 

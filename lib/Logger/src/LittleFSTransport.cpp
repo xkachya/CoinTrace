@@ -21,9 +21,12 @@ void LittleFSTransport::startTask(uint8_t coreId, UBaseType_t priority) {
     }
     taskRunning_ = true;
     BaseType_t rc = xTaskCreatePinnedToCore(
-        taskFunc, "lfs_log", /*stack=*/3072, this, priority, &taskHandle_, coreId);
-    // Stack sizing note: measured watermark = 1332 B free from 4096 B (2026-03-18 hw-test).
-    // → 2764 B used. Stack reduced to 3072 B: 308 B headroom, saves 1024 B heap.
+        taskFunc, "lfs_log", /*stack=*/3584, this, priority, &taskHandle_, coreId);
+    // Stack sizing history:
+    //   2026-03-18: watermark = 1332 B free of 4096 B → 2764 B used → reduced to 3072 B (308 B headroom).
+    //   2026-03-24: re-measured 308 B free of 3072 B (matches estimate). C-2 logging via queue
+    //               does not change lfs_log task call depth, but 308 B is too thin for safety.
+    //               Increased to 3584 B (3072 + 512): ~820 B headroom. Heap cost: +512 B.
     if (rc != pdPASS) {
         log_e("LFSTransport: xTaskCreate failed");
         taskRunning_ = false;

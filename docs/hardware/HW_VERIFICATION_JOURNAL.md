@@ -277,22 +277,33 @@ fSENSOR = (fCLKIN × RESP_TIME_cycles) / (3 × L_DATA)
 
 ---
 
-### Сесія S-5 — C-1: Визначення protocol_id (планується)
+### Сесія S-5 — C-1: Визначення protocol_id ✅ **hw-verified 2026-03-24** (commit `6628487`)
 
-**Передумова:** S-4 (валідний fSENSOR з CLKIN)
-2. Сформувати `protocol_id` за форматом FINGERPRINT_DB §3.2:
-   - Формат: `p1_MIKROE3240_{coil_diameter}mm`
-   - Приклад: `p1_MIKROE3240_013mm` (якщо котушка 13mm)
-3. Оновити `data/plugins/ldc1101.json` — замінити `"p1_UNKNOWN_013mm"`
-4. Оновити 5 synthetic FP entries — замінити `protocol_id` або видалити
+**Передумова:** S-4 ✅
 
-**Очікувані результати:**
-- `data/plugins/ldc1101.json` з реальним `protocol_id`
-- Community-compatible записи (до оновлення — **не публікувати**)
+**Результат:**
+
+| Параметр | Значення |
+|---|---|
+| `protocol_id` | `"p1_MIKROE3240_024mm"` |
+| fSENSOR | 909.2 kHz |
+| Котушка | MIKROE-3240, діаметр 24mm |
+| d_base | 1.5mm (підлога лотка) |
+| Перша тестова монета | Україна 1 гривня Ag999, ⌀38.6mm, 31.1g (1oz) |
+
+**Зміни:**
+- `NVSManager.h`: `proto_id[16]→[20]` (19 симв+NUL)
+- `NVSManager.cpp`: авто-migration з `"p1_UNKNOWN_013mm"` при завантаженні
+- `Measurement.h`: поле `protocol_id[20]` додано до struct
+- `MeasurementStore.cpp`: `save()` + `load()` серіалізація
+- `HttpServer.cpp`: `GET /measure/{id}` повертає `protocol_id`
+- `FINGERPRINT_DB_ARCHITECTURE.md §7`: заморожені константи оновлено
+
+**hw-verified:** `GET /api/v1/measure/50` → `"protocol_id": "p1_MIKROE3240_024mm"` ✅
 
 ---
 
-### Сесія S-6 — C-2: Multi-position state machine (планується)
+### Сесія S-6 — C-2: Multi-position state machine ⚠️ **реалізовано** (commit `313b179`) — hw-тест з spacers pending
 
 **Передумова:** S-4 (fSENSOR) + S-5 (protocol_id)
 
@@ -316,12 +327,19 @@ IDLE → STEP_BASE(~2mm, tray) → [ENTER] → STEP_1(1mm) → [ENTER] → STEP_
 
 **Spacers:** _______ (матеріал, перевірена товщина)
 
-**Результати (заповнити після реалізації):**
-- [ ] Тест 1–7 пройдено
-- [ ] Типовий RP при монеті на 0mm: ____
-- [ ] Типовий RP при монеті на 1mm: ____
-- [ ] Типовий RP при монеті на 3mm: ____
-- [ ] Drift `|rp[3]-rp[0]|/rp[0]`: ____% (typ)
+**Результати (commit `313b179`, 2026-03-24):**
+- [x] Тест 1: Coin placed → STEP_BASE auto-start — hw-verified: `Meas | Coin placed — session started (STEP_BASE)` ✅
+- [x] Тест 3: Timeout 120s без ENTER → abort → IDLE — hw-verified: `146630ms − 26668ms = 119962ms ≈ 120.0s`, лог `WARN Meas | Step 1 timeout — session aborted` ✅
+- [ ] Тест 2, 4: ENTER transitions — потребує hw-тесту з реальними spacers
+- [ ] Тест 5: Drift check > 5%
+- [ ] Тест 6: Full 4-step sequence → `pos_count=4` saved
+- [ ] Тест 7: `GET /sensor/state` повертає `MEASURING_STEP_*` (потребує C-4)
+- [ ] Типовий RP при монеті на tray (d=1.5mm): \_\_\_\_ (Ag999 hw-session планується)
+- [ ] Типовий RP при монеті на +1mm spacer: \_\_\_\_
+- [ ] Типовий RP при монеті на +3mm spacer: \_\_\_\_
+- [ ] Drift `|rp[3]-rp[0]|/rp[0]`: \_\_\_\_% (typ)
+
+**Spacers:** 3D-друк (PLA, товщина верифікується штангенциркулем)
 
 ---
 
