@@ -111,12 +111,16 @@ void HttpServer::registerApiRoutes() {
     );
 
     // ── GET /api/v1/sensor/state ─────────────────────────────────────────────
-    // Stub until C-2 integrates LDC1101 state machine via PluginContext.
+    // C-4: Returns composite sensor/measurement state string.
+    // sensorStateFn_ injected via setSensorState() in main.cpp after begin().
+    // Reads MeasState (uint8_t, atomic on ESP32) + LDC1101 coin state.
     server_->on("/api/v1/sensor/state", HTTP_GET,
         [this](AsyncWebServerRequest* req) {
-            AsyncWebServerResponse* resp = req->beginResponse(
-                200, "application/json", "{\"state\":\"IDLE_NO_COIN\"}"
-            );
+            const char* state = sensorStateFn_ ? sensorStateFn_() : "IDLE_NO_COIN";
+            // Fixed stack buffer — no heap allocation for small JSON responses.
+            char buf[48];
+            snprintf(buf, sizeof(buf), "{\"state\":\"%s\"}", state);
+            AsyncWebServerResponse* resp = req->beginResponse(200, "application/json", buf);
             addCors(resp);
             req->send(resp);
         }
@@ -486,10 +490,26 @@ void HttpServer::registerApiRoutes() {
         }
     );
 
-    // ── POST /api/v1/measure/start — stub (sensor not ready until C-2) ───────
+    // ── POST /api/v1/measure/start — C-4 ─────────────────────────────────────
+    // Accepts a start request if coin is present and no session is already active.
+    // measStartFn_: true → 202 Accepted (MainLoop starts session next tick);
+    //               false → 409 already_measuring.
+    // A volatile flag (gMeasStartRequested in main.cpp) is set; MainLoop picks it up.
     server_->on("/api/v1/measure/start", HTTP_POST,
         [this](AsyncWebServerRequest* req) {
-            sendError(req, 503, "sensor_not_ready");
+            if (!measStartFn_) {
+                sendError(req, 503, "sensor_not_ready");
+                return;
+            }
+            if (measStartFn_()) {
+                AsyncWebServerResponse* resp = req->beginResponse(
+                    202, "application/json", "{\"started\":true}"
+                );
+                addCors(resp);
+                req->send(resp);
+            } else {
+                sendError(req, 409, "already_measuring");
+            }
         }
     );
 

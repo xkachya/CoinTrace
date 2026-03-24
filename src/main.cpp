@@ -99,6 +99,11 @@ struct MeasSession {
 
 static MeasSession sMeas;
 
+// C-4: Written by lwIP thread (POST /api/v1/measure/start → measStartFn_ lambda).
+// Read + cleared by MainLoop in loop(). volatile ensures MainLoop sees lwIP write
+// without memory ordering issues on the ESP32-S3 dual-core architecture.
+volatile bool gMeasStartRequested = false;
+
 // ── C-2 Display Helpers ──────────────────────────────────────────────────────
 // drawMeasIdle()       — full-screen idle state (shown after session ends)
 // drawMeasStep_full()  — full-screen redraw on each state transition
@@ -645,6 +650,30 @@ void setup() {
   gHttp.begin(gHttpServer, gStorage, gNVS, gWifi, gLFS, gRingTransport,
               gMeasStore, gFPCache);
   gHttp.setOtaWindow(&sOtaWindowOpen, &sOtaWindowOpenMs);  // A-4: inject window flags
+  // C-4: Inject sensor state accessor and measurement start callback.
+  // sensorStateFn reads sMeas.state (uint8_t, atomic on ESP32) + gLDC coin state —
+  // safe to call from lwIP thread without a mutex.
+  // measStartFn sets gMeasStartRequested (volatile bool); MainLoop consumes next tick.
+  gHttp.setSensorState(
+    []() -> const char* {
+      switch (sMeas.state) {
+        case MeasState::STEP_BASE:  return "MEASURING_STEP_BASE";
+        case MeasState::STEP_1:     return "MEASURING_STEP_1";
+        case MeasState::STEP_3:     return "MEASURING_STEP_3";
+        case MeasState::STEP_DRIFT: return "MEASURING_STEP_DRIFT";
+        case MeasState::COMPUTE:    return "MEASURING_COMPUTE";
+        default: break;
+      }
+      if (gLDC && gLDC->getCoinState() == LDC1101Plugin::CoinState::COIN_PRESENT)
+        return "IDLE_COIN_PRESENT";
+      return "IDLE_NO_COIN";
+    },
+    []() -> bool {
+      if (sMeas.state != MeasState::IDLE) return false;
+      gMeasStartRequested = true;
+      return true;
+    }
+  );
   gCtx.http = &gHttp;
   LOG_DEBUG(&gLogger, "Heap", "after HTTP:  %u B free", (uint32_t)ESP.getFreeHeap());
   gLogger.info("HTTP", "REST API ready — http://%s/api/v1/status", gWifi.getIP());
@@ -811,6 +840,27 @@ void loop() {
   // Abort:   Backspace key or 120-second per-step timeout.
   if (gLDC && gLDC->isReady()) {
     const LDC1101Plugin::CoinState coinState = gLDC->getCoinState();
+
+    // ── HTTP-triggered session start (POST /api/v1/measure/start) ─────────
+    // lwIP thread sets gMeasStartRequested via measStartFn_; MainLoop consumes here.
+    // Coin must be present + LFS mounted; otherwise flag is silently discarded
+    // (202 was already sent — client re-polls GET /sensor/state to confirm start).
+    if (gMeasStartRequested) {
+      gMeasStartRequested = false;
+      if (sMeas.state == MeasState::IDLE &&
+          coinState    == LDC1101Plugin::CoinState::COIN_PRESENT &&
+          gLFS.isDataMounted()) {
+        sMeas = {};
+        sMeas.state   = MeasState::STEP_BASE;
+        sMeas.stepMs  = millis();
+        sMeas.m.ts    = millis() / 1000;
+        strlcpy(sMeas.m.metal_code,  "UNKN",                sizeof(sMeas.m.metal_code));
+        strlcpy(sMeas.m.coin_name,   "Unclassified",        sizeof(sMeas.m.coin_name));
+        strlcpy(sMeas.m.protocol_id, "p1_MIKROE3240_024mm", sizeof(sMeas.m.protocol_id));
+        drawMeasStep_full(sMeas);
+        gLogger.info("Meas", "HTTP start: session started (STEP_BASE)");
+      }
+    }
 
     // ── Auto-start on fresh coin placement ────────────────────────────────
     // Edge detection prevents re-triggering while coin stays present after

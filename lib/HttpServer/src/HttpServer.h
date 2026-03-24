@@ -22,6 +22,7 @@
 #pragma once
 
 #include <ESPAsyncWebServer.h>
+#include <functional>
 #include "IStorageManager.h"
 #include "NVSManager.h"
 #include "WiFiManager.h"
@@ -72,6 +73,18 @@ public:
         otaWindowOpenMs_ = windowOpenMs;
     }
 
+    // C-4: Inject sensor state accessor + measurement start callback from main.cpp.
+    // Called once after begin(), like setOtaWindow().
+    // Both lambdas run on the lwIP thread — must only read/write volatile data or
+    // thread-safe primitives (no Logger, no NVS, no MeasStore::save).
+    //   stateFn — returns current state string ("IDLE_NO_COIN", "MEASURING_STEP_BASE", …)
+    //   startFn — returns true if start accepted, false if session already active.
+    void setSensorState(std::function<const char*()> stateFn,
+                        std::function<bool()>         startFn) {
+        sensorStateFn_ = std::move(stateFn);
+        measStartFn_   = std::move(startFn);
+    }
+
 private:
     // Dependencies — stored for use inside route handler lambdas.
     AsyncWebServer*      server_  = nullptr;
@@ -82,4 +95,7 @@ private:
     RingBufferTransport* ring_    = nullptr;
     MeasurementStore*    meas_    = nullptr;
     FingerprintCache*    fp_      = nullptr;
+    // C-4: Sensor state / measurement start — injected via setSensorState().
+    std::function<const char*()> sensorStateFn_;  // nullptr until setSensorState() called
+    std::function<bool()>        measStartFn_;
 };

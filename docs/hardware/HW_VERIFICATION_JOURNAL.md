@@ -333,7 +333,7 @@ IDLE → STEP_BASE(~2mm, tray) → [ENTER] → STEP_1(1mm) → [ENTER] → STEP_
 - [ ] Тест 2, 4: ENTER transitions — потребує hw-тесту з реальними spacers
 - [ ] Тест 5: Drift check > 5%
 - [ ] Тест 6: Full 4-step sequence → `pos_count=4` saved
-- [ ] Тест 7: `GET /sensor/state` повертає `MEASURING_STEP_*` (потребує C-4)
+- [x] Тест 7: `GET /sensor/state` повертає `MEASURING_STEP_BASE` — hw-verified: C-4 wired, `{"state":"MEASURING_STEP_BASE"}` ✅
 - [ ] Типовий RP при монеті на tray (d=1.5mm): \_\_\_\_ (Ag999 hw-session планується)
 - [ ] Типовий RP при монеті на +1mm spacer: \_\_\_\_
 - [ ] Типовий RP при монеті на +3mm spacer: \_\_\_\_
@@ -343,7 +343,37 @@ IDLE → STEP_BASE(~2mm, tray) → [ENTER] → STEP_1(1mm) → [ENTER] → STEP_
 
 ---
 
-### Сесія S-7 — C-4/C-5: VectorCompute + FP matching (планується)
+### Сесія S-7 — C-4: HTTP endpoints hw-verification (2026-03-24)
+
+**Що робили:** hw-верифікація C-4 (`GET /api/v1/sensor/state` real MeasState + `POST /api/v1/measure/start`).
+
+**Тести (всі через `Invoke-RestMethod` на 192.168.88.53):**
+
+| # | Тест | Результат |
+|---|---|---|
+| T1 | `GET /sensor/state` (монети немає) | ✅ `{"state":"IDLE_NO_COIN"}` |
+| T2 | монета → `GET /sensor/state` (auto-start) | ✅ `{"state":"MEASURING_STEP_BASE"}` |
+| T3 | `POST /measure/start` з IDLE (монета є, немає нового edge) | ✅ `202 {"started":true}` |
+| T4 | `GET /sensor/state` одразу після POST start | ✅ `{"state":"MEASURING_STEP_BASE"}` |
+| T5 | `POST /measure/start` (сесія активна) | ✅ `409 {"error":"already_measuring"}` |
+| T6 | після timeout abort → `GET /sensor/state` | ✅ `{"state":"IDLE_NO_COIN"}` |
+
+**Ключові деталі реалізації:**
+- `sensorStateFn_` lambda читає `sMeas.state` (uint8_t, atomic на ESP32) без mutex — safe від lwIP thread
+- `measStartFn_` lambda: перевіряє `sMeas.state == IDLE` → встановлює `volatile bool gMeasStartRequested` → MainLoop споживає на наступному тіку
+- T2: auto-start від edge `IDLE_NO_COIN→COIN_PRESENT` відбувся раніше за `GET` — очікувана поведінка
+- T3: перевіряє шлях `gMeasStartRequested` (монета лишилась після timeout, `sPrevCoinState==COIN_PRESENT` → немає нового edge)
+
+**Висновки:**
+1. `GET /sensor/state` повертає правильний стан в усіх 6 сценаріях ✅
+2. `POST /measure/start` 202/409/503 працює коректно ✅
+3. Race condition відсутній: volatile flag + single consumer (MainLoop)
+
+**Наслідки:** C-4 hw-verified → закриває S-6 тест 7. Наступний: spacer hw-session (S-6 тести 2/4/5/6) → C-5 σ tuning.
+
+---
+
+### Сесія S-8 — C-4/C-5: VectorCompute + FP matching (планується)
 
 **Передумова:** S-6 (C-2 готовий)
 

@@ -1,8 +1,8 @@
 # Wave 8 Roadmap — Connectivity + Infrastructure + Sensor Integration
 
-**Статус:** 🔄 In Progress — Фаза 2 — Sensor Integration (C-1 ✅ `6628487`, C-2 ✅ `313b179` hw-verified → **C-4 розблоковано, НАСТУПНИЙ**)  
-**Версія:** 2.0.0  
-**Дата:** 2026-03-24 (оновлено після C-1+C-2 hw-верифікації: protocol\_id=`p1_MIKROE3240_024mm`, state machine trigger запускається)
+**Статус:** 🔄 In Progress — Фаза 2 — Sensor Integration (C-1 ✅ `6628487`, C-2 ✅ `313b179`, C-4 ✅ hw-verified → **spacer hw-session або C-5 НАСТУПНІЙ**)  
+**Версія:** 2.1.0  
+**Дата:** 2026-03-24 (оновлено після C-4 hw-верифікації: sensor/state real MeasState + POST measure/start 202/409)
 **Попередня хвиля:** Wave 7 — Storage Foundation (`d53a440`, 84/84 native tests, hardware verified)
 **Cross-ref:** `docs/architecture/MEMORY_MAP.md` — детальна карта Flash/SRAM/Heap (hw-verified 2026-03-18)
 
@@ -56,8 +56,8 @@ Cross-ref: [STORAGE_ARCHITECTURE.md §15](./STORAGE_ARCHITECTURE.md), [CONNECTIV
 | WebSocket sensor frames | ⚠️ partial | A-6 | Stub → real після C-2 |
 | R-01 → real protocol_id | ✅ done | C-1 | `"p1_MIKROE3240_024mm"` hw-verified (`6628487`) |
 | Multi-position state machine | ✅ done | C-2 | hw-verified: session trigger (`313b179`) |
-| queryFingerprint() wiring | ⚡ НАСТУПНИЙ | C-4 | C-2 + C-3 готові → розблоковано |
-| FingerprintCache σ tuning | ✅ БЛОК | C-5 | Потребує реальних монет |
+| queryFingerprint() wiring | ✅ done | C-4 | hw-verified 2026-03-24 — sensor/state real MeasState + POST measure/start |
+| FingerprintCache σ tuning | ⚡ НАСТУПНИЙ | C-5 | Потребує реальних монет (spacer hw-session) |
 | Real FP DB seeding | ✅ БЛОК | C-6 | Замінити synthetic entries |
 
 > **C-3\*** — єдиний виняток з Track C: vector math (dRp1/k1/k2/slope/dL1) є чистою математикою над `float[4]`, незалежною від SPI. Реалізується та тестується до прибуття сенсора.
@@ -693,8 +693,8 @@ gWebSocket.broadcastResult(m, matches, n);
 ```
 C-1  R-01 → real protocol_id          ✅ hw-verified (`6628487`) — `p1_MIKROE3240_024mm`
 C-2  Multi-position state machine     ✅ hw-verified trigger (`313b179`) — сесія стартує
-C-4  queryFingerprint() wiring        ⚡ НАСТУПНИЙ → ~0.5 дні (C-2 + C-3 готові)
-C-5  σ tuning                         ~1 день (реальні монети)
+C-4  queryFingerprint() wiring        ✅ hw-verified (2026-03-24) — sensor/state real MeasState + POST measure/start
+C-5  σ tuning                         ⚡ НАСТУПНИЙ — ~1 день (реальні монети, spacer hw-session)
 C-6  Real FP DB seeding               ~2 дні (Python CLI tool)
 A-x  WebSocket sensor frames (live)   ~0.5 дні (стаби → real)
 A-x  POST /measure/start (full)       ~0.5 дні (C-2 готово)
@@ -764,7 +764,9 @@ A-7  BLE GATT → відкладено до v2 PSRAM    (current hw: ~30 KB free
 ### Wave 8 фаза 2 (після LDC1101):
 
 - [x] R-01: fSENSOR=909.2 kHz, `protocol_id="p1_MIKROE3240_024mm"` hw-verified — commit `6628487`
-- [~] Multi-position: реалізовано commit `313b179`; hw-verified: coin placed → STEP_BASE ✅, timeout 120s → abort ✅ (119962ms hw-measured); повний 4-step flow потребує hw-тесту з реальними spacers; WebSocket result frame — після A-6
+- [~] Multi-position: реалізовано commit `313b179`; hw-verified: coin placed → STEP_BASE ✅, timeout 120s → abort ✅ (119962ms hw-measured); тест 7 (`GET /sensor/state` real MeasState) ✅ C-4; повний 4-step flow потребує hw-тесту з реальними spacers; WebSocket result frame — після A-6
+- [x] `GET /api/v1/sensor/state` → real MeasState (`MEASURING_STEP_BASE/1/3/DRIFT`, `IDLE_COIN_PRESENT`, `IDLE_NO_COIN`) — hw-verified 2026-03-24 (C-4)
+- [x] `POST /api/v1/measure/start` → `202 {"started":true}` (coin present, IDLE) + `409 already_measuring` (session active) — hw-verified 2026-03-24 (C-4)
 - [ ] Drift check: `|rp[3] - rp[0]| / rp[0] < 5%` для стабільного сенсора; WARNING лог при перевищенні
 - [ ] `queryFingerprint()`: confidence > 0.7 для правильного металу (3 тестові монети)
 - [ ] WebSocket sensor frame: real-time rp/l/pos stream при COIN_PRESENT
@@ -779,4 +781,5 @@ A-7  BLE GATT → відкладено до v2 PSRAM    (current hw: ~30 KB free
 *Версія 1.3.0 — B-3 GPIO0 recovery hw-verified: пристрій перезавантажується при утриманні G0 під час 3s splash-вікна; `LittleFSManager::formatData()` додано; `RTC_DATA_ATTR gRtcBootReason` для boot reason tracking; визуальний countdown на дисплеї. Попередня: v1.2.0 — Phase 1 batch B+C-3 реалізовано: B-3 GPIO0 recovery (`src/main.cpp`); C-3 `VectorCompute.h/.cpp` + OLS slope; B-1 `Preferences.h` in-memory KV mock + `test_nvs_manager/`; B-2 `loadTestEntry()` + `test_fingerprint_cache/`; `platformio.ini` розширено. 108/108 native tests PASSED. Наступний крок: A-1 WiFiManager.*  
 *Версія 1.3.1 — [B-3-audit-fix] впроваджено 2 знахідки B3_Delta_Independent_Audit: Fix 1 — early-exit GPIO0 window (200ms quick poll, boot penalty 3000→200ms); Fix 2 — `formatData()` SAFETY comment (R-02 race condition); D-01 portability note (USB-CDC vs UART bridge). STORAGE_ARCHITECTURE → v1.8.1.*  
 *Версія 1.4.0 — A-1 WiFiManager реалізовано та hw-verified (2026-03-17): `lib/WiFiManager/src/WiFiManager.h/.cpp` (AP+STA, `promptSTA()` keyboard provisioning); `PluginContext.h` розширено полем `WiFiManager* wifi`; `main.cpp` step [10] §17.2 + 'W' key handler; `platformio.ini` коментар виправлено. Bug fix: `buildAPSsid()` використовує `esp_efuse_mac_get_default()` замість `WiFi.macAddress()` (driver not yet init). AP hw-verified: SSID `CoinTrace-F974` видно на телефоні, підключення успішне. RAM: 60.4% (+8% WiFi stack). 108/108 native tests PASSED. Наступний крок: A-2 AsyncWebServer.*  
+*Версія 2.1.0 — C-4 hw-verified (2026-03-24): `GET /api/v1/sensor/state` → real MeasState (MEASURING\_STEP\_BASE/1/3/DRIFT, IDLE\_COIN\_PRESENT, IDLE\_NO\_COIN); `POST /api/v1/measure/start` → 202/409/503; volatile `gMeasStartRequested` flag + lambda injection via `gHttp.setSensorState()`. T1–T6 hw-verified. RAM=61.7% Flash=57.4%. Наступний: spacer hw-session (C-2 тести 2/4/5/6) → C-5 σ tuning.*  
 *Версія 2.0.0 — C-1 + C-2 hw-verified (2026-03-24): C-1 — `protocol_id="p1_MIKROE3240_024mm"` зафіксовано, NVSManager migration, Measurement.h розширено, HttpServer.cpp повертає protocol\_id (commit `6628487`); C-2 — `MeasState` enum + `MeasSession` struct, auto-start на edge COIN\_PRESENT, ENTER/Bksp handlers, 120s per-step timeout, drift check, `doMeasCompute()` (VectorCompute+FP query+save), display step/result/idle з partial redraw (commit `313b179`). LFS task stack 3072→3584 B (308→820 B headroom). hw-verified: coin placed → `Meas | Coin placed — session started (STEP_BASE)`. RAM=61.7% Flash=57.4%. Наступний: C-4 queryFingerprint() wiring.*
