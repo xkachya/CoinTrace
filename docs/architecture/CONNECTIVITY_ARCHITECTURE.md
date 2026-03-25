@@ -108,7 +108,7 @@ http GET http://cointrace.local/api/v1/status
 http POST http://cointrace.local/api/v1/measure/start
 ```
 
-**Коли знадобиться:** відразу як тільки WiFi AP + HTTP server будуть реалізовані.
+**Коли знадобиться:** WiFi AP + HTTP server реалізовано і hw-verified (C-4, 2026-03-24). Endpoint-и працюють, httpie рекомендовано для обох поточного дебагу та інтеграції UI.
 
 ### 3.5 Потрібно додати: wscat для WebSocket тестування
 
@@ -432,9 +432,9 @@ GET  /api/v1/status
      heap_min = ESP.getMinFreeHeap() — мінімум з boot, показовіший за поточне heap
 
 POST /api/v1/measure/start
-     → {"id":43,"status":"measuring","eta_ms":2000}
-     → 409 Conflict  якщо вимір вже активний: {"error":"already_measuring","current_id":42,"eta_ms":1200}
-     → 503 Service Unavailable  якщо LittleFS_data недоступна: {"error":"storage_unavailable"}
+     → 202 {"started":true}  — сесія стартує на наступному тіку MainLoop
+     → 409 Conflict  якщо вимір вже активний: {"error":"already_measuring"}
+     → 503 Service Unavailable  якщо сенсор або LFS не готовий: {"error":"sensor_not_ready"}
 
 GET  /api/v1/measure/{id}
      → {"id":43,"status":"done","match":"Ag925","conf":0.94,

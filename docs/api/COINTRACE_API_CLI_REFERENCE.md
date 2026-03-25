@@ -1,7 +1,7 @@
 # CoinTrace API & CLI Reference
 
-**Дата:** 2026-03-19  
-**Актуально для:** v1 (Wave 8, без LDC1101)
+**Дата:** 2026-03-25 (оновлено: C-4 hw-verified)  
+**Актуально для:** v1 (Wave 8, LDC1101 підключено, C-4 hw-verified 2026-03-24)
 
 ---
 
@@ -45,13 +45,14 @@
 
 ### 1.3. Sensor State
 - **GET /sensor/state**  
-  **Опис:** Стан сенсора (stub: IDLE_NO_COIN)
-  **Реалізовано:** ✅ (stub, до інтеграції LDC1101)
+  **Опис:** Поточний стан сенсора та measurement session  
+  **Реалізовано:** ✅ hw-verified 2026-03-24 (C-4)  
   **Приклад:**
   ```sh
   curl "http://$ip/api/v1/sensor/state"
   ```
-  **Відповідь:** `{ "state": "IDLE_NO_COIN" }`
+  **Відповідь:** `{ "state": "<state>" }`  
+  **Стани:** `IDLE_NO_COIN` | `IDLE_COIN_PRESENT` | `MEASURING_STEP_BASE` | `MEASURING_STEP_1` | `MEASURING_STEP_3` | `MEASURING_STEP_DRIFT` | `MEASURING_COMPUTE`
 
 ### 1.4. Fingerprint Database
 - **GET /database**  
@@ -88,13 +89,16 @@
   **Відповідь:** `{ "id": 0, ... }` або 404 якщо не існує
 
 - **POST /measure/start**  
-  **Опис:** Запустити новий вимір (сенсор не підключено)
-  **Реалізовано:** 🚧 (stub, повертає 503)
+  **Опис:** HTTP-старт вимірювання (монета має бути на котушці, стан IDLE)  
+  **Реалізовано:** ✅ hw-verified 2026-03-24 (C-4)  
   **Приклад:**
   ```sh
   curl -X POST "http://$ip/api/v1/measure/start"
   ```
-  **Відповідь:** `{ "error": "sensor_not_ready" }`
+  **Відповіді:**
+  - `202` — `{ "started": true }` — сесія стартує на наступному тіку MainLoop
+  - `409` — `{ "error": "already_measuring" }` — сесія вже активна
+  - `503` — `{ "error": "sensor_not_ready" }` — сенсор або LFS не готовий
 
 ### 1.6. Calibration
 - **POST /calibrate**  
@@ -212,7 +216,8 @@
 - 404: Not Found (невірний ID виміру)
 - 400: Bad Request (некоректний JSON, відсутні поля)
 - 403: Forbidden (OTA window не активне)
-- 503: Service Unavailable (сенсор не підключено, storage недоступний)
+- 409: Conflict (вимір вже активний — `already_measuring`)
+- 503: Service Unavailable (сенсор або LFS не готовий — `sensor_not_ready`)
 - 422: Unprocessable Entity (непідтримуваний algo_ver)
 
 ---
@@ -225,4 +230,4 @@
 
 ---
 
-**Оновлено:** 2026-03-19
+**Оновлено:** 2026-03-25 (C-4: sensor/state real MeasState + POST measure/start 202/409/503)

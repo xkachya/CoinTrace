@@ -204,10 +204,9 @@ POST /api/v1/database/match            ← КЛЮЧОВИЙ для pre-sensor р
      ← 200 {"match":null} якщо protocol_id не знайдено (не 404)
 
 GET  /api/v1/sensor/state
-     ← {"state":"IDLE_NO_COIN"|"COIN_PRESENT"|"COIN_REMOVED"|"MEASURING_STEP_1"|"MEASURING_STEP_3"|"MEASURING_DRIFT"|"CALIBRATING"}
-     ← До C-2: повертає лише IDLE_NO_COIN/COIN_PRESENT/COIN_REMOVED (базові стани LDC1101Plugin::getCoinState())
-     ← Після C-2: повні стани multi-position state machine
-     ← Критично для Web UI: клієнт polls цей endpoint під час calibrate() (2.5 сек) замість timeout
+     ← {"state":"IDLE_NO_COIN"|"IDLE_COIN_PRESENT"|"MEASURING_STEP_BASE"|"MEASURING_STEP_1"|"MEASURING_STEP_3"|"MEASURING_STEP_DRIFT"|"MEASURING_COMPUTE"}
+     ← hw-verified 2026-03-24 (C-4): всі 7 станів пройдено в T1–T6
+     ← Критично для Web UI: клієнт polls цей endpoint під час вимірювання замість timeout
 
 GET  /api/v1/ota/status
      ← NVS "ota": version, latest, update_available
