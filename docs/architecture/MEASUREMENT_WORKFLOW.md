@@ -29,19 +29,18 @@ MeasState (enum class, uint8_t):
 
  IDLE
   │
-  ├── auto-start: свіжа поява монети  ──────────────────────┐
   └── HTTP start: POST /measure/start + coin present + LFS  │
                                                              ▼
                                                         STEP_BASE
-                                                        (d ≈ 1.5 mm — монета на tray)
+                                                        (d ≈ 1.4 mm — монета в капсулі на tray)
                                                              │ ENTER
                                                              ▼
                                                          STEP_1
-                                                        (+1 mm spacer, d ≈ 2.5 mm)
+                                                        (+1 mm spacer, d ≈ 2.4 mm)
                                                              │ ENTER
                                                              ▼
                                                          STEP_3
-                                                        (+3 mm spacer, d ≈ 4.5 mm)
+                                                        (+2 mm spacer, d ≈ 3.4 mm)
                                                              │ ENTER
                                                              ▼
                                                         STEP_DRIFT
@@ -188,9 +187,9 @@ if (millis() - sMeas.stepMs > 120000UL) {
 |---|---|---|
 | `gLDC != nullptr` | loop() — guard `if (gLDC && gLDC->isReady())` | auto + HTTP старт ігноруються |
 | `gLDC->isReady()` | те ж | те ж |
-| `coinState == COIN_PRESENT` | auto-start + HTTP-start | auto: не стартує; HTTP: 503 |
-| `gLFS.isDataMounted()` | auto-start + HTTP-start | auto: не стартує; HTTP: 503 |
-| `sMeas.state == IDLE` | auto-start + HTTP-start | auto: не стартує; HTTP: 409 |
+| `coinState == COIN_PRESENT` | HTTP-start | HTTP: 503 |
+| `gLFS.isDataMounted()` | HTTP-start | HTTP: 503 |
+| `sMeas.state == IDLE` | HTTP-start | HTTP: 409 |
 
 ---
 
@@ -228,11 +227,10 @@ Endpoint повертає поточний `MeasState`, відображаючи
 
 | Component | Message | Значення |
 |---|---|---|
-| `Meas` | `Coin placed — session started (STEP_BASE)` | auto-start |
 | `Meas` | `HTTP start: session started (STEP_BASE)` | HTTP-start |
 | `Meas` | `BASE : RP=XXXX  L=YYYY` | ENTER на STEP_BASE |
 | `Meas` | `1mm  : RP=XXXX  L=YYYY` | ENTER на STEP_1 |
-| `Meas` | `3mm  : RP=XXXX  L=YYYY` | ENTER на STEP_3 |
+| `Meas` | `2mm  : RP=XXXX  L=YYYY` | ENTER на STEP_3 |
 | `Meas` | `DRIFT: RP=XXXX` | ENTER на STEP_DRIFT |
 | `Meas` | `Drift X.X% > 5% — conf forced=0` | driftWarn |
 | `Meas` | `Vec: dRp1=…  k1=…  k2=…  slope=…  dL1=…` | вектор |

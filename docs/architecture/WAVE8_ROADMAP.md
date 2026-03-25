@@ -1,8 +1,8 @@
 # Wave 8 Roadmap — Connectivity + Infrastructure + Sensor Integration
 
-**Статус:** 🔄 In Progress — Фаза 2 — Sensor Integration (C-1 ✅ `6628487`, C-2 ✅ `313b179`, C-4 ✅ hw-verified → **spacer hw-session або C-5 НАСТУПНІЙ**)  
-**Версія:** 2.1.0  
-**Дата:** 2026-03-24 (оновлено після C-4 hw-верифікації: sensor/state real MeasState + POST measure/start 202/409)
+**Статус:** 🔄 In Progress — Фаза 2 — Sensor Integration (C-1 ✅ `6628487`, C-2 ✅ `313b179`, C-4 ✅ hw-verified → **C-5 НАСТУПНІЙ після hw-сесії зі спейсерами 0/1/2мм**)
+**Версія:** 2.2.0
+**Дата:** 2026-03-25 (p2 protocol: спейсер 3мм→2мм, detect 0.85→0.90, release 0.92→0.96, авто-старт прибрано)
 **Попередня хвиля:** Wave 7 — Storage Foundation (`d53a440`, 84/84 native tests, hardware verified)
 **Cross-ref:** `docs/architecture/MEMORY_MAP.md` — детальна карта Flash/SRAM/Heap (hw-verified 2026-03-18)
 
@@ -54,7 +54,7 @@ Cross-ref: [STORAGE_ARCHITECTURE.md §15](./STORAGE_ARCHITECTURE.md), [CONNECTIV
 | **Vector computation math** | ✅ | **C-3\*** | **9/9 native tests PASSED, OLS slope верифіковано** |
 | `POST /api/v1/measure/start` | ⚠️ partial | A-3 | ✅ Stub реалізовано: `503 sensor_not_ready` до C-2 |
 | WebSocket sensor frames | ⚠️ partial | A-6 | Stub → real після C-2 |
-| R-01 → real protocol_id | ✅ done | C-1 | `"p1_MIKROE3240_024mm"` hw-verified (`6628487`) |
+| R-01 → real protocol_id | ✅ done | C-1 | `"p2_MIKROE3240_024mm"` hw-verified (`6628487`) |
 | Multi-position state machine | ✅ done | C-2 | hw-verified: session trigger (`313b179`) |
 | queryFingerprint() wiring | ✅ done | C-4 | hw-verified 2026-03-24 — sensor/state real MeasState + POST measure/start |
 | FingerprintCache σ tuning | ⚡ НАСТУПНИЙ | C-5 | Потребує реальних монет (spacer hw-session) |
@@ -197,7 +197,7 @@ GET  /api/v1/database
      ← FingerprintCache::entryCount() + список metal_code груп
 
 POST /api/v1/database/match            ← КЛЮЧОВИЙ для pre-sensor розробки UI
-     body: {"algo_ver":1,"protocol_id":"p1_UNKNOWN_013mm","vector":{...}}
+     body: {"algo_ver":1,"protocol_id":"p2_MIKROE3240_024mm","vector":{...}}
      ← ctx->storage->queryFingerprint() → top-N FPMatch
      ← 400 якщо відсутній vector або значення поза BOUNDS
      ← 503 якщо FingerprintCache не завантажений
@@ -479,11 +479,11 @@ if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
 4. Оновити NVS "sensor"."proto_id" (в коді та seed data)
 
 **Оновити після R-01:**
-- `data/plugins/ldc1101.json` — замінити "p1_UNKNOWN_013mm"
+- `data/plugins/ldc1101.json` — замінити "p2_MIKROE3240_024mm"
 - `FINGERPRINT_DB_ARCHITECTURE.md §7` — "Frozen physical constants"
 - Всі 5 synthetic seed entries в `data/plugins/ldc1101.json`
 
-> ⚠️ До R-01 — жоден запис **не публікувати** в community DB. `protocol_id = "p1_UNKNOWN_013mm"` робить їх community-incompatible (мовчазна несумісність при зміні protocol_id).
+> ⚠️ До R-01 — жоден запис **не публікувати** в community DB. `protocol_id = "p2_MIKROE3240_024mm"` робить їх community-incompatible (мовчазна несумісність при зміні protocol_id).
 
 ---
 
@@ -501,7 +501,7 @@ IDLE ──── coin placed ────►  STEP_BASE  rp[0],l[0]   ← мо�
                                 ▼
                              STEP_1   rp[1],l[1]
                                 │
-                 keyboard 'ENTER': "Place on 3mm spacer, press ENTER"
+                 keyboard 'ENTER': "Place on 2mm spacer, press ENTER"
                            (timeout 120s → abort → IDLE)
                                 ▼
                              STEP_3   rp[2],l[2]    ← назва STEP_3 = дистанція
@@ -570,7 +570,7 @@ inline float k1(const Measurement& m) {
     return m.rp[1] / m.rp[0];
 }
 
-// k2 = Rp(3mm) / Rp(0mm)  [dimensionless, 0..1]
+// k2 = Rp(2mm) / Rp(0mm)  [dimensionless, 0..1]
 // Second spatial ratio; combined with k1 gives 2D metal signature.
 inline float k2(const Measurement& m) {
     if (m.rp[0] < 1.0f) return 0.0f;
@@ -762,7 +762,7 @@ A-7  BLE GATT → відкладено до v2 PSRAM    (current hw: ~30 KB free
 
 ### Wave 8 фаза 2 (після LDC1101):
 
-- [x] R-01: fSENSOR=909.2 kHz, `protocol_id="p1_MIKROE3240_024mm"` hw-verified — commit `6628487`
+- [x] R-01: fSENSOR=909.2 kHz, `protocol_id="p2_MIKROE3240_024mm"` hw-verified — commit `6628487`
 - [~] Multi-position: реалізовано commit `313b179`; hw-verified: coin placed → STEP_BASE ✅, timeout 120s → abort ✅ (119962ms hw-measured); тест 7 (`GET /sensor/state` real MeasState) ✅ C-4; повний 4-step flow потребує hw-тесту з реальними spacers; WebSocket result frame — після A-6
 - [x] `GET /api/v1/sensor/state` → real MeasState (`MEASURING_STEP_BASE/1/3/DRIFT`, `IDLE_COIN_PRESENT`, `IDLE_NO_COIN`) — hw-verified 2026-03-24 (C-4)
 - [x] `POST /api/v1/measure/start` → `202 {"started":true}` (coin present, IDLE) + `409 already_measuring` (session active) — hw-verified 2026-03-24 (C-4)
@@ -780,5 +780,6 @@ A-7  BLE GATT → відкладено до v2 PSRAM    (current hw: ~30 KB free
 *Версія 1.3.0 — B-3 GPIO0 recovery hw-verified: пристрій перезавантажується при утриманні G0 під час 3s splash-вікна; `LittleFSManager::formatData()` додано; `RTC_DATA_ATTR gRtcBootReason` для boot reason tracking; визуальний countdown на дисплеї. Попередня: v1.2.0 — Phase 1 batch B+C-3 реалізовано: B-3 GPIO0 recovery (`src/main.cpp`); C-3 `VectorCompute.h/.cpp` + OLS slope; B-1 `Preferences.h` in-memory KV mock + `test_nvs_manager/`; B-2 `loadTestEntry()` + `test_fingerprint_cache/`; `platformio.ini` розширено. 108/108 native tests PASSED. Наступний крок: A-1 WiFiManager.*  
 *Версія 1.3.1 — [B-3-audit-fix] впроваджено 2 знахідки B3_Delta_Independent_Audit: Fix 1 — early-exit GPIO0 window (200ms quick poll, boot penalty 3000→200ms); Fix 2 — `formatData()` SAFETY comment (R-02 race condition); D-01 portability note (USB-CDC vs UART bridge). STORAGE_ARCHITECTURE → v1.8.1.*  
 *Версія 1.4.0 — A-1 WiFiManager реалізовано та hw-verified (2026-03-17): `lib/WiFiManager/src/WiFiManager.h/.cpp` (AP+STA, `promptSTA()` keyboard provisioning); `PluginContext.h` розширено полем `WiFiManager* wifi`; `main.cpp` step [10] §17.2 + 'W' key handler; `platformio.ini` коментар виправлено. Bug fix: `buildAPSsid()` використовує `esp_efuse_mac_get_default()` замість `WiFi.macAddress()` (driver not yet init). AP hw-verified: SSID `CoinTrace-F974` видно на телефоні, підключення успішне. RAM: 60.4% (+8% WiFi stack). 108/108 native tests PASSED. Наступний крок: A-2 AsyncWebServer.*  
+*Версія 2.2.0 — p2 protocol (2026-03-25): спейсер STEP_3 змінено 3мм→2мм (ефективні відстані 1.4/2.4/3.4мм — узгоджено з фізичною моделлю та hw-тестуванням Ag999 у капсулі); `coin_detect_threshold` 0.85→0.90, `coin_release_threshold` 0.92→0.96 (гістерезис 6%); авто-старт сесії прибрано (тільки HTTP POST /measure/start); seed data protocol_id + steps_mm оновлено. Наступний: hw-сесія з новими спейсерами → C-5 σ tuning.*
 *Версія 2.1.0 — C-4 hw-verified (2026-03-24): `GET /api/v1/sensor/state` → real MeasState (MEASURING\_STEP\_BASE/1/3/DRIFT, IDLE\_COIN\_PRESENT, IDLE\_NO\_COIN); `POST /api/v1/measure/start` → 202/409/503; volatile `gMeasStartRequested` flag + lambda injection via `gHttp.setSensorState()`. T1–T6 hw-verified. RAM=61.7% Flash=57.4%. Наступний: spacer hw-session (C-2 тести 2/4/5/6) → C-5 σ tuning.*  
-*Версія 2.0.0 — C-1 + C-2 hw-verified (2026-03-24): C-1 — `protocol_id="p1_MIKROE3240_024mm"` зафіксовано, NVSManager migration, Measurement.h розширено, HttpServer.cpp повертає protocol\_id (commit `6628487`); C-2 — `MeasState` enum + `MeasSession` struct, auto-start на edge COIN\_PRESENT, ENTER/Bksp handlers, 120s per-step timeout, drift check, `doMeasCompute()` (VectorCompute+FP query+save), display step/result/idle з partial redraw (commit `313b179`). LFS task stack 3072→3584 B (308→820 B headroom). hw-verified: coin placed → `Meas | Coin placed — session started (STEP_BASE)`. RAM=61.7% Flash=57.4%. Наступний: C-4 queryFingerprint() wiring.*
+*Версія 2.0.0 — C-1 + C-2 hw-verified (2026-03-24): C-1 — `protocol_id="p2_MIKROE3240_024mm"` зафіксовано, NVSManager migration, Measurement.h розширено, HttpServer.cpp повертає protocol\_id (commit `6628487`); C-2 — `MeasState` enum + `MeasSession` struct, auto-start на edge COIN\_PRESENT, ENTER/Bksp handlers, 120s per-step timeout, drift check, `doMeasCompute()` (VectorCompute+FP query+save), display step/result/idle з partial redraw (commit `313b179`). LFS task stack 3072→3584 B (308→820 B headroom). hw-verified: coin placed → `Meas | Coin placed — session started (STEP_BASE)`. RAM=61.7% Flash=57.4%. Наступний: C-4 queryFingerprint() wiring.*

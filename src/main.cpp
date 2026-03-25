@@ -77,15 +77,15 @@ constexpr uint32_t kOtaRollbackMs  = 60000;       // 60-second confirm deadline
 
 // ── C-2 Multi-position Measurement State Machine ────────────────────────────
 // WAVE8_ROADMAP.md §C-2 — 4-position fingerprint acquisition.
-// Positions: tray-floor (d≈1.5mm) → +1mm spacer → +3mm spacer → drift-check.
+// Positions: tray-floor (d≈1.4mm) → +1mm spacer (d≈2.4mm) → +2mm spacer (d≈3.4mm) → drift-check.
 // Trigger: fresh coin placement (edge IDLE_NO_COIN → COIN_PRESENT).
 // Advance:  ENTER key captures current RP/L reading and moves to next step.
 // Abort:    Backspace or 120-second step timeout → IDLE.
 enum class MeasState : uint8_t {
-    IDLE,        // awaiting fresh coin placement (auto-start on COIN_PRESENT edge)
-    STEP_BASE,   // coin on tray floor (d≈1.5mm) — press ENTER → rp[0]/l[0]
-    STEP_1,      // +1mm spacer       (d≈2.5mm) — press ENTER → rp[1]/l[1]
-    STEP_3,      // +3mm spacer       (d≈4.5mm) — press ENTER → rp[2]/l[2]
+    IDLE,        // awaiting ENTER or HTTP /measure/start trigger
+    STEP_BASE,   // coin on tray floor (d≈1.4mm) — press ENTER → rp[0]/l[0]
+    STEP_1,      // +1mm spacer        (d≈2.4mm) — press ENTER → rp[1]/l[1]
+    STEP_3,      // +2mm spacer        (d≈3.4mm) — press ENTER → rp[2]/l[2]
     STEP_DRIFT,  // remove spacers, back on tray  — press ENTER → rp[3] (drift)
     COMPUTE      // auto: vector → FP query → save → show result → IDLE
 };
@@ -784,7 +784,7 @@ void loop() {
                     break;
                   case MeasState::STEP_3:
                     sMeas.m.rp[2] = d.value1;  sMeas.m.l[2] = d.value2;
-                    gLogger.info("Meas", "3mm  : RP=%.0f  L=%.0f", d.value1, d.value2);
+                    gLogger.info("Meas", "2mm  : RP=%.0f  L=%.0f", d.value1, d.value2);
                     sMeas.state  = MeasState::STEP_DRIFT;
                     sMeas.stepMs = millis();
                     drawMeasStep_full(sMeas, (uint16_t)d.value1);
@@ -856,31 +856,11 @@ void loop() {
         sMeas.m.ts    = millis() / 1000;
         strlcpy(sMeas.m.metal_code,  "UNKN",                sizeof(sMeas.m.metal_code));
         strlcpy(sMeas.m.coin_name,   "Unclassified",        sizeof(sMeas.m.coin_name));
-        strlcpy(sMeas.m.protocol_id, "p1_MIKROE3240_024mm", sizeof(sMeas.m.protocol_id));
+        strlcpy(sMeas.m.protocol_id, "p2_MIKROE3240_024mm", sizeof(sMeas.m.protocol_id));
         drawMeasStep_full(sMeas);
         gLogger.info("Meas", "HTTP start: session started (STEP_BASE)");
       }
     }
-
-    // ── Auto-start on fresh coin placement ────────────────────────────────
-    // Edge detection prevents re-triggering while coin stays present after
-    // a completed session (sPrevCoinState stays COIN_PRESENT → no new edge).
-    static LDC1101Plugin::CoinState sPrevCoinState = LDC1101Plugin::CoinState::IDLE_NO_COIN;
-    if (sMeas.state == MeasState::IDLE &&
-        coinState    == LDC1101Plugin::CoinState::COIN_PRESENT &&
-        sPrevCoinState != LDC1101Plugin::CoinState::COIN_PRESENT &&
-        gLFS.isDataMounted()) {
-      sMeas = {};
-      sMeas.state   = MeasState::STEP_BASE;
-      sMeas.stepMs  = millis();
-      sMeas.m.ts    = millis() / 1000;
-      strlcpy(sMeas.m.metal_code,  "UNKN",                sizeof(sMeas.m.metal_code));
-      strlcpy(sMeas.m.coin_name,   "Unclassified",        sizeof(sMeas.m.coin_name));
-      strlcpy(sMeas.m.protocol_id, "p1_MIKROE3240_024mm", sizeof(sMeas.m.protocol_id));
-      drawMeasStep_full(sMeas);
-      gLogger.info("Meas", "Coin placed — session started (STEP_BASE)");
-    }
-    sPrevCoinState = coinState;
 
     // ── Periodic live RP + countdown update (every 1 s, no flicker) ───────
     if (sMeas.state >= MeasState::STEP_BASE && sMeas.state <= MeasState::STEP_DRIFT) {

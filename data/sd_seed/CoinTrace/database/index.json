@@ -2,11 +2,11 @@
   "version": 1,
   "generated_at": "2026-03-16T10:00:00Z",
   "generation": 1,
-  "protocols": ["p1_UNKNOWN_013mm"],
+  "protocols": ["p2_MIKROE3240_024mm"],
   "entries": [
     {
       "id":           "xag999/synthetic",
-      "protocol_id":  "p1_UNKNOWN_013mm",
+      "protocol_id":  "p2_MIKROE3240_024mm",
       "metal_code":   "XAG999",
       "coin_name":    "Test Silver 999 (synthetic)",
       "year":         null,
@@ -16,7 +16,7 @@
     },
     {
       "id":           "xag925/synthetic",
-      "protocol_id":  "p1_UNKNOWN_013mm",
+      "protocol_id":  "p2_MIKROE3240_024mm",
       "metal_code":   "XAG925",
       "coin_name":    "Test Silver 925 (synthetic)",
       "year":         null,
@@ -26,7 +26,7 @@
     },
     {
       "id":           "xag833/synthetic",
-      "protocol_id":  "p1_UNKNOWN_013mm",
+      "protocol_id":  "p2_MIKROE3240_024mm",
       "metal_code":   "XAG833",
       "coin_name":    "Test Silver 833 (synthetic)",
       "year":         null,
@@ -36,7 +36,7 @@
     },
     {
       "id":           "xcu/synthetic",
-      "protocol_id":  "p1_UNKNOWN_013mm",
+      "protocol_id":  "p2_MIKROE3240_024mm",
       "metal_code":   "XCU",
       "coin_name":    "Test Copper (synthetic)",
       "year":         null,
@@ -46,7 +46,7 @@
     },
     {
       "id":           "xni/synthetic",
-      "protocol_id":  "p1_UNKNOWN_013mm",
+      "protocol_id":  "p2_MIKROE3240_024mm",
       "metal_code":   "XNI",
       "coin_name":    "Test Nickel (synthetic, ferromagnetic)",
       "year":         null,

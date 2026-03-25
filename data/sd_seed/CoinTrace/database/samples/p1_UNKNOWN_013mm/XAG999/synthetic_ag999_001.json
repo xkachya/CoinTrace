@@ -7,9 +7,9 @@
     "metal_name": "Silver 999"
   },
   "conditions": {
-    "protocol_id":    "p1_UNKNOWN_013mm",
-    "freq_hz":        1000000,
-    "steps_mm":       [0, 1, 3],
+    "protocol_id":    "p2_MIKROE3240_024mm",
+    "freq_hz":        909200,
+    "steps_mm":       [0, 1, 2],
     "coil_model":     "MIKROE-3240",
     "coil_turns":     null,
     "resp_time_code": 6

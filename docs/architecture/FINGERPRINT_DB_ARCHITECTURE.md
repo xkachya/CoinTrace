@@ -238,7 +238,7 @@ algo_ver = 1:
 > - Не записує `"complete": true` в `m_XXX.json` → вимір вважається failed та відкидається
 
 **Зверніть увагу:** `slope_rp_per_mm_lr` — Variant C, 3 точки:
-- вісь X: відстані зі `steps_mm` в мм: `[0, 1, 3]`
+- вісь X: відстані зі `steps_mm` в мм: `[0, 1, 2]`
 - вісь Y: нормалізований ΔRp/ΔRp1: `[1.0, k1, k2]` — Y(0mm) = **1.0**, не 0
 - метод: linear regression (least squares) по всіх трьох точках
 - одиниці: `1/мм` (безрозмірне на мм)
@@ -636,14 +636,15 @@ database/
 
 ## 7. Frozen physical constants
 
-Ці константи заморожуються **per `protocol_id`**: для `p1_MIKROE3240_024mm` їх значення незмінні назавжди. Змінити або поекспериментувати = зареєструвати новий `protocol_id` + власна папка в `database/samples/`. `protocol_ver` при цьому **не зростає**.
+Ці константи заморожуються **per `protocol_id`**: для `p2_MIKROE3240_024mm` їх значення незмінні назавжди. Змінити або поекспериментувати = зареєструвати новий `protocol_id` + власна папка в `database/samples/`. `protocol_ver` при цьому **не зростає**.
 
-> **hw-verified 2026-03-23 (S-4):** `protocol_id = "p1_MIKROE3240_024mm"` — визначено на реальному hardware. Попередній placeholder `"p1_UNKNOWN_013mm"` скасовано. Діаметр котушки 24mm (покриття 97.9% монетою 23.5mm), fSENSOR=909.2 kHz, C=330pF, L≈92.8µH.
+> **hw-verified 2026-03-23 (S-4):** fSENSOR=909.2 kHz, C=330pF, L≈92.8µH, діаметр котушки 24mm.
+> **2026-03-25 (p2):** spacer STEP_3 змінено 3мм→2мм (ефективні відстані 1.4/2.4/3.4мм), підтверджено hw-тестом з Ag999 у капсулі. Попередній placeholder `"p1_UNKNOWN_013mm"` скасовано.
 
-| Константа | Значення для `p1_MIKROE3240_024mm` | де зараз | Ризик |
+| Константа | Значення для `p2_MIKROE3240_024mm` | де зараз | Ризик |
 |-----------|----------------------------------|---------|-------|
 | `fSENSOR` | **909 200 Hz** (hw-verified S-4) | `NVSManager.cpp` default | Змінюється від котушки до котушки |
-| Measurement distances | [base, 1mm, 3mm] мм | Документація + C-2 code | Spacer ≠ точно 1.000 / 3.000 мм |
+| Measurement distances | [base, 1mm, 2mm] мм | Документація + C-2 code | Spacer ≠ точно 1.000 / 2.000 мм |
 | `RESP_TIME` | bits=7 (6144 cycles) | `ldc1101.json` | Впливає на SNR |
 | `min_freq_nibble` | 6 (threshold=800 kHz) | `ldc1101.json` | < 6 ризик DRDYB при феромагн. |
 | Котушка | MIKROE-3240 (24mm) | BOM | Заміна → інша геометрія |
@@ -697,8 +698,8 @@ database/
 
 **Точна формула (Variant C — 3 точки, фізично коректна):**
 ```
-X = [0, 1, 3]              // steps_mm
-Y = [1.0, k1, k2]          // норм. крива: Y(0mm)=1.0, Y(1mm)=k1, Y(3mm)=k2
+X = [0, 1, 2]              // steps_mm
+Y = [1.0, k1, k2]          // норм. крива: Y(0mm)=1.0, Y(1mm)=k1, Y(2mm)=k2
 N = 3
 slope = (N·Σ(XY) - ΣX·ΣY) / (N·Σ(X²) - (ΣX)²)  // standard LR (least squares)
 
@@ -826,5 +827,5 @@ Firmware вибирає папку за `conditions.protocol_id` запису.
 
 ---
 
-*Версія документа: 1.5.0 — 2026-03-12*  
+*Версія документа: 1.6.0 — 2026-03-25*  
 *Версія 1.5.0 — [FDB-02] §3.1 canonical: l1=1186.5, dL1=18.0 µH [R-02 теоретичні значення]; [FDB-03] dRp1_MAX 600→800 Ohm (Variant M), DRPL1_MAX=800, норм. /800; [FDB-04] validate_fingerprint.py ADR-DB-003 auto-recompute block; [FDB-05] index.json "generation" counter (Variant G), note + CI; [FDB-06] dRp1≤0 firmware behavior spec.*
