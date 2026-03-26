@@ -139,6 +139,7 @@ These are **compile-time** allocations. They consume RAM before `main()` / `setu
 | BLE stack reservation | framework | ~8 KB | BSS (not used, but linked) |
 | Arduino framework buffers | framework | ~8 KB | BSS |
 | `gLogger` + transports | objects | ~0.5 KB | BSS |
+| `gMatcher` (MetalMatcher) | object | ~48 B | BSS (після C-7) |
 | All other `g*` globals | objects | ~3 KB | BSS |
 | **Total** | | **≈ 202 KB** | |
 

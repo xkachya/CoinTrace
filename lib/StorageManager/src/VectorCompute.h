@@ -14,11 +14,20 @@
 //   dL1_n  = dL1(m)  / 2000.0f      [dL1_MAX  = 2000 µH]
 //   k1, k2, slope — dimensionless, no normalization needed
 //
-// Wave 8 C-2 multi-position semantics (Measurement.h):
-//   rp[0] = reading at 0mm (contact)
-//   rp[1] = reading at 1mm spacer
-//   rp[2] = reading at 3mm spacer
-//   rp[3] = drift check (return to 0mm) — NOT used in vector computation
+// Wave 8 C-2 multi-position semantics / p3 protocol (Measurement.h):
+//   rp[0] = reading at 0.6mm base spacer (d≈0.6mm — bare coin, no capsule)
+//   rp[1] = reading at 0.6mm + 1mm spacer (d≈1.6mm)
+//   rp[2] = reading at 0.6mm + 2mm spacer (d≈2.6mm)  ← p3: was 3.4mm in p2
+//   rp[3] = drift check (return to base) — NOT used in vector computation
+//
+// ⚠️ MATH NOTE — slope() with uniform x={0,1,2} (p3 protocol):
+//   OLS closed form simplifies to: slope = (k2 − 1) / 2
+//   This is a linear transform of k2 → slope adds ZERO independent information
+//   to the fingerprint vector when x is uniformly spaced.
+//   Consequence: full_weights[3] (slope) should be 0.0 in matcher.json for p3.
+//   Formula update (x={0,1,2}) + synthetic DB slope recomputation deferred to
+//   Wave 8 C-5 (first real hw measurements) to avoid breaking 9/9 native tests.
+//   See WAVE8_ROADMAP.md §C-5 and VectorCompute.cpp ⚠️ TODO.
 
 #pragma once
 #include "Measurement.h"
@@ -45,7 +54,7 @@ inline float k1(const Measurement& m) {
     return m.rp[1] / m.rp[0];
 }
 
-// k2 = Rp(3mm) / Rp(0mm)  [dimensionless, 0.0..1.0]
+// k2 = Rp(2mm) / Rp(0mm)  [dimensionless, 0.0..1.0]   ← p3: spacer offset from 0.6mm base
 // Second spatial normalization ratio. Combined with k1 gives 2D metal signature.
 // k1 ≈ k2 → flat curve (poor conductors); k1 >> k2 → steep curve (good conductors).
 inline float k2(const Measurement& m) {
@@ -54,10 +63,11 @@ inline float k2(const Measurement& m) {
 }
 
 // slope = OLS linear regression coefficient of Rp vs distance  [1/mm]
-// Points: (0mm, rp[0]/rp[0]=1.0), (1mm, rp[1]/rp[0]=k1), (3mm, rp[2]/rp[0]=k2)
-// Formula: OLS slope = (Σxy − n·x̄·ȳ) / (Σx² − n·x̄²)
-//   x = {0, 1, 3},  x̄ = 4/3
-//   y = {1, k1, k2}, ȳ = (1 + k1 + k2) / 3
+// Points: (0mm, rp[0]/rp[0]=1.0), (1mm, rp[1]/rp[0]=k1), (2mm, rp[2]/rp[0]=k2)
+// ⚠️ FORMULA PENDING UPDATE (see file header — Wave 8 C-5):
+//   Current impl uses p1 constants x={0,1,3} / x̄=4/3 / Sxx=14/3.
+//   Correct p3 constants: x={0,1,2} / x̄=1 / Sxx=2 → slope=(k2−1)/2.
+//   Formula unchanged to preserve 9/9 passing native tests until C-5 DB reseed.
 // Typically negative (−0.05 .. −0.20): Rp/Rp0 decreases with distance.
 // Non-inline: OLS requires 6+ arithmetic ops — kept in VectorCompute.cpp.
 float slope(const Measurement& m);

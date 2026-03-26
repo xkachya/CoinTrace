@@ -3,11 +3,11 @@
   "algo_ver": 1,
   "protocol_ver": 1,
   "coin": {
-    "metal_code": "XAG925",
-    "metal_name": "Silver 925"
+    "metal_code": "XCU",
+    "metal_name": "Copper"
   },
   "conditions": {
-    "protocol_id":    "p2_MIKROE3240_024mm",
+    "protocol_id":    "p3_MIKROE3240_b06_012mm",
     "freq_hz":        909200,
     "steps_mm":       [0, 1, 2],
     "coil_model":     "MIKROE-3240",
@@ -15,19 +15,19 @@
     "resp_time_code": 6
   },
   "raw": {
-    "rp0": 10200.0,
-    "rp1": 10545.0,
-    "rp2": 10496.0,
-    "rp3": 10403.9,
-    "l0":  1200.0,
-    "l1":  1181.5
+    "rp0": 9800.0,
+    "rp1": 10090.0,
+    "rp2": 10037.8,
+    "rp3": 9958.1,
+    "l0":  1210.0,
+    "l1":  1195.0
   },
   "vector": {
-    "dRp1":               345.0,
-    "k1":                 0.8580,
-    "k2":                 0.5910,
-    "slope_rp_per_mm_lr": -0.1359,
-    "dL1":                18.5
+    "dRp1":               290.0,
+    "k1":                 0.8200,
+    "k2":                 0.5450,
+    "slope_rp_per_mm_lr": -0.1496,
+    "dL1":                15.0
   },
   "metadata": {
     "device_id":         "CoinTrace-SYNTH",

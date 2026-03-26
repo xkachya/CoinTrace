@@ -11,10 +11,14 @@
 
 CoinTrace визначає метал монети через 4-позиційний вимір паразитного опору (RP) датчика LDC1101 при різних відстанях котушка–монета. Результат зберігається в LittleFS_data та відображається на екрані Cardputer.
 
-**Три шляхи запуску:**
-1. **Автоматичний** — монета покладена на котушку (edge-детекція)
-2. **HTTP** — POST `/api/v1/measure/start` (Web UI або HTTP-клієнт)
-3. *(Keyboard start не реалізований; ENTER лише просуває кроки)*
+**Два шляхи запуску:**
+1. **HTTP** — POST `/api/v1/measure/start` (Web UI або HTTP-клієнт)
+2. **ENTER у Quick Screen** — клавіша ENTER при IDLE + COIN_PRESENT (QUICK_SCREEN_SPEC.md)
+
+> ⚠️ **Автоматичний запуск (edge-детекція) ВИЛУЧЕНО 2026-03-25.**
+> `sPrevCoinState` edge-block видалено з `main.cpp`. Монета на котушці більше
+> не запускає сесію автоматично — відображається Quick Screen (IDLE sub-mode)
+> і чекає на явний ENTER або HTTP trigger.
 
 **Дві передумови запуску (обидві обовʼязкові):**
 - `gLDC->getCoinState() == COIN_PRESENT`
@@ -32,15 +36,15 @@ MeasState (enum class, uint8_t):
   └── HTTP start: POST /measure/start + coin present + LFS  │
                                                              ▼
                                                         STEP_BASE
-                                                        (d ≈ 1.4 mm — монета в капсулі на tray)
+                                                        (d ≈ 0.6 mm — bare coin on base spacer)
                                                              │ ENTER
                                                              ▼
                                                          STEP_1
-                                                        (+1 mm spacer, d ≈ 2.4 mm)
+                                                        (+1 mm spacer, d ≈ 1.6 mm)
                                                              │ ENTER
                                                              ▼
                                                          STEP_3
-                                                        (+2 mm spacer, d ≈ 3.4 mm)
+                                                        (+2 mm spacer, d ≈ 2.6 mm)
                                                              │ ENTER
                                                              ▼
                                                         STEP_DRIFT
@@ -59,30 +63,19 @@ MeasState (enum class, uint8_t):
 
 ---
 
-## 3. Автозапуск (edge-детекція)
+## 3. ~~Автозапуск (edge-детекція)~~ — ВИЛУЧЕНО 2026-03-25
 
-```cpp
-// src/main.cpp — loop()
-static LDC1101Plugin::CoinState sPrevCoinState = CoinState::IDLE_NO_COIN;
-
-if (sMeas.state == MeasState::IDLE &&
-    coinState    == CoinState::COIN_PRESENT &&
-    sPrevCoinState != CoinState::COIN_PRESENT &&  // лише свіжий фронт!
-    gLFS.isDataMounted()) {
-    // … запуск сесії …
-}
-sPrevCoinState = coinState;  // оновлюється щотіку
-```
-
-**Ключова поведінка `sPrevCoinState`:**
-
-| Ситуація | Edge? | Сесія стартує? |
-|---|---|---|
-| Монета покладена з нуля (IDLE_NO_COIN → COIN_PRESENT) | ✅ | ✅ |
-| Монету залишено після завершеної сесії (обидва COIN_PRESENT) | ❌ | ❌ |
-| Монета знята та покладена знову | ✅ | ✅ |
-
-Це запобігає повторному автозапуску, якщо монета залишається на котушці після результату.
+> **Статус:** Код видалено з `src/main.cpp`.
+> Блок `sPrevCoinState` edge-detection та auto-start повністю вилучено.
+>
+> **Причина:** автоматичний запуск повного циклу при укладанні монети не влаштовував
+> користувача. Замість цього реалізовано **Quick Screen** (QUICK_SCREEN_SPEC.md) —
+> IDLE sub-mode що відображає live ΔRp% та ΔL при COIN_PRESENT без запуску сесії.
+>
+> **Поточна поведінка при COIN_PRESENT у IDLE:**
+> → автоматично відображається Quick Screen (live ΔRp%, ΔL, is_ferro, клас металу)
+> → ENTER → запускає повний цикл (STEP_BASE)
+> → HTTP POST /measure/start → те саме
 
 ---
 
@@ -160,7 +153,7 @@ doMeasCompute()  ← викликається одразу, не чекає на
 5. **Відображення:** `drawMeasResult(sMeas)` — залишається на екрані
 6. **Reset сесії:** `sMeas = {}` → `state = IDLE`
 
-Екран результату залишається до наступної свіжої появи монети (`sPrevCoinState` guard).
+Екран результату залишається до наступного укладання монети (перехід IDLE → Quick Screen перезаписує екран).
 
 ---
 

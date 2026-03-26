@@ -77,15 +77,16 @@ constexpr uint32_t kOtaRollbackMs  = 60000;       // 60-second confirm deadline
 
 // ── C-2 Multi-position Measurement State Machine ────────────────────────────
 // WAVE8_ROADMAP.md §C-2 — 4-position fingerprint acquisition.
-// Positions: tray-floor (d≈1.4mm) → +1mm spacer (d≈2.4mm) → +2mm spacer (d≈3.4mm) → drift-check.
-// Trigger: fresh coin placement (edge IDLE_NO_COIN → COIN_PRESENT).
+// Positions: base spacer 0.6mm (d≈0.6mm) → +1mm spacer (d≈1.6mm) → +2mm spacer (d≈2.6mm) → drift-check.
+// p3 protocol: bare coin (no capsule), 0.6mm 3D-printed base spacer (hw-verified 2026-03-26).
+// Trigger: HTTP POST /measure/start or keyboard ENTER at IDLE + COIN_PRESENT.
 // Advance:  ENTER key captures current RP/L reading and moves to next step.
 // Abort:    Backspace or 120-second step timeout → IDLE.
 enum class MeasState : uint8_t {
     IDLE,        // awaiting ENTER or HTTP /measure/start trigger
-    STEP_BASE,   // coin on tray floor (d≈1.4mm) — press ENTER → rp[0]/l[0]
-    STEP_1,      // +1mm spacer        (d≈2.4mm) — press ENTER → rp[1]/l[1]
-    STEP_3,      // +2mm spacer        (d≈3.4mm) — press ENTER → rp[2]/l[2]
+    STEP_BASE,   // base spacer 0.6mm  (d≈0.6mm) — press ENTER → rp[0]/l[0]
+    STEP_1,      // +1mm spacer        (d≈1.6mm) — press ENTER → rp[1]/l[1]
+    STEP_3,      // +2mm spacer        (d≈2.6mm) — press ENTER → rp[2]/l[2]
     STEP_DRIFT,  // remove spacers, back on tray  — press ENTER → rp[3] (drift)
     COMPUTE      // auto: vector → FP query → save → show result → IDLE
 };
@@ -147,9 +148,9 @@ static void drawMeasStep_full(const MeasSession& s, uint16_t rpLive = 0) {
     M5Cardputer.Display.setTextColor(WHITE);
     M5Cardputer.Display.setCursor(5, 36);
     switch (s.state) {
-        case MeasState::STEP_BASE:  M5Cardputer.Display.print("Coin on tray   (d = 1.5 mm)");    break;
-        case MeasState::STEP_1:     M5Cardputer.Display.print("Add 1mm spacer (d = 2.5 mm)");    break;
-        case MeasState::STEP_3:     M5Cardputer.Display.print("Add 3mm spacer (d = 4.5 mm)");    break;
+        case MeasState::STEP_BASE:  M5Cardputer.Display.print("Coin on base   (d~0.6 mm)");    break;
+        case MeasState::STEP_1:     M5Cardputer.Display.print("Add 1mm spacer (d~1.6 mm)");    break;
+        case MeasState::STEP_3:     M5Cardputer.Display.print("Add 2mm spacer (d~2.6 mm)");    break;
         case MeasState::STEP_DRIFT: M5Cardputer.Display.print("Remove spacers (back to tray)");  break;
         default: break;
     }
@@ -856,7 +857,7 @@ void loop() {
         sMeas.m.ts    = millis() / 1000;
         strlcpy(sMeas.m.metal_code,  "UNKN",                sizeof(sMeas.m.metal_code));
         strlcpy(sMeas.m.coin_name,   "Unclassified",        sizeof(sMeas.m.coin_name));
-        strlcpy(sMeas.m.protocol_id, "p2_MIKROE3240_024mm", sizeof(sMeas.m.protocol_id));
+        strlcpy(sMeas.m.protocol_id, "p3_MIKROE3240_b06_012mm", sizeof(sMeas.m.protocol_id));
         drawMeasStep_full(sMeas);
         gLogger.info("Meas", "HTTP start: session started (STEP_BASE)");
       }

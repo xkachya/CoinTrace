@@ -8,12 +8,25 @@ namespace VectorCompute {
 
 // slope()  — OLS linear regression of normalized Rp over 3 distances.
 //
+// ⚠️ TODO Wave 8 C-5: formula uses p1 protocol constants (x={0,1,3}).
+//   p3 protocol (0.6mm base + 0/+1/+2mm spacers) has uniform x={0,1,2}:
+//     x_mean = 1.0  (was 4/3)
+//     Sxx    = 2.0  (was 14/3)
+//     x3 term = 2.0  (was 3.0)
+//   With x={0,1,2}: slope = (k2 − 1) / 2  — purely a linear transform of k2.
+//   This means slope contributes ZERO independent information to the fingerprint
+//   vector with p3 protocol. Consequence: set full_weights[3]=0.0 in matcher.json.
+//   Formula update deferred: requires reseed of synthetic DB slope centroids AND
+//   update of test_slope_ols_ground_truth expected value (−0.121 → −0.1944 for Ag925).
+//
+// Current implementation (p1 formula — kept for test compatibility until C-5):
+//
 // Input points (xi, yi):
 //   (0mm, rp[0]/rp[0]) = (0, 1.0)
 //   (1mm, rp[1]/rp[0]) = (1, k1)
-//   (3mm, rp[2]/rp[0]) = (3, k2)
+//   (2mm, rp[2]/rp[0]) = (2, k2)   ← physical position (p3); formula below still uses x3=3
 //
-// OLS closed form for n=3:
+// OLS closed form for n=3 with LEGACY x={0,1,3}:
 //   x  = {0, 1, 3}    x_mean = 4/3
 //   y  = {1, k1, k2}  y_mean = (1 + k1 + k2) / 3
 //

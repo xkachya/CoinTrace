@@ -16,7 +16,7 @@
 // ADR-COIN-001: dual-threshold hysteresis for coin detect/release
 // ADR-CLKIN-002: L_DATA requires CLKIN on mikroBUS Pin16 — without it L=0 or garbage.
 //   RP_DATA is independent of CLKIN and works correctly without it (amplitude-based).
-//   Current wiring: CLKIN unconnected → L_DATA invalid. RP_DATA valid.
+//   Current wiring: CLKIN connected (G4 → mikroBUS Pin16, hw-verified S-3). L_DATA valid.
 // SYS-1 fix: read LSB first (MikroE SDK reads MSB first — BUG)
 // M-1: staleFlag_ is a volatile bool — lock-free read from getHealthStatus()
 
@@ -87,8 +87,8 @@ private:
     uint8_t  rpSetValue_          = 0x26;       // MIKROE-3240 default (ADR-LDC-001)
     uint32_t clkinFreqHz_         = 16000000UL;
     int      clkinGpio_           = -1;         // -1 = CLKIN not connected; ≥ 0 = LEDC output (ADR-CLKIN-002)
-    float    coinDetectThreshold_ = 0.85f;      // DETECT:  RP < baseline × 0.85
-    float    coinReleaseThreshold_= 0.92f;      // RELEASE: RP > baseline × 0.92 (hysteresis gap 7%)
+    float    coinDetectThreshold_ = 0.90f;      // DETECT:  RP < baseline × 0.90
+    float    coinReleaseThreshold_= 0.96f;      // RELEASE: RP > baseline × 0.96 (hysteresis gap 6%)
     uint8_t  detectDebounceN_     = 5;          // 5 consecutive → COIN_PRESENT (~100 ms @ 50 Hz)
     uint8_t  releaseDebounceM_    = 3;          // 3 consecutive → COIN_REMOVED  (~60 ms @ 50 Hz)
 

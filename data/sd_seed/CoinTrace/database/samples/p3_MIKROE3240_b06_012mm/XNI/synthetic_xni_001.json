@@ -7,7 +7,7 @@
     "metal_name": "Nickel"
   },
   "conditions": {
-    "protocol_id":    "p2_MIKROE3240_024mm",
+    "protocol_id":    "p3_MIKROE3240_b06_012mm",
     "freq_hz":        909200,
     "steps_mm":       [0, 1, 2],
     "coil_model":     "MIKROE-3240",
