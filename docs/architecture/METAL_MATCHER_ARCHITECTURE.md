@@ -1,12 +1,13 @@
 # MetalMatcher Architecture — CoinTrace
 
-**Версія:** 1.2.0
-**Дата:** 2026-03-26
+**Версія:** 1.3.0
+**Дата:** 2026-03-27
 **Статус:** Специфікація — очікує реалізації (Wave 8 C-7)
 **Cross-ref:** `FINGERPRINT_DB_ARCHITECTURE.md`, `MEMORY_MAP.md`, `WAVE8_ROADMAP.md §C-7`,
 `MEASUREMENT_WORKFLOW.md`, `PLUGIN_INTERFACES_EXTENDED.md §5`, `QUICK_SCREEN_SPEC.md`
 
 **Changelog:**
+- 1.3.0 (2026-03-27) — C-5 hw-data sync: (A) `full_weights[4]` dL1_n 2.0→1.0 (p3 всі метали |dL1_n|≈2.4, нульова дискримінація); (B) `sigma` 0.3→0.35 (C-5 empirical, відповідає FingerprintCache::CONFIDENCE_SIGMA); (C) `ferro_thresh_dL1_n` 0.05→99.0 (DISABLED — p3 dL1_n всі метали ≈ −2.4 >> 0.05, re-enable після Wave 9 S-5); (D) matcher.json приклад + таблиця defaults оновлені.
 - 1.2.0 (2026-03-26) — Pre-implementation sync: (A) §3 arch diagram виправлено: `quickScreen()` → `drawQuickScreen()` з явним Phase 1/2 split; (B) §3 Quick Screen data flow розділено на два блоки Phase 1 (threshold, без MetalMatcher) та Phase 2 (matchQuick, після C-5); (C) §9 Quick Screen handler замінено — Phase 1 передає raw значення у drawQuickScreen() без matchQuick(), Phase 2 описано як внутрішня заміна всередині drawQuickScreen(); (D) виправлено `dL_uH` → `dL_raw` в §9 (unit naming відповідно до QS_SPEC v1.1.0).
 - 1.1.0 (2026-03-25) — C-1..C-3 виправлено: alternatives[] в MatchResult; matchQuick приймає raw значення для симетрії API; logTopCandidates без Logger-параметра; W-5: is_ferro через fabsf, знак pending S-5; +§13 unit test spec; HttpServer.cpp у §12; StorageManager naming note у ADR-M1
 
@@ -261,17 +262,19 @@ struct MatchResult {
 ```cpp
 struct Config {
     // Ваги для 5D-вектора: [dRp1_n, k1, k2, slope, dL1_n]
-    float full_weights[5]    = {1.0f, 1.0f, 1.0f, 0.0f, 2.0f};
+    float full_weights[5]    = {1.0f, 1.0f, 1.0f, 0.0f, 1.0f};
     // Quick Screen: k1/k2/slope = 0.0 → ці осі не впливають на пошук
     float quick_weights[5]   = {1.5f, 0.0f, 0.0f, 0.0f, 2.5f};
     // Gaussian confidence transform: conf = exp(−dist²/σ²)
-    float sigma              = 0.3f;
+    float sigma              = 0.35f;  // C-5 empirical (відповідає FingerprintCache::CONFIDENCE_SIGMA)
     // Поріг впевненості: нижче → valid=false
     float min_confidence     = 0.3f;
     // Поріг ferro-детекції по |dL1_n|.
-    // ⚠️ ЗНАК dL1 для феромагнетиків невизначений — pending hw-сесії S-5.
-    // Детекція: fabsf(dL1_n) > ferro_thresh. Значення 0.05 ≡ |dL1| > 100 µH.
-    float ferro_thresh_dL1_n = 0.05f;
+    // ⚠️ C-5 hw-data: p3 dL1_n ВСІ метали (Ag/Cu/Zn/Fe/Al) ≈ −2.4 (діапазон [−2.3,−2.6]).
+    // Значення 0.05 (архівне) → is_ferro=true для ВСІХ металів → DISABLED.
+    // Встановлено 99.0 (практично вимкнено) до Wave 9 S-5 ferro HW-сесії.
+    // Після S-5: якщо ferro збільшує |dL1_n| суттєво відносно non-ferro → оновити.
+    float ferro_thresh_dL1_n = 99.0f;
 };
 ```
 
@@ -437,11 +440,11 @@ SD:/CoinTrace/matcher.json   ← єдине джерело (редагуєтьс
 ```json
 {
   "_comment": "CoinTrace MetalMatcher — edit weights without rebuild. Order: [dRp1_n, k1, k2, slope, dL1_n]",
-  "full_weights":  [1.0, 1.0, 1.0, 0.0, 2.0],
+  "full_weights":  [1.0, 1.0, 1.0, 0.0, 1.0],
   "quick_weights": [1.5, 0.0, 0.0, 0.0, 2.5],
-  "sigma": 0.3,
+  "sigma": 0.35,
   "min_confidence": 0.3,
-  "ferro_thresh_dL1_n": 0.05
+  "ferro_thresh_dL1_n": 99.0
 }
 ```
 
@@ -456,13 +459,13 @@ SD:/CoinTrace/matcher.json   ← єдине джерело (редагуєтьс
 | `full_weights[1]` k1 | 1.0 | перша просторова нормалізація |
 | `full_weights[2]` k2 | 1.0 | друга просторова нормалізація |
 | `full_weights[3]` slope | **0.0** | p2 протокол (x={0,1,2}): slope=(k2−1)/2, тобто slope є лінійною функцією k2 → нульова незалежна інформація. Деталі: VectorCompute.h ⚠️ TODO, WAVE8_ROADMAP §C-5 |
-| `full_weights[4]` dL1_n | 2.0 | ferro-дискримінатор — найбільш значущий |
+| `full_weights[4]` dL1_n | **1.0** | C-5: dL1_n ≈ −2.4 для ВСІХ 5 металів → нульова дискримінація. Рівна вага. Переоцінити після Wave 9 S-5. |
 | `quick_weights[0]` dRp1_n | 1.5 | підсилено: єдина провідна вісь в Quick |
 | `quick_weights[1..3]` | 0.0 | k1/k2/slope недоступні в Quick Screen |
 | `quick_weights[4]` dL1_n | 2.5 | підсилено: ferro-детекція критична |
-| `sigma` | 0.3 | успадковано з FingerprintCache v1 |
+| `sigma` | **0.35** | C-5 empirical: 25/25 correct at σ=0.35 (відповідає FingerprintCache::CONFIDENCE_SIGMA) |
 | `min_confidence` | 0.3 | нижче → `valid=false` |
-| `ferro_thresh_dL1_n` | 0.05 | \|dL1\| > 100 µH → ferro (pending S-5) |
+| `ferro_thresh_dL1_n` | **99.0** | ⚠️ DISABLED — p3 |dL1_n| всі метали ≈ 2.4 >> 0.05. Re-enable після Wave 9 S-5. |
 
 ### Workflow для tuning без rebuild
 
@@ -607,7 +610,7 @@ drawQuickScreen(liveRp, liveL, basRp, basL);
 
 | Місце | Рівень | Повідомлення |
 |-------|--------|-------------|
-| `loadConfig()` OK | `log_i` | `Matcher: SD config loaded — sigma=0.30 full_w=[1.0,1.0,1.0,0.0,2.0]` |
+| `loadConfig()` OK | `log_i` | `Matcher: SD config loaded — sigma=0.35 full_w=[1.0,1.0,1.0,0.0,1.0]` |
 | `loadConfig()` не знайдено | `log_w` | `Matcher: matcher.json not found — using defaults` |
 | `loadConfig()` parse error | `log_e` | `Matcher: JSON parse error: <error>` |
 | `matchFull()` OK | `log_i` | `Meas: Match: XAG925  conf=0.71  dist=0.1420  ferro=no` |

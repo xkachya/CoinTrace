@@ -1,11 +1,12 @@
 # Quick Screen Specification — CoinTrace
 
-**Версія:** 1.2.0
-**Дата:** 2026-03-26
+**Версія:** 1.3.0
+**Дата:** 2026-03-27
 **Статус:** Специфікація — очікує реалізації (Wave 8 C-7)
 **Cross-ref:** `COLLECTOR_USE_CASE.md §9`, `MEASUREMENT_WORKFLOW.md`, `METAL_MATCHER_ARCHITECTURE.md`, `WAVE8_ROADMAP.md §C-7`
 
 **Changelog:**
+- 1.3.0 (2026-03-27) — C-5 hw-data sync: пороги класифікації оновлені для p3 d=0.6mm (SILVER 25→40%, COPPER 14→30%, ALUM 5→15%). Додано caveat про PENDING HW-QS-6 baseline calibration. Старі значення базувались на синтетичних p2 d=1.4mm даних.
 - 1.2.0 (2026-03-26) — Pre-implementation sync: §9 пункт 1 (ENTER як шлях запуску) позначено ✅ — MEASUREMENT_WORKFLOW.md v1.0.0 вже містить цей пункт як path #2.
 - 1.1.0 (2026-03-26) — Production-ready revision: (A) одиниці dL виправлено (raw L_DATA counts + ADR-CLKIN-002 guard: isLDataValid() + lDataValid в dL_raw/isFerro); (B) recalibrate() — N-sample avg (10 samples, ok≥5) + internal coin guard + note про blocking loop() ~250ms; (C) drawMeasStep_full(sMeas) сигнатуру виправлено; (D) gLFS.isDataMounted() видалено з ENTER (ADR-QS-5); (E) QUICK_NOISE_FLOOR_PCT + QUICK_L_NOISE_FLOOR_CT як constexpr; (F) sQuickScreenFresh — file-scope reset механізм уточнено; (G) §4.2 Phase 2 quick_centroid generation pipeline документовано; (H) §9 пункти 2–3 ✅; (I) main.cpp:150-152 STEP_BASE/STEP_1/STEP_3 display strings p1→p2.
 - 1.0.0 (2026-03-25) — Початкова версія
@@ -129,11 +130,15 @@ Quick Screen оновлюється разом із стандартним polli
 // ── Quick Screen порогові константи ──────────────────────────────────────────
 // Розміщення: src/main.cpp (static constexpr, поруч з drawQuickScreen)
 // Значення попередні — верифікувати після hw-сесій S-4 + S-5.
+// ⚠️ C-5 audit: при d≈0.6mm (p3 protocol) ВСІ 5 металів мають dRpPct > 25% →
+//   старі пороги (SILVER>25%) класифікують ВСЕ як SILVER. Оновлено нижче.
+//   Значення — best-estimates з centroid k1. PENDING HW-QS-6: виміряти реальний
+//   baseline без монети та dRpPct для кожного металу; скоригувати якщо потрібно.
 static constexpr float QUICK_NOISE_FLOOR_PCT   =   2.0f;  // dRpPct нижче — сигнал у шумі (%)
 static constexpr float QUICK_L_NOISE_FLOOR_CT  =   2.0f;  // dL_raw нижче — у шумі (raw counts)
-static constexpr float QUICK_SILVER_THRESH_PCT =  25.0f;  // dRpPct > 25% → SILVER
-static constexpr float QUICK_COPPER_THRESH_PCT =  14.0f;  // dRpPct > 14% → COPPER
-static constexpr float QUICK_ALUM_THRESH_PCT   =   5.0f;  // dRpPct >  5% → ALUMINIUM
+static constexpr float QUICK_SILVER_THRESH_PCT =  40.0f;  // dRpPct > 40% → SILVER  (було 25, C-5 p3)
+static constexpr float QUICK_COPPER_THRESH_PCT =  30.0f;  // dRpPct > 30% → COPPER  (було 14, C-5 p3)
+static constexpr float QUICK_ALUM_THRESH_PCT   =  15.0f;  // dRpPct > 15% → ALUMINIUM (було 5, C-5 p3)
 static constexpr float QUICK_FERRO_THRESH_L_RAW = 100.0f; // dL_raw > 100 ct → ferro
                                                             // ⚠️ верифікувати S-5
 

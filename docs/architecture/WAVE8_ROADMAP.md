@@ -1,8 +1,8 @@
 # Wave 8 Roadmap — Connectivity + Infrastructure + Sensor Integration
 
 **Статус:** 🔄 In Progress — Фаза 2 — Sensor Integration (C-1 ✅, C-2 ✅, C-4 ✅, C-5 ✅ hw-2026-03-27, C-6 ✅ hw-2026-03-27 → **C-7 MetalMatcher + Quick Screen НАСТУПНИЙ**)
-**Версія:** 2.4.0
-**Дата:** 2026-03-27 (C-5 hw-session: 25 вимірів, 5 монет × 5 циклів; slope() OLS виправлено x={0,1,3}→{0,1,2}; CONFIDENCE_SIGMA 0.30→0.35; index.json generation 1→2; 122/122 native tests)
+**Версія:** 2.5.0
+**Дата:** 2026-03-27 (C-7 pre-coding prep: sub-tasks C-7a..C-7f, HW checklist HW-QS-1..6, C-5 audit sync: ferro_thresh DISABLED 99.0, dL1 weight 1.0, Quick Screen пороги p3)
 **Попередня хвиля:** Wave 7 — Storage Foundation (`d53a440`, 84/84 native tests, hardware verified)
 **Cross-ref:** `docs/architecture/MEMORY_MAP.md` — детальна карта Flash/SRAM/Heap (hw-verified 2026-03-18)
 
@@ -679,9 +679,15 @@ gWebSocket.broadcastResult(m, matches, n);
 
 ### C-7: MetalMatcher + Quick Screen
 
-**Статус:** Специфікація готова (METAL_MATCHER_ARCHITECTURE.md v1.1.0, QUICK_SCREEN_SPEC.md 2026-03-25)
+**Статус:** ⚡ НАСТУПНИЙ — Специфікація готова (METAL_MATCHER_ARCHITECTURE.md v1.3.0, QUICK_SCREEN_SPEC.md v1.3.0, WAVE8_ROADMAP.md v2.5.0)
 
-**Передумова:** C-4 (queryFingerprint wiring), C-5 (σ tuning з реальними монетами)
+**Передумова:** C-4 (queryFingerprint wiring), C-5 (σ tuning з реальними монетами), C-6 (real FP DB)
+
+**C-5 audit (важливо перед кодінгом):**
+- `ferro_thresh_dL1_n` 0.05 → **99.0** (DISABLED): p3 dL1_n ≈ −2.4 для ВСІХ металів — re-enable після S-5
+- `full_weights[4]` dL1_n 2.0 → **1.0**: нульова дискримінація між металами в p3
+- `sigma` 0.3 → **0.35** (вже в FingerprintCache::CONFIDENCE_SIGMA з commit 97935ae)
+- Quick Screen пороги: SILVER>25% → **40%**, COPPER>14% → **30%**, ALUM>5% → **15%** (p3 d=0.6mm)
 
 **Нові артефакти:**
 - `lib/StorageManager/src/MetalMatcher.h/.cpp` — standalone service (~150 рядків)
@@ -692,16 +698,67 @@ gWebSocket.broadcastResult(m, matches, n);
 **Ключові рішення:**
 - MetalMatcher — standalone service class (не plugin); аналог FingerprintCache/MeasurementStore
 - Quick Screen — IDLE sub-mode, не новий `MeasState` enum value
-- Phase 1: threshold-based класифікація (>25%→Ag, >14%→Cu, >5%→Al, is_ferro→Fe)
-- Phase 2: `matchQuick()` через `quick_centroid` entries у DB — після C-5 hw-сесії
-- `full_weights[3]` (slope) = 0.0 у `matcher.json` (p2 protocol: slope = лінійна функція k2)
+- Phase 1: threshold-based класифікація (>40%→Ag, >30%→Cu, >15%→Al, is_ferro→Fe) — p3 d=0.6mm
+- Phase 2: `matchQuick()` через `quick_centroid` entries у DB — після Wave 9 S-5
+- `full_weights[3]` (slope) = 0.0 у `matcher.json` (p2/p3 protocol: slope = лінійна функція k2)
+
+**Sub-task dependency graph:**
+```
+C-7a MetalMatcher class ──┐
+                           ├─► C-7d matcher.json ──► C-7e integration main.cpp
+C-7b Quick Screen Phase 1 ┤                                ▲
+                           │                               │
+C-7c LDC1101 API extension ┘   C-7f FingerprintCache ─────┘
+```
+C-7a, C-7b, C-7c, C-7f — паралельні. C-7d залежить від C-7a. C-7e — фінальна інтеграція.
+
+**C-7a: MetalMatcher class**
+- [ ] CREATE `lib/StorageManager/src/MetalMatcher.h` — Config + MatchResult + Alternative structs, клас
+- [ ] CREATE `lib/StorageManager/src/MetalMatcher.cpp` — `matchFull()`, `matchQuick()`, `doMatch()` (private), `loadConfig()`, `logTopCandidates()`
+- [ ] CREATE `test/test_metal_matcher/test_metal_matcher.cpp` — 12 unit tests MM-01..MM-12 (native)
+- [ ] 134 native tests PASS (122 existing + 12 new)
+
+**C-7b: Quick Screen Phase 1**
+- [ ] Додати `drawQuickScreen()` + `classifyQuick()` в `src/main.cpp` (~50 рядків)
+- [ ] `static constexpr` пороги: SILVER=40%, COPPER=30%, ALUM=15% (p3 best-estimates, PENDING HW-QS-6)
+- [ ] ENTER у Quick Screen → запускає STEP_BASE
+- [ ] 'R' → `gLDC->recalibrate()`
+
+**C-7c: LDC1101Plugin API extension**
+- [ ] Перевірити: `getBaseline()` / `getLBaseline()` — вже публічні?
+- [ ] Перевірити: поле `clkinGpio_` — чи існує?
+- [ ] ADD `getLiveRp()`, `getLiveL()` (mutex-protected cache read) в `.h` + `.cpp`
+- [ ] ADD `isLDataValid()` inline: `return clkinGpio_ >= 0`
+- [ ] ADD `recalibrate()` decl + impl (N=10 avg, coin guard, ~250ms blocking)
+
+**C-7d: matcher.json seed file**
+- [ ] CREATE `data/sd_seed/CoinTrace/matcher.json` з виправленими значеннями (sigma=0.35, dL1=1.0, ferro=99.0)
+
+**C-7e: Integration в main.cpp**
+- [ ] `#include "MetalMatcher.h"` + global `MetalMatcher gMatcher;`
+- [ ] `setup()`: `gMatcher.init(gFPCache)` + `gMatcher.loadConfig(&gSD, ctx.spiMutex)`
+- [ ] `doMeasCompute()`: `gFPCache.query(...)` → `gMatcher.matchFull(m)` → Measurement fields
+- [ ] IDLE handler: `isCoinPresent()` → `drawQuickScreen()` else `drawMeasIdle()`
+- [ ] `HttpServer::setMatcher(MetalMatcher* m)` setter + POST /database/match через `gMatcher`
+
+**C-7f: FingerprintCache weighted query extension**
+- [ ] ADD `const float* weights = nullptr` параметр до `FingerprintCache::query()` (backward-compat)
+- [ ] Оновити distance calculation на weighted form (weights=nullptr → рівні ваги = стара поведінка)
+
+**HW verification (після флешу):**
+- [ ] HW-QS-1: Quick Screen відображається при COIN_PRESENT в IDLE (live ΔRp%, ΔL, metal class)
+- [ ] HW-QS-2: ENTER у Quick Screen → запускає STEP_BASE (не скидає baseline)
+- [ ] HW-QS-3: 'R' → recalibrate — оновлені значення через ~250ms
+- [ ] HW-QS-4: Phase 1 threshold: ≥3 правильних з 4 тестових монет (Ag/Cu/Al/Fe)
+- [ ] HW-QS-5: MetalMatcher match() через HTTP POST /api/v1/database/match — weights з matcher.json
+- [ ] HW-QS-6: Виміряти реальний baseline + dRpPct для кожного металу → скоригувати пороги якщо потрібно
 
 **Acceptance criteria:**
 - [ ] Quick Screen відображається при COIN_PRESENT в IDLE (live ΔRp%, ΔL, metal class)
 - [ ] ENTER у Quick Screen → запускає STEP_BASE
 - [ ] R → recalibrate baseline (10-reading average)
 - [ ] Phase 1 threshold classification: ≥3 правильних з 4 тестових монет (Ag/Cu/Al/Fe)
-- [ ] `MetalMatcher::match()` через HTTP `POST /api/v1/database/match` — weights з matcher.json
+- [ ] `MetalMatcher::matchFull()` через HTTP `POST /api/v1/database/match` — weights з matcher.json
 
 ---
 
@@ -823,6 +880,7 @@ A-7  BLE GATT → відкладено до v2 PSRAM    (current hw: ~30 KB free
 *Версія 1.3.0 — B-3 GPIO0 recovery hw-verified: пристрій перезавантажується при утриманні G0 під час 3s splash-вікна; `LittleFSManager::formatData()` додано; `RTC_DATA_ATTR gRtcBootReason` для boot reason tracking; визуальний countdown на дисплеї. Попередня: v1.2.0 — Phase 1 batch B+C-3 реалізовано: B-3 GPIO0 recovery (`src/main.cpp`); C-3 `VectorCompute.h/.cpp` + OLS slope; B-1 `Preferences.h` in-memory KV mock + `test_nvs_manager/`; B-2 `loadTestEntry()` + `test_fingerprint_cache/`; `platformio.ini` розширено. 108/108 native tests PASSED. Наступний крок: A-1 WiFiManager.*  
 *Версія 1.3.1 — [B-3-audit-fix] впроваджено 2 знахідки B3_Delta_Independent_Audit: Fix 1 — early-exit GPIO0 window (200ms quick poll, boot penalty 3000→200ms); Fix 2 — `formatData()` SAFETY comment (R-02 race condition); D-01 portability note (USB-CDC vs UART bridge). STORAGE_ARCHITECTURE → v1.8.1.*  
 *Версія 1.4.0 — A-1 WiFiManager реалізовано та hw-verified (2026-03-17): `lib/WiFiManager/src/WiFiManager.h/.cpp` (AP+STA, `promptSTA()` keyboard provisioning); `PluginContext.h` розширено полем `WiFiManager* wifi`; `main.cpp` step [10] §17.2 + 'W' key handler; `platformio.ini` коментар виправлено. Bug fix: `buildAPSsid()` використовує `esp_efuse_mac_get_default()` замість `WiFi.macAddress()` (driver not yet init). AP hw-verified: SSID `CoinTrace-F974` видно на телефоні, підключення успішне. RAM: 60.4% (+8% WiFi stack). 108/108 native tests PASSED. Наступний крок: A-2 AsyncWebServer.*  
+*Версія 2.5.0 — C-7 pre-coding prep (2026-03-27): C-7 розширено sub-task breakdown (C-7a..C-7f) + HW verification checklist (HW-QS-1..6) + C-5 audit findings (ferro_thresh 0.05→99.0 DISABLED, dL1 weight 2.0→1.0, Quick Screen пороги p3-verified). Spec docs синхронізовано: METAL_MATCHER_ARCHITECTURE.md v1.3.0 + QUICK_SCREEN_SPEC.md v1.3.0. Наступний: кодінг C-7 (паралельно C-7a + C-7b + C-7c + C-7f).*  
 *Версія 2.4.0 — C-5 + C-6 hw-verified (2026-03-27): 25 вимірів (5 монет × 5 циклів, protocol `p3_MIKROE3240_b06_012mm`); slope() OLS виправлено x={0,1,3}→{0,1,2} → `(k2−1)/2`; CONFIDENCE_SIGMA 0.30→0.35 (25/25 correct, 122/122 native tests); index.json generation 1→2 (5 реальних центроїдів XAG999/XCU/XZNNIP/XFE/XAL); виправлено k1 polarity (синтетика < 1.0 → реальні ≥ 1.22); audit report `docs/audit/C5_HW_AUDIT_REPORT_2026-03-27.md`. Наступний: C-7 MetalMatcher + Quick Screen.*  
 *Версія 2.3.0 — p3 protocol (2026-03-26): базовий spacer 0.6mm (3D-друк, hw-верифіковано: 10 грн не замикає контур при d=0.6mm); без капсули (bare coin); ефективні відстані 0.6/1.6/2.6mm (замінюють 1.4/2.4/3.4mm p2); protocol_id p2_MIKROE3240_024mm→p3_MIKROE3240_b06_012mm; seed data + всі документи оновлено. Наступний: hw-сесія C-5 з Eagle Ag999 + реальними монетами.*  
 *Версія 2.2.0 — p2 protocol (2026-03-25): спейсер STEP_3 змінено 3мм→2мм (ефективні відстані 1.4/2.4/3.4мм — узгоджено з фізичною моделлю та hw-тестуванням Ag999 у капсулі); `coin_detect_threshold` 0.85→0.90, `coin_release_threshold` 0.92→0.96 (гістерезис 6%); авто-старт сесії прибрано (тільки HTTP POST /measure/start); seed data protocol_id + steps_mm оновлено. Наступний: hw-сесія з новими спейсерами → C-5 σ tuning.*

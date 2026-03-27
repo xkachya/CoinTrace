@@ -1,0 +1,8 @@
+{
+    "_comment": "CoinTrace MetalMatcher v1. Weights order: [dRp1_n, k1, k2, slope, dL1_n]. Edit without rebuild — reboot to apply.",
+    "full_weights":  [1.0, 1.0, 1.0, 0.0, 1.0],
+    "quick_weights": [1.5, 0.0, 0.0, 0.0, 2.5],
+    "sigma": 0.35,
+    "min_confidence": 0.3,
+    "ferro_thresh_dL1_n": 99.0
+}
