@@ -25,9 +25,7 @@
 //   This is a linear transform of k2 → slope adds ZERO independent information
 //   to the fingerprint vector when x is uniformly spaced.
 //   Consequence: full_weights[3] (slope) should be 0.0 in matcher.json for p3.
-//   Formula update (x={0,1,2}) + synthetic DB slope recomputation deferred to
-//   Wave 8 C-5 (first real hw measurements) to avoid breaking 9/9 native tests.
-//   See WAVE8_ROADMAP.md §C-5 and VectorCompute.cpp ⚠️ TODO.
+//   Updated in Wave 8 C-5 alongside real hw DB reseed (2026-03-27).
 
 #pragma once
 #include "Measurement.h"
@@ -64,12 +62,10 @@ inline float k2(const Measurement& m) {
 
 // slope = OLS linear regression coefficient of Rp vs distance  [1/mm]
 // Points: (0mm, rp[0]/rp[0]=1.0), (1mm, rp[1]/rp[0]=k1), (2mm, rp[2]/rp[0]=k2)
-// ⚠️ FORMULA PENDING UPDATE (see file header — Wave 8 C-5):
-//   Current impl uses p1 constants x={0,1,3} / x̄=4/3 / Sxx=14/3.
-//   Correct p3 constants: x={0,1,2} / x̄=1 / Sxx=2 → slope=(k2−1)/2.
-//   Formula unchanged to preserve 9/9 passing native tests until C-5 DB reseed.
+// p3 protocol x={0,1,2}: closed form slope = (k2−1)/2  (see ⚠️ MATH NOTE in file header).
+// Updated in Wave 8 C-5 (2026-03-27): x={0,1,3}→{0,1,2}, formula simplified to 3 lines.
 // Typically negative (−0.05 .. −0.20): Rp/Rp0 decreases with distance.
-// Non-inline: OLS requires 6+ arithmetic ops — kept in VectorCompute.cpp.
+// Non-inline: kept in VectorCompute.cpp.
 float slope(const Measurement& m);
 
 // dL1 = L(0mm) − L(1mm)  [µH]

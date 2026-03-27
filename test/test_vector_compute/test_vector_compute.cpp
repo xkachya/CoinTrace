@@ -99,20 +99,14 @@ void test_guard_zero_rp0() {
     TEST_ASSERT_EQUAL_FLOAT(0.0f, VectorCompute::dL1_n(z));
 }
 
-// 7. slope OLS ground truth — hand-verified calculation
-// Ag: rp0=1800, k1=1350/1800=0.75, k2=1100/1800≈0.6111
-//   y_mean = (1.0 + 0.75 + 0.6111) / 3 = 0.7870
-//   x_mean = 4/3 = 1.3333
-//   Sxy = (0-1.3333)(1.0-0.7870) + (1-1.3333)(0.75-0.7870) + (3-1.3333)(0.6111-0.7870)
-//       = (-1.3333)(0.2130) + (-0.3333)(-0.0370) + (1.6667)(-0.1759)
-//       = -0.2840 + 0.0123 - 0.2932  = -0.5649
-//   Sxx = 14/3 = 4.6667
-//   slope = -0.5649 / 4.6667 = -0.12105...
+// 7. slope p3 ground truth — p3 protocol x={0,1,2}: slope = (k2-1)/2
+// Ag: rp0=1800, rp2=1100, k2=1100/1800≈0.6111
+//   slope = (k2 - 1) / 2 = (0.6111 - 1) / 2 = -0.1944...
 void test_slope_ols_ground_truth() {
     Measurement ag = agMeas();  // rp0=1800, rp1=1350, rp2=1100
     const float s = VectorCompute::slope(ag);
     // Allow ±0.001 for floating-point rounding
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, -0.121f, s);
+    TEST_ASSERT_FLOAT_WITHIN(0.001f, -0.1944f, s);
 }
 
 // 8. driftRatio = 0 when rp[3] == rp[0] (no drift)

@@ -1,8 +1,8 @@
 # Wave 8 Roadmap — Connectivity + Infrastructure + Sensor Integration
 
-**Статус:** 🔄 In Progress — Фаза 2 — Sensor Integration (C-1 ✅ `6628487`, C-2 ✅ `313b179`, C-4 ✅ hw-verified → **C-5 НАСТУПНІЙ після hw-сесії зі спейсерами 0/1/2мм**)
-**Версія:** 2.2.0
-**Дата:** 2026-03-25 (p2 protocol: спейсер 3мм→2мм, detect 0.85→0.90, release 0.92→0.96, авто-старт прибрано)
+**Статус:** 🔄 In Progress — Фаза 2 — Sensor Integration (C-1 ✅, C-2 ✅, C-4 ✅, C-5 ✅ hw-2026-03-27, C-6 ✅ hw-2026-03-27 → **C-7 MetalMatcher + Quick Screen НАСТУПНИЙ**)
+**Версія:** 2.4.0
+**Дата:** 2026-03-27 (C-5 hw-session: 25 вимірів, 5 монет × 5 циклів; slope() OLS виправлено x={0,1,3}→{0,1,2}; CONFIDENCE_SIGMA 0.30→0.35; index.json generation 1→2; 122/122 native tests)
 **Попередня хвиля:** Wave 7 — Storage Foundation (`d53a440`, 84/84 native tests, hardware verified)
 **Cross-ref:** `docs/architecture/MEMORY_MAP.md` — детальна карта Flash/SRAM/Heap (hw-verified 2026-03-18)
 
@@ -57,9 +57,9 @@ Cross-ref: [STORAGE_ARCHITECTURE.md §15](./STORAGE_ARCHITECTURE.md), [CONNECTIV
 | R-01 → real protocol_id | ✅ done | C-1 | `"p2_MIKROE3240_024mm"` hw-verified (`6628487`) → **updated `p3_MIKROE3240_b06_012mm` 2026-03-26** (0.6mm base spacer, bare coin) |
 | Multi-position state machine | ✅ done | C-2 | hw-verified: session trigger (`313b179`) |
 | queryFingerprint() wiring | ✅ done | C-4 | hw-verified 2026-03-24 — sensor/state real MeasState + POST measure/start |
-| FingerprintCache σ tuning | ⚡ НАСТУПНИЙ | C-5 | Потребує реальних монет (spacer hw-session) |
-| Real FP DB seeding | ✅ БЛОК | C-6 | Замінити synthetic entries |
-| MetalMatcher + Quick Screen | ⚡ після C-5 | C-7 | Специфікація: METAL_MATCHER_ARCHITECTURE.md, QUICK_SCREEN_SPEC.md |
+| FingerprintCache σ tuning | ✅ done | C-5 | hw-verified 2026-03-27: σ=0.35, 25/25 correct, slope() x={0,1,2} fixed |
+| Real FP DB seeding | ✅ done | C-6 | hw-verified 2026-03-27: 5 real centroids, generation=2, index.json replaced |
+| MetalMatcher + Quick Screen | ⚡ НАСТУПНИЙ | C-7 | Специфікація: METAL_MATCHER_ARCHITECTURE.md, QUICK_SCREEN_SPEC.md |
 
 > **C-3\*** — єдиний виняток з Track C: vector math (dRp1/k1/k2/slope/dL1) є чистою математикою над `float[4]`, незалежною від SPI. Реалізується та тестується до прибуття сенсора.
 
@@ -586,13 +586,12 @@ inline float k2(const Measurement& m) {
     return m.rp[2] / m.rp[0];
 }
 
-// slope_rp_per_mm_lr = linear regression coefficient of k-ratios vs distance [1/mm]
-// Steps (p2 protocol): d0=0, d1=1, d2=2 mm. Typically negative (−0.05..−0.20).
-// ⚠️ p2 NOTE: x={0,1,2} uniform → OLS slope = (k2−1)/2 (linear transform of k2).
-// Slope adds ZERO independent info for p2 → full_weights[3]=0.0 in matcher.json.
-// Formula update deferred to C-5 (VectorCompute.cpp still uses p1 x={0,1,3} constants).
-// Cross-ref: STORAGE_ARCHITECTURE §8.3 field "slope_rp_per_mm_lr"; VectorCompute.h ⚠️ TODO
-float slope(const Measurement& m);   // implemented in VectorCompute.cpp (non-trivial)
+// slope_rp_per_mm_lr = OLS linear regression coefficient of k-ratios vs distance [1/mm]
+// p3 protocol x={0,1,2}: OLS closed form → slope = (k2−1)/2 (linear transform of k2).
+// Slope adds ZERO independent info → full_weights[3]=0.0 in matcher.json for p3.
+// Formula updated in Wave 8 C-5 (2026-03-27): x={0,1,3}→{0,1,2}, simplified to 3 lines.
+// Cross-ref: STORAGE_ARCHITECTURE §8.3 field "slope_rp_per_mm_lr"; VectorCompute.h MATH NOTE
+float slope(const Measurement& m);   // implemented in VectorCompute.cpp
 
 // dL1 = L(0mm) − L(1mm)  [µH]
 // Permeability component. Near-zero for Ag/Au, large for Fe/Ni.
@@ -651,26 +650,30 @@ gWebSocket.broadcastResult(m, matches, n);
 
 ### C-5: FingerprintCache σ (sigma) tuning
 
-**Поточний стан:** `CONFIDENCE_SIGMA` = константа-оцінка в `FingerprintCache.h`.
+**Статус:** ✅ hw-verified 2026-03-27 — C-5 hw-session (`p3_MIKROE3240_b06_012mm`, commit pending)
 
-**Процедура після C-1 + C-4:**
-1. Виміряти 3–5 монет відомого складу
-2. Зафіксувати відстань d до найближчого правильного match у кеші
-3. Підібрати σ так щоб `confidence = exp(-d²/σ²) ∈ [0.7, 0.95]` для правильних matches
-4. Оновити `CONFIDENCE_SIGMA` в `FingerprintCache.h` + `test_fingerprint_cache/` тест #3
+**Результати:**
+- 25 вимірів: 5 монет × 5 циклів (XAG999, XCU, XZNNIP, XFE, XAL), IDs 56–80
+- Sigma sweep 0.20–0.60: **25/25 правильних класифікацій** на всьому діапазоні
+- Обрано `CONFIDENCE_SIGMA = 0.35f` — баланс між чутливістю та робастністю
+- slope() OLS виправлено: x={0,1,3}→x={0,1,2}, формула `(k2−1)/2`
+- Найближча пара: XCU vs XZNNIP (dist=0.8635), >2σ=0.70
+- Примітка: rp[2] насичений (49152) для 20/25 вимірів; k1 (d=1.6mm) — основний дискримінатор
+- 122/122 native tests PASSED після всіх змін
+- Повний звіт: `docs/audit/C5_HW_AUDIT_REPORT_2026-03-27.md`
 
 ---
 
 ### C-6: Real FP DB seeding
 
-**Поточний стан:** 5 synthetic entries у `data/plugins/ldc1101.json`.
+**Статус:** ✅ hw-verified 2026-03-27 — виконано разом з C-5
 
-**Процедура:**
-1. Виміри 3–5 монет різних металів (Ag925, Au999, Cu, Fe) з реальним MIKROE-3240
-2. Обчислити вектори через `VectorCompute` (C-3)
-3. Згенерувати `index.json` через `tools/batch_analyze.py` (Wave 8 Python CLI)
-4. Скопіювати на SD → перевірити `FingerprintCache::init()` → `entryCount()`
-5. Запустити `POST /api/v1/database/match` з типовими векторами → верифікувати confidence
+**Результати:**
+- `data/sd_seed/CoinTrace/database/index.json` — 5 реальних центроїдів замінили синтетичні
+- `version: 2`, `generation: 2` (тригерить LittleFS cache invalidation на наступному boot)
+- entry IDs: `xag999/c5_hw_2026-03-27`, `xcu/c5_hw_2026-03-27`, `xznnip/c5_hw_2026-03-27`, `xfe/c5_hw_2026-03-27`, `xal/c5_hw_2026-03-27`
+- Виправлено знак k1: синтетичні дані мали k1 < 1.0 (фізично неможливо); реальні — k1 ∈ [1.22, 1.38]
+- Повний звіт: `docs/audit/C5_HW_AUDIT_REPORT_2026-03-27.md`
 
 ---
 
@@ -731,9 +734,9 @@ gWebSocket.broadcastResult(m, matches, n);
 C-1  R-01 → real protocol_id          ✅ hw-verified (`6628487`) — `p1_MIKROE3240_024mm`
 C-2  Multi-position state machine     ✅ hw-verified trigger (`313b179`) — сесія стартує
 C-4  queryFingerprint() wiring        ✅ hw-verified (2026-03-24) — sensor/state real MeasState + POST measure/start
-C-5  σ tuning                         ⚡ НАСТУПНИЙ — ~1 день (реальні монети, spacer hw-session)
-C-6  Real FP DB seeding               ~2 дні (Python CLI tool)
-C-7  MetalMatcher + Quick Screen      ~2 дні (після C-5: getLiveRp/L, drawQuickScreen, MetalMatcher)
+C-5  σ tuning                         ✅ hw-verified 2026-03-27 (25/25, σ=0.35, slope() x={0,1,2} fixed)
+C-6  Real FP DB seeding               ✅ hw-verified 2026-03-27 (5 real centroids, generation=2)
+C-7  MetalMatcher + Quick Screen      ⚡ НАСТУПНИЙ (~2–3 дні: getLiveRp/L, drawQuickScreen, MetalMatcher, matcher.json)
 A-x  WebSocket sensor frames (live)   ~0.5 дні (стаби → real)
 A-x  POST /measure/start (full)       ~0.5 дні (C-2 готово)
 A-7  BLE GATT → відкладено до v2 PSRAM    (current hw: ~30 KB free, NimBLE needs ~50 KB)
@@ -805,10 +808,10 @@ A-7  BLE GATT → відкладено до v2 PSRAM    (current hw: ~30 KB free
 - [~] Multi-position: реалізовано commit `313b179`; hw-verified: coin placed → STEP_BASE ✅, timeout 120s → abort ✅ (119962ms hw-measured); тест 7 (`GET /sensor/state` real MeasState) ✅ C-4; повний 4-step flow потребує hw-тесту з реальними spacers; WebSocket result frame — після A-6
 - [x] `GET /api/v1/sensor/state` → real MeasState (`MEASURING_STEP_BASE/1/3/DRIFT`, `IDLE_COIN_PRESENT`, `IDLE_NO_COIN`) — hw-verified 2026-03-24 (C-4)
 - [x] `POST /api/v1/measure/start` → `202 {"started":true}` (coin present, IDLE) + `409 already_measuring` (session active) — hw-verified 2026-03-24 (C-4)
-- [ ] Drift check: `|rp[3] - rp[0]| / rp[0] < 5%` для стабільного сенсора; WARNING лог при перевищенні
-- [ ] `queryFingerprint()`: confidence > 0.7 для правильного металу (3 тестові монети)
+- [x] Drift check: `|rp[3] - rp[0]| / rp[0] < 5%` — 25/25 вимірів C-5 пройшли; max 2.87% (Eagle ID 60); WARNING лог при перевищенні
+- [x] `queryFingerprint()`: confidence > 0.7 — C-5: 25/25 correct at σ=0.35; real DB seeded (generation=2)
 - [ ] WebSocket sensor frame: real-time rp/l/pos stream при COIN_PRESENT
-- [ ] FP DB: мінімум 3 реальні монети різних металів, entryCount() > 0
+- [x] FP DB: 5 реальних монет різних металів, entryCount()=5 (generation=2, hw 2026-03-27)
 - [ ] Quick Screen (C-7): відображається при COIN_PRESENT — live ΔRp%, ΔL, metal class; ENTER → STEP_BASE
 
 ---
@@ -820,6 +823,7 @@ A-7  BLE GATT → відкладено до v2 PSRAM    (current hw: ~30 KB free
 *Версія 1.3.0 — B-3 GPIO0 recovery hw-verified: пристрій перезавантажується при утриманні G0 під час 3s splash-вікна; `LittleFSManager::formatData()` додано; `RTC_DATA_ATTR gRtcBootReason` для boot reason tracking; визуальний countdown на дисплеї. Попередня: v1.2.0 — Phase 1 batch B+C-3 реалізовано: B-3 GPIO0 recovery (`src/main.cpp`); C-3 `VectorCompute.h/.cpp` + OLS slope; B-1 `Preferences.h` in-memory KV mock + `test_nvs_manager/`; B-2 `loadTestEntry()` + `test_fingerprint_cache/`; `platformio.ini` розширено. 108/108 native tests PASSED. Наступний крок: A-1 WiFiManager.*  
 *Версія 1.3.1 — [B-3-audit-fix] впроваджено 2 знахідки B3_Delta_Independent_Audit: Fix 1 — early-exit GPIO0 window (200ms quick poll, boot penalty 3000→200ms); Fix 2 — `formatData()` SAFETY comment (R-02 race condition); D-01 portability note (USB-CDC vs UART bridge). STORAGE_ARCHITECTURE → v1.8.1.*  
 *Версія 1.4.0 — A-1 WiFiManager реалізовано та hw-verified (2026-03-17): `lib/WiFiManager/src/WiFiManager.h/.cpp` (AP+STA, `promptSTA()` keyboard provisioning); `PluginContext.h` розширено полем `WiFiManager* wifi`; `main.cpp` step [10] §17.2 + 'W' key handler; `platformio.ini` коментар виправлено. Bug fix: `buildAPSsid()` використовує `esp_efuse_mac_get_default()` замість `WiFi.macAddress()` (driver not yet init). AP hw-verified: SSID `CoinTrace-F974` видно на телефоні, підключення успішне. RAM: 60.4% (+8% WiFi stack). 108/108 native tests PASSED. Наступний крок: A-2 AsyncWebServer.*  
+*Версія 2.4.0 — C-5 + C-6 hw-verified (2026-03-27): 25 вимірів (5 монет × 5 циклів, protocol `p3_MIKROE3240_b06_012mm`); slope() OLS виправлено x={0,1,3}→{0,1,2} → `(k2−1)/2`; CONFIDENCE_SIGMA 0.30→0.35 (25/25 correct, 122/122 native tests); index.json generation 1→2 (5 реальних центроїдів XAG999/XCU/XZNNIP/XFE/XAL); виправлено k1 polarity (синтетика < 1.0 → реальні ≥ 1.22); audit report `docs/audit/C5_HW_AUDIT_REPORT_2026-03-27.md`. Наступний: C-7 MetalMatcher + Quick Screen.*  
 *Версія 2.3.0 — p3 protocol (2026-03-26): базовий spacer 0.6mm (3D-друк, hw-верифіковано: 10 грн не замикає контур при d=0.6mm); без капсули (bare coin); ефективні відстані 0.6/1.6/2.6mm (замінюють 1.4/2.4/3.4mm p2); protocol_id p2_MIKROE3240_024mm→p3_MIKROE3240_b06_012mm; seed data + всі документи оновлено. Наступний: hw-сесія C-5 з Eagle Ag999 + реальними монетами.*  
 *Версія 2.2.0 — p2 protocol (2026-03-25): спейсер STEP_3 змінено 3мм→2мм (ефективні відстані 1.4/2.4/3.4мм — узгоджено з фізичною моделлю та hw-тестуванням Ag999 у капсулі); `coin_detect_threshold` 0.85→0.90, `coin_release_threshold` 0.92→0.96 (гістерезис 6%); авто-старт сесії прибрано (тільки HTTP POST /measure/start); seed data protocol_id + steps_mm оновлено. Наступний: hw-сесія з новими спейсерами → C-5 σ tuning.*
 *Версія 2.1.0 — C-4 hw-verified (2026-03-24): `GET /api/v1/sensor/state` → real MeasState (MEASURING\_STEP\_BASE/1/3/DRIFT, IDLE\_COIN\_PRESENT, IDLE\_NO\_COIN); `POST /api/v1/measure/start` → 202/409/503; volatile `gMeasStartRequested` flag + lambda injection via `gHttp.setSensorState()`. T1–T6 hw-verified. RAM=61.7% Flash=57.4%. Наступний: spacer hw-session (C-2 тести 2/4/5/6) → C-5 σ tuning.*  

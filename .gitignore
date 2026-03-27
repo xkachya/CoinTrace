@@ -137,6 +137,9 @@ test_output.txt
 mon_reset.py
 boot_monitor.log
 
+# Session measurement download files (raw data — distilled into index.json centroids)
+*_measurements.json
+
 # Python bytecode cache
 __pycache__/
 *.pyc

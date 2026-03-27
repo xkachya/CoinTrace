@@ -716,6 +716,72 @@ void setup() {
 void loop() {
   M5Cardputer.update();
   
+  // BtnA (physical OK button) — treat as ENTER
+  if (M5Cardputer.BtnA.wasClicked()) {
+    LOG_DEBUG(&gLogger, "Input", "BtnA click -> ENTER");
+    // Inject synthetic '\r' by reusing the same handler block via goto is
+    // messy — duplicate the ENTER logic inline via a lambda-like flag.
+    // Simplest: set a flag and fall through to the key handler below.
+    // We use a local bool so the identical ENTER block runs once.
+    const char syntheticEnter = '\r';
+    // ── ENTER (BtnA): advance measurement step ────────────────────────────
+    if (sMeas.state >= MeasState::STEP_BASE && sMeas.state <= MeasState::STEP_DRIFT) {
+      if (!gLDC || !gLDC->isReady()) {
+        gLogger.warning("Meas", "BtnA: sensor not ready");
+      } else {
+        ISensorPlugin::SensorData d = gLDC->read();
+        if (!d.valid || d.value1 < 1.0f) {
+          gLogger.warning("Meas", "BtnA: bad read (RP=%.0f) — retry", d.value1);
+        } else {
+          switch (sMeas.state) {
+            case MeasState::STEP_BASE:
+              sMeas.m.rp[0] = d.value1;  sMeas.m.l[0] = d.value2;
+              gLogger.info("Meas", "BASE : RP=%.0f  L=%.0f", d.value1, d.value2);
+              sMeas.state  = MeasState::STEP_1;
+              sMeas.stepMs = millis();
+              drawMeasStep_full(sMeas, (uint16_t)d.value1);
+              break;
+            case MeasState::STEP_1:
+              sMeas.m.rp[1] = d.value1;  sMeas.m.l[1] = d.value2;
+              gLogger.info("Meas", "1mm  : RP=%.0f  L=%.0f", d.value1, d.value2);
+              sMeas.state  = MeasState::STEP_3;
+              sMeas.stepMs = millis();
+              drawMeasStep_full(sMeas, (uint16_t)d.value1);
+              break;
+            case MeasState::STEP_3:
+              sMeas.m.rp[2] = d.value1;  sMeas.m.l[2] = d.value2;
+              gLogger.info("Meas", "2mm  : RP=%.0f  L=%.0f", d.value1, d.value2);
+              sMeas.state  = MeasState::STEP_DRIFT;
+              sMeas.stepMs = millis();
+              drawMeasStep_full(sMeas, (uint16_t)d.value1);
+              break;
+            case MeasState::STEP_DRIFT:
+              sMeas.m.rp[3] = d.value1;
+              gLogger.info("Meas", "DRIFT: RP=%.0f", d.value1);
+              sMeas.state = MeasState::COMPUTE;
+              doMeasCompute();
+              break;
+            default: break;
+          }
+        }
+      }
+    } else if (sMeas.state == MeasState::IDLE &&
+               gLDC && gLDC->isReady() &&
+               gLDC->getCoinState() == LDC1101Plugin::CoinState::COIN_PRESENT &&
+               gLFS.isDataMounted()) {
+      // BtnA at IDLE + COIN_PRESENT → start session (same as HTTP POST)
+      sMeas = {};
+      sMeas.state   = MeasState::STEP_BASE;
+      sMeas.stepMs  = millis();
+      sMeas.m.ts    = millis() / 1000;
+      strlcpy(sMeas.m.metal_code,  "UNKN",                    sizeof(sMeas.m.metal_code));
+      strlcpy(sMeas.m.coin_name,   "Unclassified",            sizeof(sMeas.m.coin_name));
+      strlcpy(sMeas.m.protocol_id, "p3_MIKROE3240_b06_012mm", sizeof(sMeas.m.protocol_id));
+      drawMeasStep_full(sMeas);
+      gLogger.info("Meas", "BtnA start: session started (STEP_BASE)");
+    }
+  }
+
   // Keyboard event handling
   if (M5Cardputer.Keyboard.isChange()) {
     if (M5Cardputer.Keyboard.isPressed()) {
@@ -725,8 +791,9 @@ void loop() {
       // (race with keyboard scanner, or physical-button-only press).
       const Keyboard_Class::KeysState& status = M5Cardputer.Keyboard.keysState();
       
-      if (!status.word.empty()) {
-        const char key = status.word[0];
+      // status.enter is set by the library for the ↵ key (KEY_ENTER never lands in word)
+      if (!status.word.empty() || status.enter) {
+        const char key = status.word.empty() ? '\r' : status.word[0];
         LOG_DEBUG(&gLogger, "Input", "Key: %c (0x%02X)", key, (uint8_t)key);
 
         if (key == 'w' || key == 'W') {
@@ -758,9 +825,22 @@ void loop() {
             sOtaWindowOpenMs = millis();
             gLogger.info("OTA", "OTA window opened — 30 seconds");
           }
-        } else if (key == '\r' || key == '\n') {
-          // ── ENTER: advance measurement step ───────────────────────────────
-          if (sMeas.state >= MeasState::STEP_BASE && sMeas.state <= MeasState::STEP_DRIFT) {
+        } else if (key == '\r' || key == '\n' || key == 'm' || key == 'M') {
+          // ── ENTER / M: start session at IDLE or advance measurement step ──
+          if (sMeas.state == MeasState::IDLE &&
+              gLDC && gLDC->isReady() &&
+              gLDC->getCoinState() == LDC1101Plugin::CoinState::COIN_PRESENT &&
+              gLFS.isDataMounted()) {
+            sMeas = {};
+            sMeas.state   = MeasState::STEP_BASE;
+            sMeas.stepMs  = millis();
+            sMeas.m.ts    = millis() / 1000;
+            strlcpy(sMeas.m.metal_code,  "UNKN",                    sizeof(sMeas.m.metal_code));
+            strlcpy(sMeas.m.coin_name,   "Unclassified",            sizeof(sMeas.m.coin_name));
+            strlcpy(sMeas.m.protocol_id, "p3_MIKROE3240_b06_012mm", sizeof(sMeas.m.protocol_id));
+            drawMeasStep_full(sMeas);
+            gLogger.info("Meas", "M/Enter: session started (STEP_BASE)");
+          } else if (sMeas.state >= MeasState::STEP_BASE && sMeas.state <= MeasState::STEP_DRIFT) {
             if (!gLDC || !gLDC->isReady()) {
               gLogger.warning("Meas", "ENTER: sensor not ready");
             } else {

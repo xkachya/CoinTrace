@@ -76,9 +76,12 @@ public:
     static constexpr uint16_t MAX_ENTRIES = 1000;
 
     // Sigma for confidence transform: conf = exp(−dist² / σ²).
-    // σ = 0.3 covers typical inter-class distances for v1 normalized 5D space.
-    // Adjust after empirical validation (FINGERPRINT_DB_ARCHITECTURE.md §3.4).
-    static constexpr float CONFIDENCE_SIGMA = 0.3f;
+    // σ = 0.35 — empirically validated on C-5 hw dataset (25 real measurements,
+    // 5 coins × 5 cycles, p3_MIKROE3240_b06_012mm protocol, 2026-03-27).
+    // At σ=0.35: 25/25 correct classifications; conf_correct ∈ [0.05, 0.99];
+    // conf_wrong always < conf_correct. Closest pair: XCU vs XZNNIP (dist=0.86).
+    // Adjust after accumulating a larger validation set (>10 cycles per coin).
+    static constexpr float CONFIDENCE_SIGMA = 0.35f;
 
     // Number of top candidates returned by query().
     static constexpr uint8_t QUERY_TOP_N = 10;
