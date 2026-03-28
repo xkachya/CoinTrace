@@ -236,7 +236,7 @@ static void drawQuickScreen(float liveRp, float liveL, float basRp, float basL) 
     M5Cardputer.Display.setTextColor(dRpPct > QUICK_NOISE_FLOOR_PCT ? YELLOW : DARKGREY);
     M5Cardputer.Display.setCursor(4, 30);
     M5Cardputer.Display.printf("  dRp: %+.1f%%", dRpPct);
-    M5Cardputer.Display.setTextColor(DARKGREY);
+    M5Cardputer.Display.setTextColor(WHITE);
     M5Cardputer.Display.setCursor(145, 30);
     M5Cardputer.Display.printf("Rp:%5.0f", liveRp);
 
@@ -245,7 +245,7 @@ static void drawQuickScreen(float liveRp, float liveL, float basRp, float basL) 
     M5Cardputer.Display.setCursor(4, 46);
     if (lValid) {
         M5Cardputer.Display.printf("  dL:  %+.0f ct", dL_raw);
-        M5Cardputer.Display.setTextColor(DARKGREY);
+        M5Cardputer.Display.setTextColor(WHITE);
         M5Cardputer.Display.setCursor(145, 46);
         M5Cardputer.Display.printf(" L:%5.0f", liveL);
     } else {
@@ -1135,6 +1135,13 @@ void loop() {
               const float dRpPct = (basRp > 1.0f) ? (basRp - liveRp) / basRp * 100.0f : 0.0f;
               gLogger.info("Meas", "QuickScreen ON: basRp=%.0f liveRp=%.0f dRp=%+.1f%%",
                            basRp, liveRp, dRpPct);
+              if (gLDC->isLDataValid()) {
+                const float basL   = gLDC->getLBaseline();
+                const float liveL  = gLDC->getLiveL();
+                const float dL_raw = liveL - basL;
+                gLogger.info("Meas", "QuickScreen ON:  basL=%.0f  liveL=%.0f  dL=%+.0f ct  ferro=%s",
+                             basL, liveL, dL_raw, dL_raw > QUICK_FERRO_THRESH_L_RAW ? "YES" : "NO");
+              }
             }
           }
           // else: still settling — keep "Stabilizing..." visible, do nothing
