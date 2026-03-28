@@ -109,7 +109,7 @@ volatile bool gMeasStartRequested = false;
 
 // ── Quick Screen constants (Wave 8 C-7b) ─────────────────────────────────────
 // QUICK_SCREEN_SPEC.md §3 — Phase 1 threshold-based classification.
-// C-5 calibrated for p3 d≈0.6mm protocol (bare coin, 0.6mm base spacer).
+// C-5 calibrated for p3 d≈0.6mm protocol (coin on 0.6mm base spacer, no additional spacers).
 // PENDING HW-QS-6: verify with real hardware after first flash.
 // All values are static constexpr → tunable in source, no runtime overhead.
 static constexpr float QUICK_NOISE_FLOOR_PCT    =  2.0f;   // dRpPct below → signal in noise
@@ -1011,8 +1011,10 @@ void loop() {
             sMeas = {};
             drawMeasIdle();
           }
-        } else if ((key == 'r' || key == 'R') && sMeas.state == MeasState::IDLE) {
+        } else if ((key == 'r' || key == 'R') && sMeas.state == MeasState::IDLE && !sResultPending) {
           // ── R: recalibrate no-coin baseline (QUICK_SCREEN_SPEC.md §6) ─────
+          // Guard: !sResultPending prevents R from destroying the result screen
+          // while a coin is still on the coil after a full measurement cycle.
           // recalibrate() is ~250 ms blocking — show feedback before calling.
           // It internally guards against coin-present (logs warning, returns false).
           M5Cardputer.Display.fillRect(0, 54, 240, 20, BLACK);
