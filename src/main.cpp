@@ -27,6 +27,7 @@
 #include "FingerprintCache.h"   // Wave 7 P-4
 #include "StorageManager.h"     // Wave 7 P-5
 #include "VectorCompute.h"      // Wave 8 C-2/C-3 — fingerprint vector
+#include "MetalMatcher.h"       // Wave 8 C-7a/e — classification layer
 
 // ── Logger globals (ініціалізуються першими в setup()) ────────────
 static Logger              gLogger;
@@ -47,6 +48,7 @@ static LittleFSTransport gLfsTransport(gLFS, /*maxLogKB=*/200, /*queue=*/64);
 static MeasurementStore  gMeasStore(gLFS, gNVS);
 static SDCardManager     gSDCard;        // Wave 7 P-4 — optional SD archive tier
 static FingerprintCache  gFPCache;        // Wave 7 P-4 — fingerprint index in RAM
+static MetalMatcher      gMatcher;        // Wave 8 C-7e — weighted 5D classification (matchFull/matchQuick)
 static StorageManager    gStorage(gNVS, gLFS, gSDCard, gFPCache, gMeasStore);  // Wave 7 P-5 — unified Facade
 static WiFiManager       gWifi;                    // Wave 8 A-1 — AP/STA management
 static AsyncWebServer    gHttpServer(80);           // Wave 8 A-2 — non-blocking HTTP on port 80
@@ -105,11 +107,43 @@ static MeasSession sMeas;
 // without memory ordering issues on the ESP32-S3 dual-core architecture.
 volatile bool gMeasStartRequested = false;
 
+// ── Quick Screen constants (Wave 8 C-7b) ─────────────────────────────────────
+// QUICK_SCREEN_SPEC.md §3 — Phase 1 threshold-based classification.
+// C-5 calibrated for p3 d≈0.6mm protocol (bare coin, 0.6mm base spacer).
+// PENDING HW-QS-6: verify with real hardware after first flash.
+// All values are static constexpr → tunable in source, no runtime overhead.
+static constexpr float QUICK_NOISE_FLOOR_PCT    =  2.0f;   // dRpPct below → signal in noise
+static constexpr float QUICK_L_NOISE_FLOOR_CT   =  2.0f;   // |dL_raw| below → noise
+static constexpr float QUICK_SILVER_THRESH_PCT  = 40.0f;   // dRpPct > 40% → SILVER
+static constexpr float QUICK_COPPER_THRESH_PCT  = 30.0f;   // dRpPct > 30% → COPPER
+static constexpr float QUICK_ALUM_THRESH_PCT    = 15.0f;   // dRpPct > 15% → ALUMINIUM
+static constexpr float QUICK_FERRO_THRESH_L_RAW = 100.0f;  // dL_raw > 100 ct → ferro (⚠ verify S-5)
+
+// Reset to true when coin is removed → forces full redraw on next placement.
+// File-scope so loop() can reset it outside drawQuickScreen() (QUICK_SCREEN_SPEC §5).
+static bool sQuickScreenFresh = true;
+
+// Quick Screen metal classification (Phase 1 — threshold-based).
+// Phase 2 will call gMatcher.matchQuick() instead, after quick_centroid hw-data.
+struct QuickClass {
+    const char* label;    // ASCII label for UART log
+    const char* display;  // short string for display (ASCII — Cardputer has no Cyrillic font)
+};
+
+static QuickClass classifyQuick(float dRpPct, bool isFerro) {
+    if (isFerro)                           return {"STEEL",     "STEEL !"};
+    if (dRpPct > QUICK_SILVER_THRESH_PCT)  return {"SILVER",    "SILVER" };
+    if (dRpPct > QUICK_COPPER_THRESH_PCT)  return {"COPPER",    "COPPER" };
+    if (dRpPct > QUICK_ALUM_THRESH_PCT)    return {"ALUMINIUM", "ALUM"   };
+    return                                        {"?",         "?"      };
+}
+
 // ── C-2 Display Helpers ──────────────────────────────────────────────────────
 // drawMeasIdle()       — full-screen idle state (shown after session ends)
+// drawQuickScreen()    — live Quick Screen (IDLE + COIN_PRESENT)
 // drawMeasStep_full()  — full-screen redraw on each state transition
 // drawMeasResult()     — full-screen result view after COMPUTE step
-// doMeasCompute()      — runs vector math, FP query, save; called on STEP_DRIFT capture
+// doMeasCompute()      — runs vector math, FP match, save; called on STEP_DRIFT capture
 
 static void drawMeasIdle() {
     M5Cardputer.Display.fillScreen(BLACK);
@@ -124,6 +158,69 @@ static void drawMeasIdle() {
     M5Cardputer.Display.setTextColor(DARKGREY);
     M5Cardputer.Display.setCursor(5, 56);
     M5Cardputer.Display.printf("Meas: %u   %s", gNVS.getMeasCount(), gWifi.getIP());
+}
+
+// Wave 8 C-7b — live Quick Screen while a coin is present in IDLE state.
+// Partial-update strategy: ΔRp% and ΔL lines are redrawn every tick (rows
+// 22-51); header/ferro/class block is redrawn only when sQuickScreenFresh
+// or the ferro flag changes — avoids display flicker on each loop iteration.
+static void drawQuickScreen(float liveRp, float liveL, float basRp, float basL) {
+    const float dRpPct   = (basRp > 1.0f) ? (basRp - liveRp) / basRp * 100.0f : 0.0f;
+    const bool  lValid   = gLDC ? gLDC->isLDataValid() : false;
+    const float dL_raw   = lValid ? (liveL - basL) : 0.0f;
+    const bool  isFerro  = lValid && (dL_raw > QUICK_FERRO_THRESH_L_RAW);
+    const QuickClass qc  = classifyQuick(dRpPct, isFerro);
+
+    static bool sLastFerro = false;
+
+    // ── Partial update: ΔRp% and ΔL rows (every tick) ────────────────────
+    M5Cardputer.Display.fillRect(0, 22, 240, 14, BLACK);
+    M5Cardputer.Display.setTextSize(1);
+    M5Cardputer.Display.setTextColor(dRpPct > QUICK_NOISE_FLOOR_PCT ? YELLOW : DARKGREY);
+    M5Cardputer.Display.setCursor(4, 30);
+    M5Cardputer.Display.printf("  dRp: %+.1f%%", dRpPct);
+
+    M5Cardputer.Display.fillRect(0, 38, 240, 14, BLACK);
+    M5Cardputer.Display.setTextColor(fabsf(dL_raw) > QUICK_L_NOISE_FLOOR_CT ? YELLOW : DARKGREY);
+    M5Cardputer.Display.setCursor(4, 46);
+    if (lValid) { M5Cardputer.Display.printf("  dL:  %+.0f ct", dL_raw); }
+    else        { M5Cardputer.Display.print("  dL:  -- (no CLKIN)"); }
+
+    // ── Full redraw: header + ferro + class label (only when stale) ───────
+    if (sQuickScreenFresh || (isFerro != sLastFerro)) {
+        M5Cardputer.Display.fillRect(0, 0, 240, 22, BLACK);
+        M5Cardputer.Display.setTextSize(1);
+        M5Cardputer.Display.setTextColor(WHITE);
+        M5Cardputer.Display.setCursor(4, 6);
+        M5Cardputer.Display.print("QUICK SCREEN");
+        M5Cardputer.Display.setTextColor(DARKGREY);
+        M5Cardputer.Display.setCursor(138, 6);
+        M5Cardputer.Display.print("[ENTER=Full]");
+
+        M5Cardputer.Display.fillRect(0, 54, 240, 20, BLACK);
+        M5Cardputer.Display.setTextColor(isFerro ? RED : GREEN);
+        M5Cardputer.Display.setCursor(4, 66);
+        M5Cardputer.Display.printf("  Ferro: %s", isFerro ? "YES !" : "NO  v");
+
+        M5Cardputer.Display.fillRect(0, 76, 240, 36, BLACK);
+        M5Cardputer.Display.setTextSize(2);
+        M5Cardputer.Display.setTextColor(
+            isFerro ? RED : (dRpPct > QUICK_ALUM_THRESH_PCT ? GREEN : DARKGREY));
+        M5Cardputer.Display.setCursor(4, 84);
+        M5Cardputer.Display.print(qc.display);
+        M5Cardputer.Display.setTextSize(1);
+        M5Cardputer.Display.setTextColor(DARKGREY);
+        M5Cardputer.Display.setCursor(4, 100);
+        M5Cardputer.Display.print("  (quick estimate)");
+
+        M5Cardputer.Display.fillRect(0, 114, 240, 21, BLACK);
+        M5Cardputer.Display.setTextColor(DARKGREY);
+        M5Cardputer.Display.setCursor(4, 122);
+        M5Cardputer.Display.print("[ENTER] Full meas  [R] Recal");
+
+        sLastFerro       = isFerro;
+        sQuickScreenFresh = false;
+    }
 }
 
 static void drawMeasStep_full(const MeasSession& s, uint16_t rpLive = 0) {
@@ -250,32 +347,27 @@ static void doMeasCompute() {
         gLogger.warning("Meas", "Drift %.1f%% > 5%% — conf forced=0", drift * 100.0f);
     }
 
-    // ── 2. Fingerprint vector ──────────────────────────────────────────────
-    const float dRp1_n = VectorCompute::dRp1_n(sMeas.m);
-    const float k1v    = VectorCompute::k1(sMeas.m);
-    const float k2v    = VectorCompute::k2(sMeas.m);
-    const float slv    = VectorCompute::slope(sMeas.m);
-    const float dL1_n  = VectorCompute::dL1_n(sMeas.m);
+    // ── 2. Fingerprint vector (log raw values for diagnostics) ───────────────
     gLogger.info("Meas", "Vec: dRp1=%.0f  k1=%.3f  k2=%.3f  slope=%.4f  dL1=%.0f",
-                 VectorCompute::dRp1(sMeas.m), k1v, k2v, slv,
+                 VectorCompute::dRp1(sMeas.m),
+                 VectorCompute::k1(sMeas.m),
+                 VectorCompute::k2(sMeas.m),
+                 VectorCompute::slope(sMeas.m),
                  VectorCompute::dL1(sMeas.m));
 
-    // ── 3. Fingerprint cache query (skip on drift — unreliable vector) ─────
-    if (gFPCache.isReady() && !sMeas.driftWarn) {
-        QueryResult results[FingerprintCache::QUERY_TOP_N];
-        const uint8_t n = gFPCache.query(dRp1_n, k1v, k2v, slv, dL1_n,
-                                         results, FingerprintCache::QUERY_TOP_N);
-        if (n > 0 && results[0].confidence > 0.01f) {
-            strlcpy(sMeas.m.metal_code, results[0].entry->metal_code,
-                    sizeof(sMeas.m.metal_code));
-            strlcpy(sMeas.m.coin_name,  results[0].entry->coin_name,
-                    sizeof(sMeas.m.coin_name));
-            sMeas.m.conf = results[0].confidence;
-            gLogger.info("Meas", "Match: %s  conf=%.2f  dist=%.4f",
-                         sMeas.m.coin_name, sMeas.m.conf, results[0].distance);
+    // ── 3. Fingerprint match via MetalMatcher (skip on drift — unreliable vector) ──
+    // matchFull() normalises internally via VectorCompute (ADR-M6).
+    // logTopCandidates() emits #1..#4 with per-axis dist breakdown to UART.
+    if (gMatcher.isReady() && !sMeas.driftWarn) {
+        const MatchResult mr = gMatcher.matchFull(sMeas.m);
+        gMatcher.logTopCandidates(mr);
+        if (mr.valid) {
+            strlcpy(sMeas.m.metal_code, mr.metal_code, sizeof(sMeas.m.metal_code));
+            strlcpy(sMeas.m.coin_name,  mr.coin_name,  sizeof(sMeas.m.coin_name));
+            sMeas.m.conf = mr.confidence;
         }
-    } else if (!gFPCache.isReady()) {
-        gLogger.info("Meas", "FP cache not ready — skipping match");
+    } else if (!gMatcher.isReady()) {
+        gLogger.info("Meas", "Matcher not ready — skipping match");
     }
 
     // ── 4. Save measurement ────────────────────────────────────────────────
@@ -548,6 +640,24 @@ void setup() {
               (unsigned)FingerprintCache::MAX_ENTRIES);
   } else {
     gLogger.warning("LFS", "data mount failed — measurements will not persist");
+  }
+
+  // ── 4g-b. MetalMatcher (Wave 8 C-7e) ──────────────────────────────────────
+  // init() takes a const-ref to gFPCache — must follow 4g so entries are loaded.
+  // loadConfig() is best-effort: falls back to compiled defaults if SD absent.
+  gMatcher.init(gFPCache);
+  if (gSDCard.isAvailable()) {
+      if (gMatcher.loadConfig(&gSDCard, gCtx.spiMutex)) {
+          gLogger.info("Matcher", "Config loaded — sigma=%.2f weights=[%.1f,%.1f,%.1f,%.1f,%.1f]",
+                       gMatcher.config().sigma,
+                       gMatcher.config().full_weights[0], gMatcher.config().full_weights[1],
+                       gMatcher.config().full_weights[2], gMatcher.config().full_weights[3],
+                       gMatcher.config().full_weights[4]);
+      } else {
+          gLogger.info("Matcher", "Using default config (sigma=%.2f)", gMatcher.config().sigma);
+      }
+  } else {
+      gLogger.info("Matcher", "SD not available — default config");
   }
 
   // ── 4h. StorageManager Facade (Wave 7 P-5) ───────────────────────────────────
@@ -888,6 +998,20 @@ void loop() {
             sMeas = {};
             drawMeasIdle();
           }
+        } else if ((key == 'r' || key == 'R') && sMeas.state == MeasState::IDLE) {
+          // ── R: recalibrate no-coin baseline (QUICK_SCREEN_SPEC.md §6) ─────
+          // recalibrate() is ~250 ms blocking — show feedback before calling.
+          // It internally guards against coin-present (logs warning, returns false).
+          M5Cardputer.Display.fillRect(0, 54, 240, 20, BLACK);
+          M5Cardputer.Display.setTextSize(1);
+          M5Cardputer.Display.setTextColor(CYAN);
+          M5Cardputer.Display.setCursor(4, 66);
+          M5Cardputer.Display.print("  Recalibrating...");
+          if (gLDC && gLDC->isReady()) {
+            gLDC->recalibrate();   // logs result + updated baselines internally
+          }
+          sQuickScreenFresh = true;  // force full redraw with updated baseline
+          gLogger.info("Meas", "Recalibrate requested (R key)");
         } else {
           // Display key on screen
           M5Cardputer.Display.fillRect(0, M5Cardputer.Display.height() - 20,
@@ -941,6 +1065,34 @@ void loop() {
         drawMeasStep_full(sMeas);
         gLogger.info("Meas", "HTTP start: session started (STEP_BASE)");
       }
+    }
+
+    // ── Quick Screen — IDLE + live coin detection (Wave 8 C-7b) ──────────────
+    // QUICK_SCREEN_SPEC.md §2: no new MeasState — visual mode inside IDLE.
+    // drawQuickScreen() partial-updates ΔRp%/ΔL on every tick; full redraw
+    // only when sQuickScreenFresh or the ferro flag changes (avoids flicker).
+    if (sMeas.state == MeasState::IDLE) {
+      static LDC1101Plugin::CoinState sPrevCoinState = LDC1101Plugin::CoinState::IDLE_NO_COIN;
+      if (coinState == LDC1101Plugin::CoinState::COIN_PRESENT) {
+        drawQuickScreen(gLDC->getLiveRp(), gLDC->getLiveL(),
+                        gLDC->getBaseline(), gLDC->getLBaseline());
+        if (sPrevCoinState != LDC1101Plugin::CoinState::COIN_PRESENT) {
+          // First tick with coin — log initial reading
+          const float basRp  = gLDC->getBaseline();
+          const float liveRp = gLDC->getLiveRp();
+          const float dRpPct = (basRp > 1.0f) ? (basRp - liveRp) / basRp * 100.0f : 0.0f;
+          gLogger.info("Meas", "QuickScreen ON: basRp=%.0f liveRp=%.0f dRp=%+.1f%%",
+                       basRp, liveRp, dRpPct);
+        }
+      } else {
+        if (sPrevCoinState == LDC1101Plugin::CoinState::COIN_PRESENT) {
+          // Coin just removed — restore idle screen
+          sQuickScreenFresh = true;   // force full redraw on next placement
+          drawMeasIdle();
+          gLogger.info("Meas", "QuickScreen OFF: coin removed");
+        }
+      }
+      sPrevCoinState = coinState;
     }
 
     // ── Periodic live RP + countdown update (every 1 s, no flicker) ───────
