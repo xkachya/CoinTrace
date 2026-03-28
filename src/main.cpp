@@ -1023,7 +1023,8 @@ void loop() {
           if (gLDC && gLDC->isReady()) {
             gLDC->recalibrate();   // logs result + updated baselines internally
           }
-          sQuickScreenFresh = true;  // force full redraw with updated baseline
+          sQuickScreenFresh = true;  // force full redraw on next coin placement
+          drawMeasIdle();            // clear "Recalibrating..." — restore idle screen
           gLogger.info("Meas", "Recalibrate requested (R key)");
         } else {
           // Display key on screen
