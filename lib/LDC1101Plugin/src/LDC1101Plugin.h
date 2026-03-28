@@ -160,6 +160,77 @@ public:
     float     getLBaseline()  const { return calibrationLBaseline_; }
     float     getFSensor()    const { return calibrationFSensor_; }   // Hz
 
+    // ── Quick Screen API (Wave 8 C-7c) ────────────────────────────────────────
+    // QUICK_SCREEN_SPEC.md §8
+
+    // Returns the most recent live RP_DATA reading from the update() cache.
+    // Thread-safe: acquires dataMutex_ with 50 ms timeout.
+    // Returns 0.0f if not ready, mutex timeout, or cache invalid.
+    float getLiveRp() const {
+        if (!dataMutex_) return 0.0f;
+        if (xSemaphoreTake(dataMutex_, pdMS_TO_TICKS(50)) != pdTRUE) return 0.0f;
+        const float rp = cache_.valid ? static_cast<float>(cache_.rpRaw) : 0.0f;
+        xSemaphoreGive(dataMutex_);
+        return rp;
+    }
+
+    // Returns the most recent live L_DATA reading from the update() cache.
+    // Thread-safe: acquires dataMutex_ with 50 ms timeout.
+    // ⚠️ ADR-CLKIN-002: meaningful only if isLDataValid() == true (CLKIN wired).
+    // Returns 0.0f if not ready, mutex timeout, or cache invalid.
+    float getLiveL() const {
+        if (!dataMutex_) return 0.0f;
+        if (xSemaphoreTake(dataMutex_, pdMS_TO_TICKS(50)) != pdTRUE) return 0.0f;
+        const float l = cache_.valid ? static_cast<float>(cache_.lRaw) : 0.0f;
+        xSemaphoreGive(dataMutex_);
+        return l;
+    }
+
+    // Returns true if CLKIN is configured (clkin_gpio >= 0 in ldc1101.json).
+    // Without CLKIN: getLiveL() and getLBaseline() return 0 or garbage.
+    // ADR-CLKIN-002: always guard L_DATA usage with this check.
+    bool isLDataValid() const { return clkinGpio_ >= 0; }
+
+    // Re-measure the no-coin baseline using 10 fresh samples (avg of ≥5 valid).
+    // Call this when the user presses 'R' key in IDLE state (Quick Screen recal).
+    // Guard: returns false immediately if coin is present — caller must ensure no coin.
+    // Blocks ~250 ms (10 × convTimeMs + 5 ms each). Call from MainLoop, not update().
+    // Does NOT recompute calibrationFSensor_ (retained from last calibrate() call).
+    bool recalibrate() {
+        if (!ready_) return false;
+        if (isCoinPresent()) {
+            ctx_->log->warning(getName(), "recalibrate() — coin present, remove coin first");
+            return false;
+        }
+        float    rpSum = 0.0f, lSum = 0.0f;
+        uint32_t ok    = 0;
+        for (int i = 0; i < 10; i++) {
+            delay(convTimeMs_() + 5);
+            const uint8_t status = spiRead_(REG_STATUS);
+            if (status & STATUS_NO_OSC) continue;   // skip if coil not oscillating
+            if (status & STATUS_DRDYB)  continue;   // skip if conversion in progress
+            uint16_t rp, l;
+            if (readBurst_(rp, l) && rp > 0 && rp < 65535) {
+                rpSum += rp;
+                lSum  += l;
+                ++ok;
+            }
+        }
+        if (ok < 5) {
+            ctx_->log->warning(getName(), "recalibrate() failed — only %u/10 valid samples", ok);
+            return false;
+        }
+        const float oldRp = calibrationRpBaseline_;
+        const float oldL  = calibrationLBaseline_;
+        calibrationRpBaseline_ = rpSum / ok;
+        calibrationLBaseline_  = lSum  / ok;
+        lastCalibrationTime_   = millis();
+        ctx_->log->info(getName(),
+            "recalibrate OK: RP %.0f\u2192%.0f  L %.0f\u2192%.0f  (%u/10 samples)",
+            oldRp, calibrationRpBaseline_, oldL, calibrationLBaseline_, ok);
+        return true;
+    }
+
     // ── IPlugin status ────────────────────────────────────────────────────────
     bool isEnabled() const override { return enabled_; }
     bool isReady()   const override { return ready_; }

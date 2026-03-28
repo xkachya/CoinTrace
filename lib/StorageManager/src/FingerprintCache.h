@@ -142,8 +142,13 @@ public:
     // Returns the number of results written (may be < QUERY_TOP_N if count_ < QUERY_TOP_N).
     //
     // Thread safe for concurrent reads (no writes after init()).
+    //
+    // weights: optional array [w_dRp1_n, w_k1, w_k2, w_slope, w_dL1_n].
+    //   nullptr → equal weights 1.0 (backward-compatible with all existing callers).
+    //   MetalMatcher passes cfg_.full_weights or cfg_.quick_weights (METAL_MATCHER_ARCHITECTURE.md §8).
     uint8_t query(float dRp1_n, float k1, float k2, float slope, float dL1_n,
-                  QueryResult* results, uint8_t maxResults = QUERY_TOP_N) const;
+                  QueryResult* results, uint8_t maxResults = QUERY_TOP_N,
+                  const float* weights = nullptr) const;
 
 private:
     // ── Storage ────────────────────────────────────────────────────────────

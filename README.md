@@ -240,17 +240,30 @@ Outputs real-time CSV + live attenuation curve plot.
 
 ## 📊 Supported Metals
 
-| Metal | Conductivity | Status | Notes |
-|-------|-------------|--------|-------|
-| Silver 999 | 63 MS/m | ✅ Planned | Steepest curve |
-| Silver 925 | ~60 MS/m | ✅ Planned | |
-| Silver 900 | ~57 MS/m | ✅ Planned | |
-| Copper | 59 MS/m | ✅ Planned | |
-| Gold 999 | 45 MS/m | 🔄 Planned | |
-| Gold 585 | ~27 MS/m | 🔄 Planned | |
-| Aluminum | 37 MS/m | 🔄 Planned | |
-| Steel (magnetic) | 6–10 MS/m | ✅ Planned | |
-| Nickel silver | ~4 MS/m | 🔄 Planned | |
+### Currently in fingerprint database (Wave 8, 2026)
+
+These 8 metal classes are implemented in the current firmware DB (`FingerprintCache`):
+
+| Metal | DB code | Conductivity | Notes |
+|-------|---------|-------------|-------|
+| Silver 999 | `XAG999` | 63 MS/m | Steepest attenuation curve |
+| Silver 925 | `XAG925` | ~60 MS/m | Sterling silver |
+| Silver 833 | `XAG833` | ~53 MS/m | European 13-lot silver |
+| Copper | `XCU` | 59 MS/m | |
+| Nickel silver (zinc alloy) | `XZNNIP` | ~4 MS/m | Cu-Zn-Ni alloy; close to XCU in 5D space |
+| Nickel | `XNI` | 14 MS/m | |
+| Aluminum | `XAL` | 37 MS/m | |
+| Steel (ferromagnetic) | `XFE` | 6–10 MS/m | Detected via ΔL axis; requires CLKIN HW |
+
+### Planned for future waves
+
+| Metal | Conductivity | Notes |
+|-------|-------------|-------|
+| Gold 999 | 45 MS/m | Wave 9+ — requires calibrated samples |
+| Gold 585 | ~27 MS/m | Wave 9+ |
+| Silver 900 | ~57 MS/m | Wave 9+ |
+
+> **Note:** Gold is intentionally excluded from the current DB — it is physically similar to Silver 925 in RP space and requires high-quality reference samples to distinguish reliably. It will be added after S-5 (ferro-detection) and S-6 (Gold separation) research tasks.
 
 ---
 

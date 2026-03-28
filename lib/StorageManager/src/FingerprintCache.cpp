@@ -134,7 +134,8 @@ bool FingerprintCache::init(LittleFSManager& lfs, SDCardManager* sdCard,
 //   dL1_n  = measured_dL1  / 2000.0f
 
 uint8_t FingerprintCache::query(float dRp1_n, float k1, float k2, float slope, float dL1_n,
-                                QueryResult* results, uint8_t maxResults) const {
+                                QueryResult* results, uint8_t maxResults,
+                                const float* weights) const {
     if (!ready_ || count_ == 0 || results == nullptr || maxResults == 0) return 0;
 
     const uint8_t topN = (maxResults < QUERY_TOP_N) ? maxResults : QUERY_TOP_N;
@@ -148,6 +149,16 @@ uint8_t FingerprintCache::query(float dRp1_n, float k1, float k2, float slope, f
 
     uint8_t found = 0;
 
+    // Hoist loop-invariant values outside the per-entry loop.
+    // Weights and sigma² are constant for the lifetime of this query call.
+    const float w0    = weights ? weights[0] : 1.0f;
+    const float w1    = weights ? weights[1] : 1.0f;
+    const float w2    = weights ? weights[2] : 1.0f;
+    const float w3    = weights ? weights[3] : 1.0f;
+    const float w4    = weights ? weights[4] : 1.0f;
+    const float sigma2 = CONFIDENCE_SIGMA * CONFIDENCE_SIGMA;
+    const uint8_t slots = (topN < count_) ? topN : (uint8_t)count_;
+
     for (uint16_t i = 0; i < count_; ++i) {
         const CacheEntry& e = entries_[i];
 
@@ -156,17 +167,17 @@ uint8_t FingerprintCache::query(float dRp1_n, float k1, float k2, float slope, f
         const float d2 = k2     - e.k2;
         const float d3 = slope  - e.slope;
         const float d4 = dL1_n  - e.dL1_n;
-        const float dist = sqrtf(d0*d0 + d1*d1 + d2*d2 + d3*d3 + d4*d4);
+
+        // Weighted Euclidean distance. weights==nullptr → equal weights 1.0 (METAL_MATCHER_ARCHITECTURE.md §8).
+        const float dist = sqrtf(w0*d0*d0 + w1*d1*d1 + w2*d2*d2 + w3*d3*d3 + w4*d4*d4);
 
         // Insert into sorted results (ascending distance)
-        const uint8_t slots = (topN < count_) ? topN : (uint8_t)count_;
         for (uint8_t j = 0; j < slots; ++j) {
             if (dist < results[j].distance) {
                 // Shift tail down
                 for (uint8_t k = slots - 1; k > j; --k) {
                     results[k] = results[k-1];
                 }
-                const float sigma2 = CONFIDENCE_SIGMA * CONFIDENCE_SIGMA;
                 results[j].entry      = &e;
                 results[j].distance   = dist;
                 results[j].confidence = expf(-(dist * dist) / sigma2);
@@ -175,6 +186,7 @@ uint8_t FingerprintCache::query(float dRp1_n, float k1, float k2, float slope, f
             }
         }
     }
+
 
     return found;
 }

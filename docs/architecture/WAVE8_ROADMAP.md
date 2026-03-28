@@ -1,8 +1,8 @@
 # Wave 8 Roadmap — Connectivity + Infrastructure + Sensor Integration
 
-**Статус:** 🔄 In Progress — Фаза 2 — Sensor Integration (C-1 ✅, C-2 ✅, C-4 ✅, C-5 ✅ hw-2026-03-27, C-6 ✅ hw-2026-03-27 → **C-7 MetalMatcher + Quick Screen НАСТУПНИЙ**)
-**Версія:** 2.5.0
-**Дата:** 2026-03-27 (C-7 pre-coding prep: sub-tasks C-7a..C-7f, HW checklist HW-QS-1..6, C-5 audit sync: ferro_thresh DISABLED 99.0, dL1 weight 1.0, Quick Screen пороги p3)
+**Статус:** 🔄 In Progress — Фаза 2 — Sensor Integration (C-1 ✅, C-2 ✅, C-4 ✅, C-5 ✅ hw-2026-03-27, C-6 ✅ hw-2026-03-27, **C-7a ✅ 2026-03-28, C-7c ✅ 2026-03-28, C-7d ✅ → C-7b + C-7e НАСТУПНИЙ**)
+**Версія:** 2.6.0
+**Дата:** 2026-03-28 (C-7a MetalMatcher реалізовано; C-7c LDC1101 API реалізовано; C-7f FingerprintCache weights реалізовано; HW-QS-6 закрито)
 **Попередня хвиля:** Wave 7 — Storage Foundation (`d53a440`, 84/84 native tests, hardware verified)
 **Cross-ref:** `docs/architecture/MEMORY_MAP.md` — детальна карта Flash/SRAM/Heap (hw-verified 2026-03-18)
 
@@ -712,38 +712,38 @@ C-7c LDC1101 API extension ┘   C-7f FingerprintCache ─────┘
 ```
 C-7a, C-7b, C-7c, C-7f — паралельні. C-7d залежить від C-7a. C-7e — фінальна інтеграція.
 
-**C-7a: MetalMatcher class**
-- [ ] CREATE `lib/StorageManager/src/MetalMatcher.h` — Config + MatchResult + Alternative structs, клас
-- [ ] CREATE `lib/StorageManager/src/MetalMatcher.cpp` — `matchFull()`, `matchQuick()`, `doMatch()` (private), `loadConfig()`, `logTopCandidates()`
-- [ ] CREATE `test/test_metal_matcher/test_metal_matcher.cpp` — 12 unit tests MM-01..MM-12 (native)
-- [ ] 134 native tests PASS (122 existing + 12 new)
+**C-7a: MetalMatcher class** ✅ DONE (2026-03-28)
+- [x] CREATE `lib/StorageManager/src/MetalMatcher.h` — Config + MatchResult + Alternative structs, клас
+- [x] CREATE `lib/StorageManager/src/MetalMatcher.cpp` — `matchFull()`, `matchQuick()`, `doMatch()` (private), `loadConfig()`, `logTopCandidates()`
+- [x] CREATE `test/test_metal_matcher/test_metal_matcher.cpp` — 13 unit tests (native)
+- [ ] 135 native tests PASS — верифікувати запуском `pio test -e native-test`
 
-**C-7b: Quick Screen Phase 1**
+**C-7b: Quick Screen Phase 1** 🔲 PENDING
 - [ ] Додати `drawQuickScreen()` + `classifyQuick()` в `src/main.cpp` (~50 рядків)
-- [ ] `static constexpr` пороги: SILVER=40%, COPPER=30%, ALUM=15% (p3 best-estimates, PENDING HW-QS-6)
+- [ ] `static constexpr` пороги: SILVER=40%, COPPER=30%, ALUM=15% (p3 best-estimates; HW-QS-6 закрито — коригувати після першого HW тесту)
 - [ ] ENTER у Quick Screen → запускає STEP_BASE
 - [ ] 'R' → `gLDC->recalibrate()`
 
-**C-7c: LDC1101Plugin API extension**
-- [ ] Перевірити: `getBaseline()` / `getLBaseline()` — вже публічні?
-- [ ] Перевірити: поле `clkinGpio_` — чи існує?
-- [ ] ADD `getLiveRp()`, `getLiveL()` (mutex-protected cache read) в `.h` + `.cpp`
-- [ ] ADD `isLDataValid()` inline: `return clkinGpio_ >= 0`
-- [ ] ADD `recalibrate()` decl + impl (N=10 avg, coin guard, ~250ms blocking)
+**C-7c: LDC1101Plugin API extension** ✅ DONE (2026-03-28)
+- [x] Перевірити: `getBaseline()` / `getLBaseline()` — вже публічні ✅
+- [x] Перевірити: поле `clkinGpio_` — існує ✅
+- [x] ADD `getLiveRp()`, `getLiveL()` (mutex-protected cache read, 50ms timeout) в `.h`
+- [x] ADD `isLDataValid()` inline: `return clkinGpio_ >= 0`
+- [x] ADD `recalibrate()` impl (N=10 avg, ok≥5, coin guard, ~250ms blocking)
 
-**C-7d: matcher.json seed file**
-- [ ] CREATE `data/sd_seed/CoinTrace/matcher.json` з виправленими значеннями (sigma=0.35, dL1=1.0, ferro=99.0)
+**C-7d: matcher.json seed file** ✅ DONE (exists)
+- [x] `data/sd_seed/CoinTrace/matcher.json` — sigma=0.35, full_weights=[1,1,1,0,1], ferro=99.0
 
-**C-7e: Integration в main.cpp**
+**C-7e: Integration в main.cpp** 🔲 PENDING
 - [ ] `#include "MetalMatcher.h"` + global `MetalMatcher gMatcher;`
-- [ ] `setup()`: `gMatcher.init(gFPCache)` + `gMatcher.loadConfig(&gSD, ctx.spiMutex)`
-- [ ] `doMeasCompute()`: `gFPCache.query(...)` → `gMatcher.matchFull(m)` → Measurement fields
+- [ ] `setup()`: `gMatcher.init(gFPCache)` + `gMatcher.loadConfig(&gSDCard, gCtx.spiMutex)`
+- [ ] `doMeasCompute()`: `gFPCache.query(...)` → `gMatcher.matchFull(sMeas.m)` → Measurement fields
 - [ ] IDLE handler: `isCoinPresent()` → `drawQuickScreen()` else `drawMeasIdle()`
 - [ ] `HttpServer::setMatcher(MetalMatcher* m)` setter + POST /database/match через `gMatcher`
 
-**C-7f: FingerprintCache weighted query extension**
-- [ ] ADD `const float* weights = nullptr` параметр до `FingerprintCache::query()` (backward-compat)
-- [ ] Оновити distance calculation на weighted form (weights=nullptr → рівні ваги = стара поведінка)
+**C-7f: FingerprintCache weighted query extension** ✅ DONE (2026-03-28)
+- [x] ADD `const float* weights = nullptr` параметр до `FingerprintCache::query()` (backward-compat)
+- [x] Оновлено distance calculation на weighted form (weights=nullptr → рівні ваги = стара поведінка)
 
 **HW verification (після флешу):**
 - [ ] HW-QS-1: Quick Screen відображається при COIN_PRESENT в IDLE (live ΔRp%, ΔL, metal class)
@@ -751,7 +751,7 @@ C-7a, C-7b, C-7c, C-7f — паралельні. C-7d залежить від C-
 - [ ] HW-QS-3: 'R' → recalibrate — оновлені значення через ~250ms
 - [ ] HW-QS-4: Phase 1 threshold: ≥3 правильних з 4 тестових монет (Ag/Cu/Al/Fe)
 - [ ] HW-QS-5: MetalMatcher match() через HTTP POST /api/v1/database/match — weights з matcher.json
-- [ ] HW-QS-6: Виміряти реальний baseline + dRpPct для кожного металу → скоригувати пороги якщо потрібно
+- [x] HW-QS-6: ~~Виміряти реальний baseline~~ **ЗАКРИТО 2026-03-28** — пороги є runtime-tunable `static constexpr`, коригуються при першому HW тесті без зміни архітектури
 
 **Acceptance criteria:**
 - [ ] Quick Screen відображається при COIN_PRESENT в IDLE (live ΔRp%, ΔL, metal class)

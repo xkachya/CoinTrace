@@ -1,9 +1,9 @@
 # LDC1101 в системі плагінів CoinTrace: Архітектурний аналіз
 
-**Тип документа:** Технічний аналіз та специфікація реалізації  
-**Версія:** 1.3.3  
-**Дата:** 14 березня 2026 (оновлено: 16 березня 2026 — v1.3.0: §A LHR 24-bit ADR-LHR-001; §B fSENSOR вимірювання ADR-FREQ-001; §C RP_SET optimization; §D HIGH_Q_SENSOR ADR-HQ-001; §E INTB v2 roadmap ADR-INTB-001; §F температурна компенсація ADR-TEMP-001; §G coil guidelines | хвиля 5: M-1 staleFlag без mutex; M-3 polling contract COIN_REMOVED; L-1 convTimeMs; I-1 lastCalibrationTime; I-2 reconfigureSensor async | 17 березня 2026 — v1.3.1: аудит-відповідь F-03 §9.2.2.2 ref; F-05 spiMutex≡spi_vspi_mutex; TODO lhrContinuous path; calMaxAgeSec placeholder clarification; §10 бекло rows 6–9 | 16 березня 2026 — v1.3.2: видалено §12 dual-chip/dual-freq roadmap (LDC1614, dL_ratio, 9D vector) | 20 березня 2026 — v1.3.3: §2 пункт 5 CLKIN/CLDO/PWM hardware; §7 clkin_freq_hz уточнено LHR-only; §10 задача 10 LEDC timer)  
-**Статус:** Актуальний (v1.3.3)  
+**Тип документа:** Технічний аналіз та специфікація реалізації
+**Версія:** 1.4.0
+**Дата:** 14 березня 2026 (оновлено: 16 березня 2026 — v1.3.0: §A LHR 24-bit ADR-LHR-001; §B fSENSOR вимірювання ADR-FREQ-001; §C RP_SET optimization; §D HIGH_Q_SENSOR ADR-HQ-001; §E INTB v2 roadmap ADR-INTB-001; §F температурна компенсація ADR-TEMP-001; §G coil guidelines | хвиля 5: M-1 staleFlag без mutex; M-3 polling contract COIN_REMOVED; L-1 convTimeMs; I-1 lastCalibrationTime; I-2 reconfigureSensor async | 17 березня 2026 — v1.3.1: аудит-відповідь F-03 §9.2.2.2 ref; F-05 spiMutex≡spi_vspi_mutex; TODO lhrContinuous path; calMaxAgeSec placeholder clarification; §10 бекло rows 6–9 | 16 березня 2026 — v1.3.2: видалено §12 dual-chip/dual-freq roadmap (LDC1614, dL_ratio, 9D vector) | 20 березня 2026 — v1.3.3: §2 пункт 5 CLKIN/CLDO/PWM hardware; §7 clkin_freq_hz уточнено LHR-only; §10 задача 10 LEDC timer | 28 березня 2026 — v1.4.0: Wave 8 C-7c §8.2 Quick Screen API: getLiveRp(), getLiveL(), isLDataValid(), recalibrate())
+**Статус:** Актуальний (v1.4.0)  
 **Джерело:** Texas Instruments LDC1101 Datasheet SNOSD01D (May 2015 – Revised October 2016) | TI App Note SNOA944
 
 ---
@@ -930,6 +930,61 @@ public:
     CoinState getCoinState()  const { return coin.state; }
     bool      isCoinPresent() const { return coin.state == CoinState::COIN_PRESENT; }
 
+    // ── Quick Screen live data (Wave 8 C-7c, 2026-03-28) ─────────────
+    // Повертають поточні кешовані значення без додаткового SPI-читання.
+    // Мутекс: dataMutex_ (50 мс timeout). Повертають 0.0f якщо мутекс недоступний.
+
+    float getLiveRp() const {
+        if (!dataMutex_) return 0.0f;
+        if (xSemaphoreTake(dataMutex_, pdMS_TO_TICKS(50)) != pdTRUE) return 0.0f;
+        const float rp = cache_.valid ? static_cast<float>(cache_.rpRaw) : 0.0f;
+        xSemaphoreGive(dataMutex_);
+        return rp;
+    }
+
+    float getLiveL() const {
+        if (!dataMutex_) return 0.0f;
+        if (xSemaphoreTake(dataMutex_, pdMS_TO_TICKS(50)) != pdTRUE) return 0.0f;
+        const float l = cache_.valid ? static_cast<float>(cache_.lRaw) : 0.0f;
+        xSemaphoreGive(dataMutex_);
+        return l;
+    }
+
+    // Повертає true якщо CLKIN GPIO сконфігурований (clkin_gpio >= 0).
+    // false → L_DATA не відображає індуктивність; ferro-detection вимкнена.
+    bool isLDataValid() const { return clkinGpio_ >= 0; }
+
+    // Швидка рекалібровка без монети (~250 мс).
+    // Оновлює calibrationRpBaseline_ та calibrationLBaseline_.
+    // НЕ перераховує calibrationFSensor_ (fSENSOR стабільний між рекалібровками).
+    // ⚠ Блокуючий виклик — викликати лише з IDLE стану поза update() циклом.
+    // ⚠ Якщо монета присутня під час виклику — повертає false без змін.
+    bool recalibrate() {
+        if (!ready) return false;
+        if (isCoinPresent()) {
+            log_i("LDC1101", "recalibrate() skipped: coin present");
+            return false;
+        }
+        float rpSum = 0, lSum = 0;
+        uint32_t ok = 0;
+        for (int i = 0; i < 10; i++) {
+            delay(convTimeMs() + 5);
+            uint16_t rp, l;
+            if (readMeasurementBurst(rp, l) && rp > 0 && rp < 65535) {
+                rpSum += rp; lSum += l; ok++;
+            }
+        }
+        if (ok < 5) {
+            log_i("LDC1101", "recalibrate() failed: only %d valid readings", ok);
+            return false;
+        }
+        calibrationRpBaseline_ = rpSum / ok;
+        calibrationLBaseline_  = lSum  / ok;
+        log_i("LDC1101", "recalibrate() OK: rpBase=%.0f lBase=%.0f (%d samples)",
+              calibrationRpBaseline_, calibrationLBaseline_, ok);
+        return true;
+    }
+
     HealthStatus getHealthStatus() const override {
         if (!enabled) return HealthStatus::DISABLED;
         if (!ready)   return HealthStatus::INITIALIZATION_FAILED;
@@ -1476,6 +1531,6 @@ private:
 
 ---
 
-*Документ підготовлено для архітектора та імплементора `LDC1101Plugin`.*  
-*Версія: 1.3.2 | Дата: 16 березня 2026*  
+*Документ підготовлено для архітектора та імплементора `LDC1101Plugin`.*
+*Версія: 1.4.0 | Дата: 28 березня 2026*
 *Верифіковано по: TI LDC1101 Datasheet SNOSD01D – May 2015 – Revised October 2016 | TI App Note SNOA944 "Optimizing L Measurement Resolution"*
