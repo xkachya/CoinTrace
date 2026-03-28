@@ -1,23 +1,24 @@
 # Quick Screen Specification — CoinTrace
 
-**Версія:** 1.4.0
+**Версія:** 1.5.0
 **Дата:** 2026-03-28
-**Статус:** ⚡ ЧАСТКОВО РЕАЛІЗОВАНО (Wave 8 C-7)
+**Статус:** ✅ РЕАЛІЗОВАНО (Wave 8 C-7) — pending HW verification HW-QS-1..5
 
 | Компонент | Файл | Статус |
 |-----------|------|--------|
 | `getLiveRp()` / `getLiveL()` | `lib/LDC1101Plugin/src/LDC1101Plugin.h` | ✅ Реалізовано (C-7c) |
 | `isLDataValid()` | `lib/LDC1101Plugin/src/LDC1101Plugin.h` | ✅ Реалізовано (C-7c) |
 | `recalibrate()` | `lib/LDC1101Plugin/src/LDC1101Plugin.h` | ✅ Реалізовано (C-7c) |
-| `drawQuickScreen()` + `classifyQuick()` | `src/main.cpp` | 🔲 Pending (C-7b) |
-| Quick Screen пороги (константи) | `src/main.cpp` | 🔲 Pending (C-7b) |
-| IDLE handler + 'R' key | `src/main.cpp` | 🔲 Pending (C-7e) |
+| `drawQuickScreen()` + `classifyQuick()` | `src/main.cpp` | ✅ Реалізовано (C-7b) |
+| Quick Screen пороги (константи) | `src/main.cpp` | ✅ Реалізовано (C-7b) |
+| IDLE handler + 'R' key | `src/main.cpp` | ✅ Реалізовано (C-7e) |
 
 **HW-QS-6 ЗАКРИТО (2026-03-28):** Пороги Quick Screen Phase 1 (SILVER=40%, COPPER=30%, ALUM=15%) є best-estimates на основі C-5 centroid даних. Прийнято рішення: **пороги є runtime-tunable `static constexpr` константами** — після першого HW тесту (HW-QS-6) скоригувати в коді без зміни архітектури. HW-QS-6 виконується під час C-7e HW verification, не є блокером для початку C-7b імплементації.
 
 **Cross-ref:** `COLLECTOR_USE_CASE.md §9`, `MEASUREMENT_WORKFLOW.md`, `METAL_MATCHER_ARCHITECTURE.md`, `WAVE8_ROADMAP.md §C-7`
 
 **Changelog:**
+- 1.5.0 (2026-03-28) — C-7b + C-7e реалізовано (`a41f7af`): `drawQuickScreen()`, `classifyQuick()`, QUICK_* пороги, `sQuickScreenFresh`, IDLE Quick Screen branch, R-key recalibrate, `gMatcher.init()` + `loadConfig()` у `setup()`, `gMatcher.matchFull()` у `doMeasCompute()`. Статус: PARTIALLY_IMPLEMENTED → IMPLEMENTED (pending HW-QS-1..5). Гайд: `docs/guides/HW_QUICK_SCREEN_TEST.md`.
 - 1.4.0 (2026-03-28) — C-7c реалізовано: `getLiveRp()`, `getLiveL()`, `isLDataValid()`, `recalibrate()` додано в `LDC1101Plugin.h`. HW-QS-6 закрито — рішення прийнято. Статус оновлено SPEC → PARTIALLY_IMPLEMENTED.
 - 1.3.0 (2026-03-27) — C-5 hw-data sync: пороги класифікації оновлені для p3 d=0.6mm (SILVER 25→40%, COPPER 14→30%, ALUM 5→15%). Додано caveat про PENDING HW-QS-6 baseline calibration. Старі значення базувались на синтетичних p2 d=1.4mm даних.
 - 1.2.0 (2026-03-26) — Pre-implementation sync: §9 пункт 1 (ENTER як шлях запуску) позначено ✅ — MEASUREMENT_WORKFLOW.md v1.0.0 вже містить цей пункт як path #2.
