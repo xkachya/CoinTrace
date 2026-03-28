@@ -22,6 +22,7 @@
 
 ```
 Послідовність:
+  0. SD-картка     — matcher.json + index.json (cardreader)
   1. Flash           — прошити девайс (pio run --target upload)
   2. Serial Monitor  — відкрити por FT232RL (не COM3!)
   3. HW-QS-1         — Quick Screen відображається
@@ -48,6 +49,78 @@
 > **CLKIN:** `getLiveL()` та ΔL на дисплеї потребують CLKIN підключеного на GPIO4
 > (mikroBUS Pin16). Без CLKIN ΔL рядок показує `-- (no CLKIN)` — це очікувана поведінка,
 > ferro detection вимкнено. Тест HW-QS-1..4 можна пройти без CLKIN (тільки ΔRp%).
+
+---
+
+## §0 — Підготовка SD-картки
+
+**Потрібно:** мікро-SD картка (FAT32) + card reader, підключений до ПК.
+
+### Структура директорій на SD
+
+```
+SD:/
+└── CoinTrace/
+    ├── matcher.json        ← ваги MetalMatcher (обов'язковий для HW-QS-5)
+    └── database/
+        └── index.json      ← fingerprint DB (потрібна для matchFull())
+```
+
+### Крок 1 — скопіювати matcher.json
+
+Файл вже є у репозиторії як seed: `data/sd_seed/CoinTrace/matcher.json`
+
+```powershell
+# Замінити E: на букву вашої SD-картки
+$sd = "E:"
+
+# Створити директорію якщо не існує
+New-Item -ItemType Directory -Force "$sd\CoinTrace"
+
+# Скопіювати matcher.json
+Copy-Item "d:\GitHub\CoinTrace\data\sd_seed\CoinTrace\matcher.json" "$sd\CoinTrace\matcher.json"
+```
+
+**Вміст файлу** (версія seed, редагується без rebuild — перезавантаження застосовує зміни):
+
+```json
+{
+  "_comment": "CoinTrace MetalMatcher v1. Weights order: [dRp1_n, k1, k2, slope, dL1_n].",
+  "full_weights":  [1.0, 1.0, 1.0, 0.0, 1.0],
+  "quick_weights": [1.5, 0.0, 0.0, 0.0, 2.5],
+  "sigma": 0.35,
+  "min_confidence": 0.3,
+  "ferro_thresh_dL1_n": 99.0
+}
+```
+
+> `full_weights[3]` (slope) = 0.0 навмисно — slope є лінійною функцією k2 для p3 протоколу
+> і не додає незалежної інформації (ADR-C5-003, VectorCompute.h).
+
+### Крок 2 — скопіювати index.json (якщо є)
+
+Якщо DB вже заповнена:
+
+```powershell
+New-Item -ItemType Directory -Force "$sd\CoinTrace\database"
+Copy-Item "d:\GitHub\CoinTrace\data\sd_seed\CoinTrace\database\index.json" `
+          "$sd\CoinTrace\database\index.json"
+```
+
+Якщо `index.json` порожній або відсутній — HW-QS-5 пройде з результатом
+`[Meas] Matcher not ready — skipping match` (acceptable).
+
+### Крок 3 — вставити SD у Cardputer
+
+1. Вставити SD у слот Cardputer (мікро-SD, нижня частина корпусу)
+2. Перезавантажити або прошити заново
+3. Перевірити Serial Monitor при старті:
+   ```
+   [Matcher] Config loaded — sigma=0.35 weights=[1.0,1.0,1.0,0.0,1.0]
+   [Cache]   FingerprintCache ready — N entries
+   ```
+   Якщо `[Matcher] Using default config` — SD не змонтована або файл не знайдено.
+   Якщо `[SD]` помилки у Serial — перевірити форматування (FAT32, не exFAT).
 
 ---
 
