@@ -123,6 +123,10 @@ static constexpr float QUICK_FERRO_THRESH_L_RAW = 100.0f;  // dL_raw > 100 ct �
 // File-scope so loop() can reset it outside drawQuickScreen() (QUICK_SCREEN_SPEC §5).
 static bool sQuickScreenFresh = true;
 
+// Set by doMeasCompute() after showing the result screen — suppresses Quick Screen
+// until the coin is physically removed, keeping the result visible.
+static bool sResultPending = false;
+
 // Quick Screen metal classification (Phase 1 — threshold-based).
 // Phase 2 will call gMatcher.matchQuick() instead, after quick_centroid hw-data.
 struct QuickClass {
@@ -388,8 +392,10 @@ static void doMeasCompute() {
     }
 
     // ── 5. Show result screen ──────────────────────────────────────────────
-    // Screen persists until next fresh coin placement (sPrevCoinState guard).
+    // sResultPending suppresses Quick Screen until coin is removed — result
+    // stays visible as long as the coin remains on the coil.
     drawMeasResult(sMeas);
+    sResultPending = true;
 
     // ── 6. Reset session — next trigger requires coin removal + re-placement
     sMeas = {};
@@ -1081,19 +1087,26 @@ void loop() {
     if (sMeas.state == MeasState::IDLE) {
       static LDC1101Plugin::CoinState sPrevCoinState = LDC1101Plugin::CoinState::IDLE_NO_COIN;
       if (coinState == LDC1101Plugin::CoinState::COIN_PRESENT) {
-        drawQuickScreen(gLDC->getLiveRp(), gLDC->getLiveL(),
-                        gLDC->getBaseline(), gLDC->getLBaseline());
-        if (sPrevCoinState != LDC1101Plugin::CoinState::COIN_PRESENT) {
-          // First tick with coin — log initial reading
-          const float basRp  = gLDC->getBaseline();
-          const float liveRp = gLDC->getLiveRp();
-          const float dRpPct = (basRp > 1.0f) ? (basRp - liveRp) / basRp * 100.0f : 0.0f;
-          gLogger.info("Meas", "QuickScreen ON: basRp=%.0f liveRp=%.0f dRp=%+.1f%%",
-                       basRp, liveRp, dRpPct);
+        if (!sResultPending) {
+          // Normal Quick Screen — no recent full measurement
+          drawQuickScreen(gLDC->getLiveRp(), gLDC->getLiveL(),
+                          gLDC->getBaseline(), gLDC->getLBaseline());
+          if (sPrevCoinState != LDC1101Plugin::CoinState::COIN_PRESENT) {
+            const float basRp  = gLDC->getBaseline();
+            const float liveRp = gLDC->getLiveRp();
+            const float dRpPct = (basRp > 1.0f) ? (basRp - liveRp) / basRp * 100.0f : 0.0f;
+            gLogger.info("Meas", "QuickScreen ON: basRp=%.0f liveRp=%.0f dRp=%+.1f%%",
+                         basRp, liveRp, dRpPct);
+          }
         }
+        // else: result screen is showing — do nothing until coin removed
       } else {
         if (sPrevCoinState == LDC1101Plugin::CoinState::COIN_PRESENT) {
-          // Coin just removed — restore idle screen
+          // Coin removed — clear result (if any) and restore idle screen
+          if (sResultPending) {
+            sResultPending    = false;
+            gLogger.info("Meas", "Result dismissed: coin removed");
+          }
           sQuickScreenFresh = true;   // force full redraw on next placement
           drawMeasIdle();
           gLogger.info("Meas", "QuickScreen OFF: coin removed");
