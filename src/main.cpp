@@ -161,19 +161,62 @@ static void drawMeasIdle() {
 }
 
 // Wave 8 C-7b — live Quick Screen while a coin is present in IDLE state.
-// Partial-update strategy: ΔRp% and ΔL lines are redrawn every tick (rows
-// 22-51); header/ferro/class block is redrawn only when sQuickScreenFresh
-// or the ferro flag changes — avoids display flicker on each loop iteration.
+// Redraw strategy:
+//   needFullRedraw  → fillScreen(BLACK) + all static elements (header/ferro/class/footer)
+//   needPartialUpdate → ΔRp% and ΔL rows only, rate-limited to 250 ms to prevent flicker
+//   early return if nothing needs updating this tick
 static void drawQuickScreen(float liveRp, float liveL, float basRp, float basL) {
-    const float dRpPct   = (basRp > 1.0f) ? (basRp - liveRp) / basRp * 100.0f : 0.0f;
-    const bool  lValid   = gLDC ? gLDC->isLDataValid() : false;
-    const float dL_raw   = lValid ? (liveL - basL) : 0.0f;
-    const bool  isFerro  = lValid && (dL_raw > QUICK_FERRO_THRESH_L_RAW);
-    const QuickClass qc  = classifyQuick(dRpPct, isFerro);
+    const float dRpPct  = (basRp > 1.0f) ? (basRp - liveRp) / basRp * 100.0f : 0.0f;
+    const bool  lValid  = gLDC ? gLDC->isLDataValid() : false;
+    const float dL_raw  = lValid ? (liveL - basL) : 0.0f;
+    const bool  isFerro = lValid && (dL_raw > QUICK_FERRO_THRESH_L_RAW);
+    const QuickClass qc = classifyQuick(dRpPct, isFerro);
 
-    static bool sLastFerro = false;
+    static bool     sLastFerro    = false;
+    static uint32_t sLastUpdateMs = 0;
 
-    // ── Partial update: ΔRp% and ΔL rows (every tick) ────────────────────
+    const bool needFullRedraw    = sQuickScreenFresh || (isFerro != sLastFerro);
+    const bool needPartialUpdate = needFullRedraw || (millis() - sLastUpdateMs >= 250);
+
+    if (!needPartialUpdate) return;
+    sLastUpdateMs = millis();
+
+    // ── Full redraw: clear screen + static elements ───────────────────────
+    // fillScreen(BLACK) eliminates any leftover pixels from drawMeasIdle().
+    if (needFullRedraw) {
+        M5Cardputer.Display.fillScreen(BLACK);
+
+        M5Cardputer.Display.setTextSize(1);
+        M5Cardputer.Display.setTextColor(WHITE);
+        M5Cardputer.Display.setCursor(4, 6);
+        M5Cardputer.Display.print("QUICK SCREEN");
+        M5Cardputer.Display.setTextColor(DARKGREY);
+        M5Cardputer.Display.setCursor(138, 6);
+        M5Cardputer.Display.print("[ENTER=Full]");
+
+        M5Cardputer.Display.setTextColor(isFerro ? RED : GREEN);
+        M5Cardputer.Display.setCursor(4, 66);
+        M5Cardputer.Display.printf("  Ferro: %s", isFerro ? "YES !" : "NO  v");
+
+        M5Cardputer.Display.setTextSize(2);
+        M5Cardputer.Display.setTextColor(
+            isFerro ? RED : (dRpPct > QUICK_ALUM_THRESH_PCT ? GREEN : DARKGREY));
+        M5Cardputer.Display.setCursor(4, 84);
+        M5Cardputer.Display.print(qc.display);
+        M5Cardputer.Display.setTextSize(1);
+        M5Cardputer.Display.setTextColor(DARKGREY);
+        M5Cardputer.Display.setCursor(4, 100);
+        M5Cardputer.Display.print("  (quick estimate)");
+
+        M5Cardputer.Display.setTextColor(DARKGREY);
+        M5Cardputer.Display.setCursor(4, 122);
+        M5Cardputer.Display.print("[ENTER] Full meas  [R] Recal");
+
+        sLastFerro        = isFerro;
+        sQuickScreenFresh = false;
+    }
+
+    // ── Partial update: ΔRp% and ΔL rows (rate-limited to 250 ms) ────────
     M5Cardputer.Display.fillRect(0, 22, 240, 14, BLACK);
     M5Cardputer.Display.setTextSize(1);
     M5Cardputer.Display.setTextColor(dRpPct > QUICK_NOISE_FLOOR_PCT ? YELLOW : DARKGREY);
@@ -185,42 +228,6 @@ static void drawQuickScreen(float liveRp, float liveL, float basRp, float basL) 
     M5Cardputer.Display.setCursor(4, 46);
     if (lValid) { M5Cardputer.Display.printf("  dL:  %+.0f ct", dL_raw); }
     else        { M5Cardputer.Display.print("  dL:  -- (no CLKIN)"); }
-
-    // ── Full redraw: header + ferro + class label (only when stale) ───────
-    if (sQuickScreenFresh || (isFerro != sLastFerro)) {
-        M5Cardputer.Display.fillRect(0, 0, 240, 22, BLACK);
-        M5Cardputer.Display.setTextSize(1);
-        M5Cardputer.Display.setTextColor(WHITE);
-        M5Cardputer.Display.setCursor(4, 6);
-        M5Cardputer.Display.print("QUICK SCREEN");
-        M5Cardputer.Display.setTextColor(DARKGREY);
-        M5Cardputer.Display.setCursor(138, 6);
-        M5Cardputer.Display.print("[ENTER=Full]");
-
-        M5Cardputer.Display.fillRect(0, 54, 240, 20, BLACK);
-        M5Cardputer.Display.setTextColor(isFerro ? RED : GREEN);
-        M5Cardputer.Display.setCursor(4, 66);
-        M5Cardputer.Display.printf("  Ferro: %s", isFerro ? "YES !" : "NO  v");
-
-        M5Cardputer.Display.fillRect(0, 76, 240, 36, BLACK);
-        M5Cardputer.Display.setTextSize(2);
-        M5Cardputer.Display.setTextColor(
-            isFerro ? RED : (dRpPct > QUICK_ALUM_THRESH_PCT ? GREEN : DARKGREY));
-        M5Cardputer.Display.setCursor(4, 84);
-        M5Cardputer.Display.print(qc.display);
-        M5Cardputer.Display.setTextSize(1);
-        M5Cardputer.Display.setTextColor(DARKGREY);
-        M5Cardputer.Display.setCursor(4, 100);
-        M5Cardputer.Display.print("  (quick estimate)");
-
-        M5Cardputer.Display.fillRect(0, 114, 240, 21, BLACK);
-        M5Cardputer.Display.setTextColor(DARKGREY);
-        M5Cardputer.Display.setCursor(4, 122);
-        M5Cardputer.Display.print("[ENTER] Full meas  [R] Recal");
-
-        sLastFerro       = isFerro;
-        sQuickScreenFresh = false;
-    }
 }
 
 static void drawMeasStep_full(const MeasSession& s, uint16_t rpLive = 0) {
@@ -1069,8 +1076,8 @@ void loop() {
 
     // ── Quick Screen — IDLE + live coin detection (Wave 8 C-7b) ──────────────
     // QUICK_SCREEN_SPEC.md §2: no new MeasState — visual mode inside IDLE.
-    // drawQuickScreen() partial-updates ΔRp%/ΔL on every tick; full redraw
-    // only when sQuickScreenFresh or the ferro flag changes (avoids flicker).
+    // drawQuickScreen() rate-limits to 250 ms internally and does early return
+    // when nothing changed — no busy-loop rendering, no flicker.
     if (sMeas.state == MeasState::IDLE) {
       static LDC1101Plugin::CoinState sPrevCoinState = LDC1101Plugin::CoinState::IDLE_NO_COIN;
       if (coinState == LDC1101Plugin::CoinState::COIN_PRESENT) {
