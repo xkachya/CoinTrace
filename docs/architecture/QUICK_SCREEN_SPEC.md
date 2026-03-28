@@ -18,6 +18,14 @@
 **Cross-ref:** `COLLECTOR_USE_CASE.md §9`, `MEASUREMENT_WORKFLOW.md`, `METAL_MATCHER_ARCHITECTURE.md`, `WAVE8_ROADMAP.md §C-7`
 
 **Changelog:**
+- 1.6.0 (2026-03-28) — Bug fixes після HW тестування (commits `c51fff0`, `adb7535`):
+  (A) `QUICK_SETTLE_MS=400` — 400 ms settling window після `COIN_PRESENT` перед першим
+  `drawQuickScreen()` — рука ще на монеті жорстко заниживала dRp% (14% замість 33%);
+  показує `Stabilizing...` під час очікування. Tune: `src/main.cpp:QUICK_SETTLE_MS`.
+  (B) R-key guard `!sResultPending` — R ігнорується поки result screen показується
+  (монета ще на котушці після повного вимірювання); без цього R знищував result screen.
+  (C) Коментар рядок 112: `'bare coin'` → `'coin on 0.6mm base spacer'` — узгоджено з
+  `HW_QUICK_SCREEN_TEST.md` spacer fix.
 - 1.5.0 (2026-03-28) — C-7b + C-7e реалізовано (`a41f7af`): `drawQuickScreen()`, `classifyQuick()`, QUICK_* пороги, `sQuickScreenFresh`, IDLE Quick Screen branch, R-key recalibrate, `gMatcher.init()` + `loadConfig()` у `setup()`, `gMatcher.matchFull()` у `doMeasCompute()`. Статус: PARTIALLY_IMPLEMENTED → IMPLEMENTED (pending HW-QS-1..5). Гайд: `docs/guides/HW_QUICK_SCREEN_TEST.md`.
 - 1.4.0 (2026-03-28) — C-7c реалізовано: `getLiveRp()`, `getLiveL()`, `isLDataValid()`, `recalibrate()` додано в `LDC1101Plugin.h`. HW-QS-6 закрито — рішення прийнято. Статус оновлено SPEC → PARTIALLY_IMPLEMENTED.
 - 1.3.0 (2026-03-27) — C-5 hw-data sync: пороги класифікації оновлені для p3 d=0.6mm (SILVER 25→40%, COPPER 14→30%, ALUM 5→15%). Додано caveat про PENDING HW-QS-6 baseline calibration. Старі значення базувались на синтетичних p2 d=1.4mm даних.
@@ -47,7 +55,7 @@
 
 ### Що таке Quick Screen
 
-Quick Screen — **автоматичний live-дисплей** у стані IDLE, який активується щойно монета кладеться на котушку. Без spacerів, без натискань. За ~2 секунди (час стабілізації RP після coin-detect) екран показує:
+Quick Screen — **автоматичний live-дисплей** у стані IDLE, який активується щойно монета кладеться на котушку. Без spacerів, без натискань. За ~500 мс (100 ms debounce + `QUICK_SETTLE_MS`=400 ms settling — час для відведення руки та усталення RP сигналу) екран показує:
 
 - **ΔRp%** — відносна зміна паразитного опору (провідність металу)
 - **ΔL ct** — абсолютна зміна L_DATA в raw counts (пропорційна магнітній проникності)
@@ -85,11 +93,14 @@ IDLE → (HTTP /measure/start + COIN_PRESENT) → STEP_BASE → ... → IDLE
 Quick Screen **не є новим станом** у `MeasState` enum. Це візуальний режим всередині IDLE.
 
 ```
-IDLE (no coin)      →  coin placed  →  IDLE (COIN_PRESENT) = Quick Screen
+IDLE (no coin)      →  coin placed  →  IDLE (settling, ~500ms)  →  IDLE (COIN_PRESENT) = Quick Screen
 IDLE (Quick Screen) →  ENTER        →  STEP_BASE (повний цикл)
 IDLE (Quick Screen) →  монету знято →  IDLE (no coin)
-IDLE (Quick Screen) →  'R'          →  recalibrate baseline → IDLE (Quick Screen)
+IDLE (Quick Screen) →  'R' + !sResultPending  →  recalibrate baseline → IDLE (Quick Screen)
 ```
+
+> Якщо після повного обробки (`doMeasCompute`) монета лишилась на котушці,
+> Quick Screen не показується доки монету не знято (`sResultPending` flag). R також ігнорується у цьому стані.
 
 **Рефактор drawMeasIdle():**
 
@@ -102,11 +113,19 @@ IDLE (Quick Screen) →  'R'          →  recalibrate baseline → IDLE (Quick 
 Викликається з loop() при `sMeas.state == IDLE`:
 ```cpp
 if (gLDC->isCoinPresent()) {
-    const float liveRp  = gLDC->getLiveRp();
-    const float liveL   = gLDC->getLiveL();
-    const float basRp   = gLDC->getBaseline();
-    const float basL    = gLDC->getLBaseline();
-    drawQuickScreen(liveRp, liveL, basRp, basL);
+    if (!sResultPending) {
+        const bool isFirstTick = (prevState != COIN_PRESENT);
+        if (isFirstTick) {
+            // Тольки зареєстрували — показати "Стабілізуємо" і запустити таймер
+            sCoinSettleMs = millis();
+            show("Stabilizing...");
+        } else if (millis() - sCoinSettleMs >= QUICK_SETTLE_MS) {
+            // Settled — малювати Quick Screen (rate-limit 250ms всередині)
+            drawQuickScreen(liveRp, liveL, basRp, basL);
+        }
+        // інакше: ще settling — нічого не робити
+    }
+    // інакше: sResultPending — result screen показується, ждати зняття монети
 } else {
     drawMeasIdle();
 }
@@ -116,7 +135,11 @@ if (gLDC->isCoinPresent()) {
 
 Quick Screen оновлюється разом із стандартним polling RP у IDLE — тобто при кожному виклику loop(). Окремий таймер не потрібен: LDC1101 вже оновлює cache_ кожні ~20 ms через `update()`.
 
-Часткові оновлення (без full redraw) — при кожному тіку IDLE, якщо COIN_PRESENT:
+**Settling window:** попередній `QUICK_SETTLE_MS` ms після `COIN_PRESENT` Quick Screen не малюється —
+показується `Stabilizing...`. Причина: рука користувача ще торкається монети як провідник і знижує RP,
+якщо читати одразу після debounce — буде 14% dRp замість 33%.
+
+Часткові оновлення (rate-limit 250 ms) — після стабілізації:
 - рядок ΔRp%: `fillRect` + новий відсоток
 - рядок ΔL ct: `fillRect` + нове значення
 - Заголовок "QUICK SCREEN" та is_ferro рядок — лише при зміні is_ferro або першому відображенні
@@ -155,6 +178,10 @@ static constexpr float QUICK_COPPER_THRESH_PCT =  30.0f;  // dRpPct > 30% → CO
 static constexpr float QUICK_ALUM_THRESH_PCT   =  15.0f;  // dRpPct > 15% → ALUMINIUM (було 5, C-5 p3)
 static constexpr float QUICK_FERRO_THRESH_L_RAW = 100.0f; // dL_raw > 100 ct → ferro
                                                             // ⚠️ верифікувати S-5
+static constexpr uint32_t QUICK_SETTLE_MS       = 400;    // ms settling window після COIN_PRESENT
+                                                           // перед першим drawQuickScreen() — час для
+                                                           // відведення руки та стабілізації RP.
+                                                           // tune: на основі HW-QS-4 результатів
 
 // ── Обчислення (на стеку у loop()) ───────────────────────────────────────────
 
@@ -360,7 +387,7 @@ if (sQuickScreenFresh || (isFerro != sLastFerro)) {
 | Клавіша | Дія | Умова |
 |---|---|---|
 | `ENTER` (`\r`/`\n`) | Запустити повний вимір → STEP_BASE | IDLE + COIN_PRESENT |
-| `R` / `r` | Recalibrate baseline → `gLDC->recalibrate()` | IDLE (монети немає — перевіряється всередині recalibrate()) |
+| `R` / `r` | Recalibrate baseline → `gLDC->recalibrate()` | IDLE + `!sResultPending` (ігнорується якщо result screen показується) |
 | Будь-яка інша | Ігнорується у Quick Screen | — |
 
 ### ENTER — запуск повного циклу
@@ -383,19 +410,18 @@ if (key == '\r' || key == '\n') {
 ### 'R' — Recalibrate baseline
 
 ```cpp
-if (key == 'R' || key == 'r') {
-    // Показати "Recal..." перед блокуючим recalibrate() (~250 ms)
-    M5Cardputer.Display.fillRect(0, 54, 240, 20, BLACK);
-    M5Cardputer.Display.setTextColor(CYAN);
-    M5Cardputer.Display.setCursor(4, 66);
+// Guard 1: !sResultPending — R ігнорується поки показується result screen (монета ще лежить
+// на котушці після повного виміру). Без цього guard R знищував result screen.
+if ((key == 'R' || key == 'r') && sMeas.state == MeasState::IDLE && !sResultPending) {
+    // Guard 2 (allередині recalibrate()): якщо isCoinPresent() == true — recalibrate() логує warning
+    // і повертає false без змін baseline. Обидва guard незалежні:
+    // sResultPending: семантика "не показувати на екрані"
+    // isCoinPresent(): семантика "не записувати брудний baseline"
     M5Cardputer.Display.print("  Recalibrating...");
-
     if (gLDC->recalibrate()) {
         gLogger.info("Meas", "Baseline recalibrated (R key)");
     }
-    // recalibrate() внутрішньо перевіряє isCoinPresent() та логує warning якщо монета є.
-    // Full redraw після повернення — показати оновлені значення.
-    drawMeasIdle();  // ← coin_present стан буде перехоплений у наступному loop() тіку
+    drawMeasIdle();
 }
 ```
 
@@ -405,11 +431,16 @@ if (key == 'R' || key == 'r') {
 
 ## 7. UART logging
 
-### При активації Quick Screen (перший тік з COIN_PRESENT)
+### При детекції монети (COIN_PRESENT, перший тік)
 
 ```
-[Meas] QuickScreen: basRp=57344 liveRp=47130 basL=3198 liveL=3207
-[Meas] QuickScreen: dRp=+18.4% dL=+9ct ferro=NO class=SILVER
+[Meas] Coin detected — settling 400 ms
+```
+
+### Після settling window — перший drawQuickScreen()
+
+```
+[Meas] QuickScreen ON: basRp=57344 liveRp=47130 dRp=+18.4%
 ```
 
 ### При кожній зміні класу (ferro або label)

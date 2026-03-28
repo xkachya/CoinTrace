@@ -183,11 +183,23 @@ pio device monitor --port COM4 --baud 115200
    - spacer запобігає КЗ між монетою та котушкою
    - **пороги класифікації скалібровані для d≈0.6mm** (C-5 hw-сесія, p3 протокол) —
      вимірювання без spacer дасть більший dRp% і зіб'є класифікацію
-3. Чекати ~500 ms — час coin-detect + стабілізація RP
+3. **Зняти руку** з монети відразу хвилину кладеть — очікувати ~500 ms
+   - 0–100 ms: debouncing — екран не міняється
+   - 100 ms: COIN_PRESENT — екран показує `Stabilizing...` (1–2 секунди помітно менше)
+   - 500 ms: settling window закінчився — Quick Screen з'являється із стабільним dRp%
 
 ### Очікуваний результат на дисплеї
-
+**Фаза 1** — ~100–500 ms після покладання (сетлінг):
 ```
+┌────────────────────────────────────────┐
+│                                         │
+│                                         │
+│   Stabilizing...                        │  ← сірий текст
+│                                         │
+└────────────────────────────────────────┘
+```
+
+**Фаза 2** — після 500 ms — Quick Screen зі стабільними значеннями:```
 ┌─────────────────────────────────────────┐
 │ QUICK SCREEN             [ENTER=Full]   │  ← білий заголовок
 │                                         │
@@ -206,14 +218,20 @@ pio device monitor --port COM4 --baud 115200
 ### Очікувані рядки у Serial
 
 ```
+[LDC1101] Coin PRESENT (RP=NNNNN, ...)
+[Meas] Coin detected — settling 400 ms
+... (чекаємо 400 ms settling) ...
 [Meas] QuickScreen ON: basRp=NNNNN liveRp=NNNNN dRp=+NN.N%
 ```
 
+> До 2026-03-28 перший рядок відразу логував QuickScreen ON зі зниженим dRp% (рука ще на монеті).
+> Тепер "Coin detected" виходить імедіатно, QuickScreen ON — після стабілізації.
+
 ### Критерій PASS
 
-- [ ] Екран переключається з `Place coin on coil` на Quick Screen після появи монети
+- [ ] Дісплей показує `Stabilizing...` перші ~400 ms, потім перемикається на Quick Screen
 - [ ] `dRp:` рядок жовтий і не нуль для металевої монети
-- [ ] Serial показує `QuickScreen ON:` рядок
+- [ ] Serial показує спочатку `Coin detected — settling 400 ms`, потім `QuickScreen ON:`
 
 ### Можлива проблема
 
@@ -279,13 +297,25 @@ pio device monitor --port COM4 --baud 115200
 
 ### Перевірка захисту від recalibrate з монетою
 
-1. Покласти монету → Quick Screen
+**Кейс A — монета є, Quick Screen активний:**
+1. Покласти монету → дочекатись Quick Screen (після settling)
 2. Натиснути **R**
 3. Serial повинен показати:
    ```
-   [LDC1101] recalibrate() — coin present, ignored
+   [LDC1101] recalibrate() — coin present, remove coin first
    ```
 4. Дисплей **не** показує `Recalibrating...`, Quick Screen залишається
+
+**Кейс B — монета є, result screen показується (після повного вимірювання):**
+1. Пройти повний 4-кроковий цикл → result screen показується, монету **не знімати**
+2. Натиснути **R**
+3. Result screen **залишається** — R повністю ігнорується (`!sResultPending` guard)
+4. Serial `recalibrate()` **не** виводиться (код навіть не доходить до recalibrate())
+5. Знизу екрану може з'явитись `Key: r` — це очікувана поведінка (fallback key display)
+
+> **Чому два окремих guard:** `sResultPending` захищає від знищення result screen
+> відображення; `isCoinPresent()` всередині `recalibrate()` захищає від запису
+> baseline з монетою. Обидva guard незалежні.
 
 ---
 
