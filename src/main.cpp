@@ -118,10 +118,18 @@ static constexpr float QUICK_SILVER_THRESH_PCT  = 40.0f;   // dRpPct > 40% → S
 static constexpr float QUICK_COPPER_THRESH_PCT  = 30.0f;   // dRpPct > 30% → COPPER
 static constexpr float QUICK_ALUM_THRESH_PCT    = 15.0f;   // dRpPct > 15% → ALUMINIUM
 static constexpr float QUICK_FERRO_THRESH_L_RAW = 100.0f;  // dL_raw > 100 ct → ferro (⚠ verify S-5)
+// Settling window: RP signal is unstable for ~300-500 ms after COIN_PRESENT because
+// the user's hand is still moving. Quick Screen is suppressed until signal settles.
+// HW-QS-4 result: tune this after observing stabilisation with real coins.
+static constexpr uint32_t QUICK_SETTLE_MS       = 400;     // ms after COIN_PRESENT before drawing Quick Screen
 
 // Reset to true when coin is removed → forces full redraw on next placement.
 // File-scope so loop() can reset it outside drawQuickScreen() (QUICK_SCREEN_SPEC §5).
 static bool sQuickScreenFresh = true;
+
+// Timestamp of the last COIN_PRESENT transition — Quick Screen is suppressed
+// for QUICK_SETTLE_MS ms to let the RP signal stabilise after hand removal.
+static uint32_t sCoinSettleMs = 0;
 
 // Set by doMeasCompute() after showing the result screen — suppresses Quick Screen
 // until the coin is physically removed, keeping the result visible.
@@ -1089,18 +1097,36 @@ void loop() {
     // when nothing changed — no busy-loop rendering, no flicker.
     if (sMeas.state == MeasState::IDLE) {
       static LDC1101Plugin::CoinState sPrevCoinState = LDC1101Plugin::CoinState::IDLE_NO_COIN;
+      static bool sQuickLoggedOn = false;
       if (coinState == LDC1101Plugin::CoinState::COIN_PRESENT) {
         if (!sResultPending) {
-          // Normal Quick Screen — no recent full measurement
-          drawQuickScreen(gLDC->getLiveRp(), gLDC->getLiveL(),
-                          gLDC->getBaseline(), gLDC->getLBaseline());
-          if (sPrevCoinState != LDC1101Plugin::CoinState::COIN_PRESENT) {
-            const float basRp  = gLDC->getBaseline();
-            const float liveRp = gLDC->getLiveRp();
-            const float dRpPct = (basRp > 1.0f) ? (basRp - liveRp) / basRp * 100.0f : 0.0f;
-            gLogger.info("Meas", "QuickScreen ON: basRp=%.0f liveRp=%.0f dRp=%+.1f%%",
-                         basRp, liveRp, dRpPct);
+          const bool isFirstTick = (sPrevCoinState != LDC1101Plugin::CoinState::COIN_PRESENT);
+          if (isFirstTick) {
+            // Coin just detected — record settle start, show brief indicator.
+            // Quick Screen is suppressed for QUICK_SETTLE_MS to let the user’s hand
+            // leave and RP signal stabilise (otherwise first reading is ~50% low).
+            sCoinSettleMs  = millis();
+            sQuickLoggedOn = false;
+            M5Cardputer.Display.fillScreen(BLACK);
+            M5Cardputer.Display.setTextSize(1);
+            M5Cardputer.Display.setTextColor(DARKGREY);
+            M5Cardputer.Display.setCursor(4, 46);
+            M5Cardputer.Display.print("  Stabilizing...");
+            gLogger.info("Meas", "Coin detected — settling %u ms", QUICK_SETTLE_MS);
+          } else if (millis() - sCoinSettleMs >= QUICK_SETTLE_MS) {
+            // Settled — draw Quick Screen (rate-limited to 250 ms internally)
+            drawQuickScreen(gLDC->getLiveRp(), gLDC->getLiveL(),
+                            gLDC->getBaseline(), gLDC->getLBaseline());
+            if (!sQuickLoggedOn) {
+              sQuickLoggedOn = true;
+              const float basRp  = gLDC->getBaseline();
+              const float liveRp = gLDC->getLiveRp();
+              const float dRpPct = (basRp > 1.0f) ? (basRp - liveRp) / basRp * 100.0f : 0.0f;
+              gLogger.info("Meas", "QuickScreen ON: basRp=%.0f liveRp=%.0f dRp=%+.1f%%",
+                           basRp, liveRp, dRpPct);
+            }
           }
+          // else: still settling — keep "Stabilizing..." visible, do nothing
         }
         // else: result screen is showing — do nothing until coin removed
       } else {
@@ -1110,6 +1136,7 @@ void loop() {
             sResultPending    = false;
             gLogger.info("Meas", "Result dismissed: coin removed");
           }
+          sQuickLoggedOn    = false;
           sQuickScreenFresh = true;   // force full redraw on next placement
           drawMeasIdle();
           gLogger.info("Meas", "QuickScreen OFF: coin removed");
