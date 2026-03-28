@@ -203,8 +203,8 @@ pio device monitor --port COM4 --baud 115200
 ┌─────────────────────────────────────────┐
 │ QUICK SCREEN             [ENTER=Full]   │  ← білий заголовок
 │                                         │
-│   dRp: +NN.N%                          │  ← жовтий (або сірий якщо < 2%)
-│   dL:  +NN ct                          │  ← жовтий (або -- якщо немає CLKIN)
+│   dRp: +NN.N%      Rp:NNNNN           │  ← жовтий delta; сірий абсолют
+│   dL:  +NN ct       L:NNNNN           │  ← жовтий delta (або -- без CLKIN)
 │                                         │
 │   Ferro: NO  v                         │  ← зелений
 │                                         │

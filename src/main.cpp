@@ -229,17 +229,28 @@ static void drawQuickScreen(float liveRp, float liveL, float basRp, float basL) 
     }
 
     // ── Partial update: ΔRp% and ΔL rows (rate-limited to 250 ms) ────────
+    // Left column (x=4):  delta values — primary info for classification
+    // Right column (x=145): absolute live values — secondary / tech reference
     M5Cardputer.Display.fillRect(0, 22, 240, 14, BLACK);
     M5Cardputer.Display.setTextSize(1);
     M5Cardputer.Display.setTextColor(dRpPct > QUICK_NOISE_FLOOR_PCT ? YELLOW : DARKGREY);
     M5Cardputer.Display.setCursor(4, 30);
     M5Cardputer.Display.printf("  dRp: %+.1f%%", dRpPct);
+    M5Cardputer.Display.setTextColor(DARKGREY);
+    M5Cardputer.Display.setCursor(145, 30);
+    M5Cardputer.Display.printf("Rp:%5.0f", liveRp);
 
     M5Cardputer.Display.fillRect(0, 38, 240, 14, BLACK);
     M5Cardputer.Display.setTextColor(fabsf(dL_raw) > QUICK_L_NOISE_FLOOR_CT ? YELLOW : DARKGREY);
     M5Cardputer.Display.setCursor(4, 46);
-    if (lValid) { M5Cardputer.Display.printf("  dL:  %+.0f ct", dL_raw); }
-    else        { M5Cardputer.Display.print("  dL:  -- (no CLKIN)"); }
+    if (lValid) {
+        M5Cardputer.Display.printf("  dL:  %+.0f ct", dL_raw);
+        M5Cardputer.Display.setTextColor(DARKGREY);
+        M5Cardputer.Display.setCursor(145, 46);
+        M5Cardputer.Display.printf(" L:%5.0f", liveL);
+    } else {
+        M5Cardputer.Display.print("  dL:  -- (no CLKIN)");
+    }
 }
 
 static void drawMeasStep_full(const MeasSession& s, uint16_t rpLive = 0) {
