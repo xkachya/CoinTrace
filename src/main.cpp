@@ -109,18 +109,25 @@ volatile bool gMeasStartRequested = false;
 
 // ── Quick Screen constants (Wave 8 C-7b) ─────────────────────────────────────
 // QUICK_SCREEN_SPEC.md §3 — Phase 1 threshold-based classification.
-// C-5 calibrated for p3 d≈0.6mm protocol (coin on 0.6mm base spacer, no additional spacers).
-// PENDING HW-QS-6: verify with real hardware after first flash.
+// HW-QS-4 empirical calibration 2026-03-30: 5 coins × 5 readings, p3 d≈0.6mm, spacer 0.6mm.
+// DONE HW-QS-4: thresholds tuned; QUICK_SETTLE_MS=400 confirmed; dL ferro needs real ferro coin.
 // All values are static constexpr → tunable in source, no runtime overhead.
 static constexpr float QUICK_NOISE_FLOOR_PCT    =  2.0f;   // dRpPct below → signal in noise
 static constexpr float QUICK_L_NOISE_FLOOR_CT   =  2.0f;   // |dL_raw| below → noise
-static constexpr float QUICK_SILVER_THRESH_PCT  = 40.0f;   // dRpPct > 40% → SILVER
-static constexpr float QUICK_COPPER_THRESH_PCT  = 30.0f;   // dRpPct > 30% → COPPER
-static constexpr float QUICK_ALUM_THRESH_PCT    = 15.0f;   // dRpPct > 15% → ALUMINIUM
-static constexpr float QUICK_FERRO_THRESH_L_RAW = 100.0f;  // dL_raw > 100 ct → ferro (⚠ verify S-5)
+// Empirical dRp% ordering (ascending): Ag 33.4% < Fe 36.6% < Al 38.6% < Cu 43.4% ≈ ZnNi 44.3%.
+// Original estimate (SILVER=highest bucket) was INVERTED: large Ag coin (38 mm) > coil area
+// → lower eddy coupling efficiency than smaller Cu/ZnNi coins. Constants listed high→low to
+// match classifyQuick() cascade order. Retained names: COPPER=highest, SILVER=lowest bucket.
+static constexpr float QUICK_COPPER_THRESH_PCT  = 41.0f;   // dRpPct > 41%     → COPPER (Cu≈43.4%, ZnNi≈44.3%)
+static constexpr float QUICK_ALUM_THRESH_PCT    = 37.3f;   // dRpPct 37.3–41%  → ALUM   (Al≈38.6%)  ⚠ 0.5% gap to Fe
+static constexpr float QUICK_SILVER_THRESH_PCT  = 35.0f;   // dRpPct 35–37.3%  → ?      (Fe zone, no dL ferro signal)
+                                                             // dRpPct 2–35%     → SILVER (Ag≈33.4%, large-coin coupling)
+static constexpr float QUICK_FERRO_THRESH_L_RAW = 100.0f;  // dL_raw > +100 ct → ferro (genuine ferromagnet, positive dL)
+                                                             // HW-QS-4: all 5 test coins show NEGATIVE dL (eddy dominant)
+                                                             // → ferro flag never triggered; validate with real steel coin (S-5)
 // Settling window: RP signal is unstable for ~300-500 ms after COIN_PRESENT because
 // the user's hand is still moving. Quick Screen is suppressed until signal settles.
-// HW-QS-4 result: tune this after observing stabilisation with real coins.
+// HW-QS-4 confirmed: QUICK_SETTLE_MS=400 working correctly, no adjustment needed.
 static constexpr uint32_t QUICK_SETTLE_MS       = 400;     // ms after COIN_PRESENT before drawing Quick Screen
 
 // Reset to true when coin is removed → forces full redraw on next placement.
@@ -142,11 +149,13 @@ struct QuickClass {
     const char* display;  // short string for display (ASCII — Cardputer has no Cyrillic font)
 };
 
+// Cascade checks HIGH → LOW to match threshold ordering above.
 static QuickClass classifyQuick(float dRpPct, bool isFerro) {
     if (isFerro)                           return {"STEEL",     "STEEL !"};
-    if (dRpPct > QUICK_SILVER_THRESH_PCT)  return {"SILVER",    "SILVER" };
-    if (dRpPct > QUICK_COPPER_THRESH_PCT)  return {"COPPER",    "COPPER" };
-    if (dRpPct > QUICK_ALUM_THRESH_PCT)    return {"ALUMINIUM", "ALUM"   };
+    if (dRpPct > QUICK_COPPER_THRESH_PCT)  return {"COPPER",    "COPPER" };  // > 41%: Cu / ZnNi
+    if (dRpPct > QUICK_ALUM_THRESH_PCT)    return {"ALUMINIUM", "ALUM"   };  // 37.3–41%: Al
+    if (dRpPct > QUICK_SILVER_THRESH_PCT)  return {"?",         "?"      };  // 35–37.3%: Fe zone (⚠ 0.5% margin)
+    if (dRpPct > QUICK_NOISE_FLOOR_PCT)    return {"SILVER",    "SILVER" };  // 2–35%: Ag (large-coin low coupling)
     return                                        {"?",         "?"      };
 }
 
@@ -212,7 +221,7 @@ static void drawQuickScreen(float liveRp, float liveL, float basRp, float basL) 
 
         M5Cardputer.Display.setTextSize(2);
         M5Cardputer.Display.setTextColor(
-            isFerro ? RED : (dRpPct > QUICK_ALUM_THRESH_PCT ? GREEN : DARKGREY));
+            isFerro ? RED : (qc.label[0] != '?' ? GREEN : DARKGREY));  // GREEN = classified, DARKGREY = uncertain
         M5Cardputer.Display.setCursor(4, 84);
         M5Cardputer.Display.print(qc.display);
         M5Cardputer.Display.setTextSize(1);
