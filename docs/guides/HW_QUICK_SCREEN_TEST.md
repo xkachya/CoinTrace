@@ -457,9 +457,9 @@ Invoke-RestMethod -Method POST -Uri "http://$ip/api/v1/database/match" `
 
 ### Критерій PASS
 
-- [ ] Serial показує `[Meas] Vec:` + `[Meas] #1:` з `conf > 0` (якщо DB ready)
-- [ ] Або `[Meas] Matcher not ready — skipping match` якщо SD порожня (acceptable)
-- [ ] `GET /api/v1/measure/{meas_count-1}` повертає запис з `metal_code` і `conf > 0`
+- [x] Serial показує `[Meas] Vec:` + conf=0.98 ✅ 2026-03-30
+- [x] `GET /api/v1/measure/87` → `metal_code=XAG999`, `conf=0.984`, `pos_count=4` ✅ 2026-03-30
+- [x] `GET /api/v1/measure/{meas_count-1}` повертає запис з `metal_code` і `conf > 0`
 
 ---
 
@@ -518,13 +518,13 @@ HW-QS-4 measurement results (p3 d≈0.6mm, DATE):
 | HW-QS-3b | R → ignored (Quick Screen активний, монета є) | **PASS** | `isCoinPresent()` guard | 2026-03-28 |
 | HW-QS-3c | R → ignored (result screen, `sResultPending=true`) | **PASS** | `!sResultPending` guard | 2026-03-28 |
 | **HW-QS-4** | Threshold classification ≥3/4 монет | **PASS** | AG✅ CU✅ AL✅ = 3/4 | 2026-03-30 |
-| HW-QS-5 | matchFull() result у Serial або HTTP | ⏳ не тестовано | наступний крок | — |
+| **HW-QS-5** | matchFull() result у Serial або HTTP | **PASS** | XAG999 conf=0.984, id=87 ✅ | 2026-03-30 |
 | Threshold | SILVER thresh | **35.0%** | Ag≈33.4% (mean, 5 вимірів) | 2026-03-30 |
 | Threshold | COPPER thresh | **41.0%** | Cu≈43.4%, ZnNi≈44.3% | 2026-03-30 |
 | Threshold | ALUM thresh | **37.3%** | Al≈38.6%; ⚠ 0.5% gap до XFE | 2026-03-30 |
 | Threshold | FERRO thresh | 100 ct (не перевірено) | XFE coin non-ferro; потребує S-5 | — |
 
-> **Наступний крок:** HW-QS-5 — пройти повний 4-кроковий цикл зі срібною монетою, перевірити Serial `[Meas] Match:` та HTTP `/api/v1/database/match`.
+> **HW-QS-1..5 всі PASS** (2026-03-30). Наступний крок: закрити Wave 8 — оновити `WAVE8_ROADMAP.md` та `QUICK_SCREEN_SPEC.md`.
 
 **Після проходження всіх HW-QS-1..5:**
 - Оновити `WAVE8_ROADMAP.md` — позначити HW-QS-1..5 як `[x]`

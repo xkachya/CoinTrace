@@ -887,28 +887,28 @@ void loop() {
           switch (sMeas.state) {
             case MeasState::STEP_BASE:
               sMeas.m.rp[0] = d.value1;  sMeas.m.l[0] = d.value2;
-              gLogger.info("Meas", "BASE : RP=%.0f  L=%.0f", d.value1, d.value2);
+              gLogger.info("Meas", "Step 1/4 (0.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
               sMeas.state  = MeasState::STEP_1;
               sMeas.stepMs = millis();
               drawMeasStep_full(sMeas, (uint16_t)d.value1);
               break;
             case MeasState::STEP_1:
               sMeas.m.rp[1] = d.value1;  sMeas.m.l[1] = d.value2;
-              gLogger.info("Meas", "1mm  : RP=%.0f  L=%.0f", d.value1, d.value2);
+              gLogger.info("Meas", "Step 2/4 (1.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
               sMeas.state  = MeasState::STEP_3;
               sMeas.stepMs = millis();
               drawMeasStep_full(sMeas, (uint16_t)d.value1);
               break;
             case MeasState::STEP_3:
               sMeas.m.rp[2] = d.value1;  sMeas.m.l[2] = d.value2;
-              gLogger.info("Meas", "2mm  : RP=%.0f  L=%.0f", d.value1, d.value2);
+              gLogger.info("Meas", "Step 3/4 (2.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
               sMeas.state  = MeasState::STEP_DRIFT;
               sMeas.stepMs = millis();
               drawMeasStep_full(sMeas, (uint16_t)d.value1);
               break;
             case MeasState::STEP_DRIFT:
-              sMeas.m.rp[3] = d.value1;
-              gLogger.info("Meas", "DRIFT: RP=%.0f", d.value1);
+              sMeas.m.rp[3] = d.value1;  sMeas.m.l[3] = d.value2;
+              gLogger.info("Meas", "Step 4/4 drift (0.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
               sMeas.state = MeasState::COMPUTE;
               doMeasCompute();
               break;
@@ -1002,28 +1002,28 @@ void loop() {
                 switch (sMeas.state) {
                   case MeasState::STEP_BASE:
                     sMeas.m.rp[0] = d.value1;  sMeas.m.l[0] = d.value2;
-                    gLogger.info("Meas", "BASE : RP=%.0f  L=%.0f", d.value1, d.value2);
+                    gLogger.info("Meas", "Step 1/4 (0.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
                     sMeas.state  = MeasState::STEP_1;
                     sMeas.stepMs = millis();
                     drawMeasStep_full(sMeas, (uint16_t)d.value1);
                     break;
                   case MeasState::STEP_1:
                     sMeas.m.rp[1] = d.value1;  sMeas.m.l[1] = d.value2;
-                    gLogger.info("Meas", "1mm  : RP=%.0f  L=%.0f", d.value1, d.value2);
+                    gLogger.info("Meas", "Step 2/4 (1.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
                     sMeas.state  = MeasState::STEP_3;
                     sMeas.stepMs = millis();
                     drawMeasStep_full(sMeas, (uint16_t)d.value1);
                     break;
                   case MeasState::STEP_3:
                     sMeas.m.rp[2] = d.value1;  sMeas.m.l[2] = d.value2;
-                    gLogger.info("Meas", "2mm  : RP=%.0f  L=%.0f", d.value1, d.value2);
+                    gLogger.info("Meas", "Step 3/4 (2.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
                     sMeas.state  = MeasState::STEP_DRIFT;
                     sMeas.stepMs = millis();
                     drawMeasStep_full(sMeas, (uint16_t)d.value1);
                     break;
                   case MeasState::STEP_DRIFT:
-                    sMeas.m.rp[3] = d.value1;
-                    gLogger.info("Meas", "DRIFT: RP=%.0f", d.value1);
+                    sMeas.m.rp[3] = d.value1;  sMeas.m.l[3] = d.value2;
+                    gLogger.info("Meas", "Step 4/4 drift (0.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
                     sMeas.state = MeasState::COMPUTE;
                     doMeasCompute();
                     break;

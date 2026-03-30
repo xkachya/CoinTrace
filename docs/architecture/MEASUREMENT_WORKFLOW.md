@@ -221,10 +221,10 @@ Endpoint повертає поточний `MeasState`, відображаючи
 | Component | Message | Значення |
 |---|---|---|
 | `Meas` | `HTTP start: session started (STEP_BASE)` | HTTP-start |
-| `Meas` | `BASE : RP=XXXX  L=YYYY` | ENTER на STEP_BASE |
-| `Meas` | `1mm  : RP=XXXX  L=YYYY` | ENTER на STEP_1 |
-| `Meas` | `2mm  : RP=XXXX  L=YYYY` | ENTER на STEP_3 |
-| `Meas` | `DRIFT: RP=XXXX` | ENTER на STEP_DRIFT |
+| `Meas` | `Step 1/4 (0.6mm): RP=XXXX  L=YYYY` | ENTER на STEP_BASE |
+| `Meas` | `Step 2/4 (1.6mm): RP=XXXX  L=YYYY` | ENTER на STEP_1 |
+| `Meas` | `Step 3/4 (2.6mm): RP=XXXX  L=YYYY` | ENTER на STEP_3 |
+| `Meas` | `Step 4/4 drift (0.6mm): RP=XXXX  L=YYYY` | ENTER на STEP_DRIFT |
 | `Meas` | `Drift X.X% > 5% — conf forced=0` | driftWarn |
 | `Meas` | `Vec: dRp1=…  k1=…  k2=…  slope=…  dL1=…` | вектор |
 | `Meas` | `Match: <coin>  conf=X.XX  dist=X.XXXX` | FP match |
