@@ -1,7 +1,7 @@
 // LDC1101Plugin.h — LDC1101 Inductive Sensor Plugin (SPI)
 // CoinTrace — Open Source Inductive Coin Analyzer
 // License: GPL v3
-// LDC1101_ARCHITECTURE.md §8 (v1.3.2 contract; impl parity: v1.2.0 — LHR/HIGH_Q backlog pending R-01)
+// LDC1101_ARCHITECTURE.md §8 (v1.5.0 — D-2 LHR continuous ADR-LHR-001; D-2b StabilityTracker ADR-STAB-001)
 //
 // Hardware: MIKROE-3240 breakout, ESP32-S3 VSPI
 //   SCK = GPIO40, MISO = GPIO39, MOSI = GPIO14, CS = GPIO5 (configurable)
@@ -56,6 +56,19 @@ private:
     static const uint8_t REG_L_DATA_MSB    = 0x24;
     static const uint8_t REG_CHIP_ID       = 0x3F; // Expected: 0xD4
 
+    // ── LHR register map (ADR-LHR-001, datasheet §8.6.25–§8.6.31) ──────────────
+    static const uint8_t REG_LHR_RCOUNT_LSB  = 0x30; // Reference count LSB
+    static const uint8_t REG_LHR_RCOUNT_MSB  = 0x31; // Reference count MSB
+    static const uint8_t REG_LHR_OFFSET_LSB  = 0x32; // Offset LSB (0 = max range)
+    static const uint8_t REG_LHR_OFFSET_MSB  = 0x33; // Offset MSB
+    static const uint8_t REG_LHR_CONFIG      = 0x34; // SENSOR_DIV[1:0] (0x00 = div1, fSENSOR<fCLKIN/4)
+    static const uint8_t REG_LHR_DATA_LSB    = 0x38; // ⚠ READ FIRST — latches MID + MSB
+    static const uint8_t REG_LHR_DATA_MID    = 0x39;
+    static const uint8_t REG_LHR_DATA_MSB    = 0x3A;
+    static const uint8_t REG_LHR_STATUS      = 0x3B; // bit0=DRDYB(0=ready,inverted); bits1-4=ERR
+    static const uint8_t LHR_STATUS_DRDYB    = 0x01; // bit0: 0=data ready (inverted logic)
+    static const uint8_t LHR_STATUS_ERR_MASK = 0x1E; // bits4=ERR_ZC,3=ERR_OR,2=ERR_UR,1=ERR_OF
+
     static const uint8_t FUNC_MODE_ACTIVE  = 0x00; // Continuous conversion
     static const uint8_t FUNC_MODE_SLEEP   = 0x01; // Low-power, config retained
 
@@ -91,6 +104,11 @@ private:
     float    coinReleaseThreshold_= 0.96f;      // RELEASE: RP > baseline × 0.96 (hysteresis gap 6%)
     uint8_t  detectDebounceN_     = 5;          // 5 consecutive → COIN_PRESENT (~100 ms @ 50 Hz)
     uint8_t  releaseDebounceM_    = 3;          // 3 consecutive → COIN_REMOVED  (~60 ms @ 50 Hz)
+    // LHR continuous (D-2, ADR-LHR-001)
+    bool     lhrContinuous_       = false;      // ldc1101.lhr_continuous: read LHR in every update()
+    uint32_t lhrRcount_           = 65535UL;    // ldc1101.lhr_rcount: 0xFFFF = max 24-bit res (~65ms)
+    // StabilityTracker threshold (D-2b, ADR-STAB-001)
+    float    stabThreshRp_        = 50.0f;      // ldc1101.stab_sigma_thresh_rp: σ(RP) stable threshold
 
     // ── Measurement cache (protected by dataMutex_) ──────────────────────────
     SemaphoreHandle_t dataMutex_ = nullptr;
@@ -98,17 +116,20 @@ private:
     struct MeasurementCache {
         uint16_t rpRaw     = 0;
         uint16_t lRaw      = 0;
+        uint32_t lhrRaw    = 0;     // 24-bit LHR_DATA (ADR-LHR-001); valid when lhrValid=true
         uint32_t timestamp = 0;
         bool     valid     = false;
+        bool     lhrValid  = false; // true after first successful LHR read at lhr_continuous=true
     } cache_;
 
     // ── Diagnostics / runtime statistics ─────────────────────────────────────
     struct {
-        uint32_t     totalReads  = 0;
-        uint32_t     failedReads = 0;
-        uint32_t     staleCount  = 0;  // consecutive DRDYB=1 calls (LA-7)
-        uint32_t     lastSuccess = 0;
-        HealthStatus status      = HealthStatus::UNKNOWN;
+        uint32_t     totalReads     = 0;
+        uint32_t     failedReads    = 0;
+        uint32_t     staleCount     = 0;     // consecutive DRDYB=1 calls (LA-7)
+        uint32_t     lastSuccess    = 0;
+        HealthStatus status         = HealthStatus::UNKNOWN;
+        bool         lhrErrorLogged = false; // prevent LHR error log spam (D-2)
     } ds_;
 
     // Dynamic error message buffer (prevents dangling pointer from snprintf locals)
@@ -130,6 +151,42 @@ private:
         uint8_t   detectCount  = 0;
         uint8_t   releaseCount = 0;
     } coin_;
+
+    // ── Signal Stability Tracking (D-2b, ADR-STAB-001) ───────────────────────
+    // Circular buffer N=8 — rolling σ(RP). ~36 bytes BSS, zero public API impact.
+    struct StabilityTracker {
+        uint16_t buf[8] = {};   // circular buffer of RP samples
+        uint8_t  head   = 0;    // next write position
+        uint8_t  count  = 0;    // samples accumulated (0–8)
+        float    sigma  = 0.0f; // rolling σ(RP) over last N samples
+        float    mean   = 0.0f; // rolling mean — copied to stableCache_.rpRaw when stable
+        bool     stable = false;// true if count==8 AND sigma < stabThreshRp_
+
+        void reset() { *this = StabilityTracker{}; }
+
+        void feed(uint16_t rpRaw, float thresh) {
+            buf[head] = rpRaw;
+            head = (head + 1) & 7;      // power-of-2 wrap (N=8 hardcoded)
+            if (count < 8) ++count;
+            if (count < 8) { stable = false; return; }
+            float sum = 0.0f, sumSq = 0.0f;
+            for (uint8_t i = 0; i < 8; i++) {
+                sum   += buf[i];
+                sumSq += static_cast<float>(buf[i]) * buf[i];
+            }
+            mean   = sum / 8.0f;
+            sigma  = sqrtf(sumSq / 8.0f - mean * mean);
+            stable = (sigma < thresh);
+        }
+    } stab_;
+
+    // Frozen stable snapshot — written only from update() (same mutex as live cache).
+    // Race-free: getStableRp() returns this snapshot, not a live reading.
+    struct StableCache {
+        uint16_t rpRaw = 0;     // mean of last N stable samples (truncated to uint16)
+        uint16_t lRaw  = 0;     // lRaw at the moment of stable snapshot
+        bool     valid = false; // true once stab_.stable triggered first time
+    } stableCache_;
 
 public:
 
@@ -191,6 +248,18 @@ public:
     // ADR-CLKIN-002: always guard L_DATA usage with this check.
     bool isLDataValid() const { return clkinGpio_ >= 0; }
 
+    // Returns the most recent 24-bit LHR_DATA as float (ADR-LHR-001, D-2).
+    // Convert to fSENSOR [Hz] via: fSENSOR = getLiveLHR() * 2 * fCLKIN / 16777216.
+    // Returns 0.0f if lhr_continuous=false, CLKIN not wired, or no read yet.
+    // Thread-safe: acquires dataMutex_ with 50 ms timeout.
+    float getLiveLHR() const {
+        if (!dataMutex_) return 0.0f;
+        if (xSemaphoreTake(dataMutex_, pdMS_TO_TICKS(50)) != pdTRUE) return 0.0f;
+        const float lhr = cache_.lhrValid ? static_cast<float>(cache_.lhrRaw) : 0.0f;
+        xSemaphoreGive(dataMutex_);
+        return lhr;
+    }
+
     // Re-measure the no-coin baseline using 10 fresh samples (avg of ≥5 valid).
     // Call this when the user presses 'R' key in IDLE state (Quick Screen recal).
     // Guard: returns false immediately if coin is present — caller must ensure no coin.
@@ -228,8 +297,34 @@ public:
         ctx_->log->info(getName(),
             "recalibrate OK: RP %.0f\u2192%.0f  L %.0f\u2192%.0f  (%u/10 samples)",
             oldRp, calibrationRpBaseline_, oldL, calibrationLBaseline_, ok);
+        stab_.reset();              // ADR-STAB-001: new baseline — re-establish stability
+        stableCache_.valid = false;
         return true;
     }
+
+    // ── Signal Stability API (D-2b, ADR-STAB-001) ────────────────────────────
+    // getStableRp()/getStableL(): frozen snapshot — race-free with isSignalStable().
+    // isSignalStable(): lock-free bool read (1 byte, atomic on Xtensa LX7).
+    // getSignalSigma(): lock-free float read — for Serial diagnostics and Discovery.
+
+    float getStableRp() const {
+        if (!dataMutex_) return 0.0f;
+        if (xSemaphoreTake(dataMutex_, pdMS_TO_TICKS(50)) != pdTRUE) return 0.0f;
+        const float rp = stableCache_.valid ? static_cast<float>(stableCache_.rpRaw) : 0.0f;
+        xSemaphoreGive(dataMutex_);
+        return rp;
+    }
+
+    float getStableL() const {
+        if (!dataMutex_) return 0.0f;
+        if (xSemaphoreTake(dataMutex_, pdMS_TO_TICKS(50)) != pdTRUE) return 0.0f;
+        const float l = stableCache_.valid ? static_cast<float>(stableCache_.lRaw) : 0.0f;
+        xSemaphoreGive(dataMutex_);
+        return l;
+    }
+
+    bool  isSignalStable() const { return stab_.stable; }
+    float getSignalSigma() const { return stab_.sigma; }
 
     // ── IPlugin status ────────────────────────────────────────────────────────
     bool isEnabled() const override { return enabled_; }
@@ -256,6 +351,9 @@ public:
         coinReleaseThreshold_  = ctx_->config->getFloat ("ldc1101.coin_release_threshold", 0.92f);
         detectDebounceN_       = ctx_->config->getUInt8 ("ldc1101.detect_debounce_n",      5);
         releaseDebounceM_      = ctx_->config->getUInt8 ("ldc1101.release_debounce_m",     3);
+        lhrContinuous_         = ctx_->config->getBool  ("ldc1101.lhr_continuous",      false);
+        lhrRcount_             = ctx_->config->getUInt32("ldc1101.lhr_rcount",       65535UL);
+        stabThreshRp_          = ctx_->config->getFloat ("ldc1101.stab_sigma_thresh_rp", 50.0f);
 
         if (csPin_ < 0 || !ctx_->spi) {
             return fail_(1, "CS pin or SPI bus not available");
@@ -386,6 +484,46 @@ public:
         ds_.lastSuccess = millis();
         ds_.status      = HealthStatus::OK;
 
+        // ── LHR continuous (D-2, ADR-LHR-001) ──────────────────────────────
+        // Non-blocking: status check every update(); 3-byte burst only when DRDYB=0.
+        // Overhead: ~5 μs (status) + ~15 μs (burst, ~every 3-4 cycles) = 0.1% budget.
+        if (lhrContinuous_) {
+            const uint8_t lhrStat = spiRead_(REG_LHR_STATUS);
+            if (lhrStat & LHR_STATUS_ERR_MASK) {
+                if (!ds_.lhrErrorLogged) {
+                    ctx_->log->warning(getName(),
+                        "LHR error flags: 0x%02X (ZC=%d OR=%d UR=%d OF=%d)",
+                        lhrStat,
+                        (lhrStat >> 4) & 1, (lhrStat >> 3) & 1,
+                        (lhrStat >> 2) & 1, (lhrStat >> 1) & 1);
+                    ds_.lhrErrorLogged = true;
+                }
+            }
+            if (!(lhrStat & LHR_STATUS_DRDYB)) {  // 0 = data ready (inverted)
+                const uint32_t lhrRaw = readLHRBurst_();
+                if (lhrRaw > 0 && lhrRaw < 0xFFFFFFUL) {
+                    if (xSemaphoreTake(dataMutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
+                        cache_.lhrRaw   = lhrRaw;
+                        cache_.lhrValid = true;
+                        xSemaphoreGive(dataMutex_);
+                    }
+                    ds_.lhrErrorLogged = false;
+                }
+            }
+        }
+
+        // ── StabilityTracker (D-2b, ADR-STAB-001) ───────────────────────────
+        // ~5 μs worst case (N=8 multiply/add + 1 sqrtf). 0.05% of 10 ms budget.
+        stab_.feed(rpRaw, stabThreshRp_);
+        if (stab_.stable) {
+            if (xSemaphoreTake(dataMutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
+                stableCache_.rpRaw = static_cast<uint16_t>(stab_.mean);
+                stableCache_.lRaw  = lRaw;
+                stableCache_.valid = true;
+                xSemaphoreGive(dataMutex_);
+            }
+        }
+
         // Coin detection: dual-threshold hysteresis (ADR-COIN-001)
         // Guard: skip until calibrate() has established a valid baseline
         if (calibrationRpBaseline_ > 100.0f) {
@@ -439,6 +577,8 @@ public:
         calibrationRpBaseline_ = rpSum / ok;
         calibrationLBaseline_  = lSum  / ok;
         lastCalibrationTime_   = millis();
+        stab_.reset();              // ADR-STAB-001: new baseline — re-establish stability
+        stableCache_.valid = false;
 
         // fSENSOR = (fCLKIN × RESP_TIME_cycles) / (3 × L_avg)  — Eq.6, datasheet §8.6.21
         // ⚠ Without CLKIN the chip has no reference for L counting — L_DATA = 0 or garbage.
@@ -610,6 +750,8 @@ private:
                         coin_.detectCount  = 0;
                         coin_.releaseCount = 0;
                         coin_.state        = CoinState::COIN_PRESENT;
+                        stab_.reset();              // ADR-STAB-001: coin arrived — re-establish stability
+                        stableCache_.valid = false;
                         ctx_->log->info(getName(),
                             "Coin PRESENT (RP=%.0f, baseline=%.0f, ratio=%.2f)",
                             rp, calibrationRpBaseline_, rp / calibrationRpBaseline_);
@@ -692,6 +834,27 @@ private:
         spiWrite_(REG_D_CONFIG,   0x00);  // DOK_REPORT = 0: require amplitude regulation
         spiWrite_(REG_ALT_CONFIG, 0x00);  // LOPTIMAL = 0: RP + L both active
 
+        // ── LHR subsystem (D-2, ADR-LHR-001) ──────────────────────────────────
+        // RCOUNT: 0xFFFF = max 24-bit resolution, conv time ~65ms.
+        // OFFSET: 0x0000 = maximum dynamic range.
+        // LHR_CONFIG: 0x00 = SENSOR_DIV=0 (fSENSOR < fCLKIN/4 = 4 MHz for MIKROE-3240).
+        // Note: LHR requires CLKIN — without it LHR_DATA=0. Guarded by isLDataValid().
+        {
+            const uint8_t lhrL = static_cast<uint8_t>(lhrRcount_ & 0xFF);
+            const uint8_t lhrM = static_cast<uint8_t>((lhrRcount_ >> 8) & 0xFF);
+            spiWrite_(REG_LHR_RCOUNT_LSB, lhrL);
+            spiWrite_(REG_LHR_RCOUNT_MSB, lhrM);
+            spiWrite_(REG_LHR_OFFSET_LSB, 0x00);
+            spiWrite_(REG_LHR_OFFSET_MSB, 0x00);
+            spiWrite_(REG_LHR_CONFIG,     0x00);
+            if (spiRead_(REG_LHR_RCOUNT_LSB) != lhrL || spiRead_(REG_LHR_RCOUNT_MSB) != lhrM) {
+                ctx_->log->warning(getName(), "LHR_RCOUNT verify failed — LHR output may be unreliable");
+            } else {
+                ctx_->log->info(getName(), "LHR configured: RCOUNT=0x%04lX, continuous=%s",
+                                (unsigned long)lhrRcount_, lhrContinuous_ ? "true" : "false");
+            }
+        }
+
         ctx_->log->info(getName(), "configure_: DIG_CONFIG=0x%02X, RP_SET=0x%02X",
                         digCfg, rpSetValue_);
         return true;
@@ -722,6 +885,24 @@ private:
         rpRaw = (static_cast<uint16_t>(rpMsb) << 8) | rpLsb;
         lRaw  = (static_cast<uint16_t>(lMsb)  << 8) | lLsb;
         return true;
+    }
+
+    // Read 24-bit LHR_DATA in one SPI burst (D-2, ADR-LHR-001).
+    // REG_LHR_DATA_LSB (0x38) MUST be read FIRST — unlocks MID and MSB (datasheet §9.2.2.2).
+    // Call only when LHR_STATUS.DRDYB=0 (data ready). Returns 0 on SPI failure.
+    uint32_t readLHRBurst_() {
+        if (!ctx_ || !ctx_->spi || csPin_ < 0) return 0;
+        ctx_->spi->beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
+        digitalWrite(csPin_, LOW);
+        ctx_->spi->transfer(REG_LHR_DATA_LSB | 0x80);   // Read bit | 0x38 — FIRST
+        const uint8_t lsb = ctx_->spi->transfer(0x00);  // 0x38: LHR_DATA_LSB (unlocks MID+MSB)
+        const uint8_t mid = ctx_->spi->transfer(0x00);  // 0x39: LHR_DATA_MID
+        const uint8_t msb = ctx_->spi->transfer(0x00);  // 0x3A: LHR_DATA_MSB
+        digitalWrite(csPin_, HIGH);
+        ctx_->spi->endTransaction();
+        return (static_cast<uint32_t>(msb) << 16) |
+               (static_cast<uint32_t>(mid) << 8)  |
+               lsb;
     }
 
     uint8_t spiRead_(uint8_t reg) {

@@ -10,5 +10,9 @@
   "coin_detect_threshold": 0.90,
   "coin_release_threshold": 0.96,
   "detect_debounce_n": 5,
-  "release_debounce_m": 3
+  "release_debounce_m": 3,
+  "lhr_rcount": 65535,
+  "lhr_continuous": true,
+  "stab_sigma_thresh_rp": 50.0,
+  "stab_n_samples": 8
 }

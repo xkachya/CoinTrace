@@ -129,6 +129,7 @@ static constexpr float QUICK_FERRO_THRESH_L_RAW = 100.0f;  // dL_raw > +100 ct �
 // the user's hand is still moving. Quick Screen is suppressed until signal settles.
 // HW-QS-4 confirmed: QUICK_SETTLE_MS=400 working correctly, no adjustment needed.
 static constexpr uint32_t QUICK_SETTLE_MS       = 400;     // ms after COIN_PRESENT before drawing Quick Screen
+static constexpr uint32_t MEAS_STEP_SETTLE_MS   = 300;     // ms — hybrid settle fallback for STEP_1/3/DRIFT (ADR-STAB-001)
 
 // Reset to true when coin is removed → forces full redraw on next placement.
 // File-scope so loop() can reset it outside drawQuickScreen() (QUICK_SCREEN_SPEC §5).
@@ -892,26 +893,62 @@ void loop() {
               sMeas.stepMs = millis();
               drawMeasStep_full(sMeas, (uint16_t)d.value1);
               break;
-            case MeasState::STEP_1:
-              sMeas.m.rp[1] = d.value1;  sMeas.m.l[1] = d.value2;
-              gLogger.info("Meas", "Step 2/4 (1.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
+            case MeasState::STEP_1: {
+              const uint32_t elapsed1   = millis() - sMeas.stepMs;
+              const bool rByTimer1      = elapsed1 >= MEAS_STEP_SETTLE_MS;
+              const bool rBySignal1     = gLDC && gLDC->isSignalStable();
+              if (!rByTimer1 && !rBySignal1) {
+                gLogger.info("Meas", "Step 2/4: hold steady (sigma=%.1f, %u ms)",
+                             gLDC ? gLDC->getSignalSigma() : 0.0f, elapsed1);
+                break;
+              }
+              const float rp1 = (rBySignal1 && gLDC->getStableRp() > 0.0f) ? gLDC->getStableRp() : d.value1;
+              const float l1  = (rBySignal1 && gLDC->getStableL()  > 0.0f) ? gLDC->getStableL()  : d.value2;
+              sMeas.m.rp[1] = rp1;  sMeas.m.l[1] = l1;
+              gLogger.info("Meas", "Step 2/4 (1.6mm): RP=%.0f  L=%.0f%s",
+                           rp1, l1, rBySignal1 ? " [stable]" : "");
               sMeas.state  = MeasState::STEP_3;
               sMeas.stepMs = millis();
-              drawMeasStep_full(sMeas, (uint16_t)d.value1);
+              drawMeasStep_full(sMeas, (uint16_t)rp1);
               break;
-            case MeasState::STEP_3:
-              sMeas.m.rp[2] = d.value1;  sMeas.m.l[2] = d.value2;
-              gLogger.info("Meas", "Step 3/4 (2.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
+            }
+            case MeasState::STEP_3: {
+              const uint32_t elapsed3   = millis() - sMeas.stepMs;
+              const bool rByTimer3      = elapsed3 >= MEAS_STEP_SETTLE_MS;
+              const bool rBySignal3     = gLDC && gLDC->isSignalStable();
+              if (!rByTimer3 && !rBySignal3) {
+                gLogger.info("Meas", "Step 3/4: hold steady (sigma=%.1f, %u ms)",
+                             gLDC ? gLDC->getSignalSigma() : 0.0f, elapsed3);
+                break;
+              }
+              const float rp3 = (rBySignal3 && gLDC->getStableRp() > 0.0f) ? gLDC->getStableRp() : d.value1;
+              const float l3  = (rBySignal3 && gLDC->getStableL()  > 0.0f) ? gLDC->getStableL()  : d.value2;
+              sMeas.m.rp[2] = rp3;  sMeas.m.l[2] = l3;
+              gLogger.info("Meas", "Step 3/4 (2.6mm): RP=%.0f  L=%.0f%s",
+                           rp3, l3, rBySignal3 ? " [stable]" : "");
               sMeas.state  = MeasState::STEP_DRIFT;
               sMeas.stepMs = millis();
-              drawMeasStep_full(sMeas, (uint16_t)d.value1);
+              drawMeasStep_full(sMeas, (uint16_t)rp3);
               break;
-            case MeasState::STEP_DRIFT:
-              sMeas.m.rp[3] = d.value1;  sMeas.m.l[3] = d.value2;
-              gLogger.info("Meas", "Step 4/4 drift (0.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
+            }
+            case MeasState::STEP_DRIFT: {
+              const uint32_t elapsedD   = millis() - sMeas.stepMs;
+              const bool rByTimerD      = elapsedD >= MEAS_STEP_SETTLE_MS;
+              const bool rBySignalD     = gLDC && gLDC->isSignalStable();
+              if (!rByTimerD && !rBySignalD) {
+                gLogger.info("Meas", "Step 4/4: hold steady (sigma=%.1f, %u ms)",
+                             gLDC ? gLDC->getSignalSigma() : 0.0f, elapsedD);
+                break;
+              }
+              const float rpD = (rBySignalD && gLDC->getStableRp() > 0.0f) ? gLDC->getStableRp() : d.value1;
+              const float lD  = (rBySignalD && gLDC->getStableL()  > 0.0f) ? gLDC->getStableL()  : d.value2;
+              sMeas.m.rp[3] = rpD;  sMeas.m.l[3] = lD;
+              gLogger.info("Meas", "Step 4/4 drift (0.6mm): RP=%.0f  L=%.0f%s",
+                           rpD, lD, rBySignalD ? " [stable]" : "");
               sMeas.state = MeasState::COMPUTE;
               doMeasCompute();
               break;
+            }
             default: break;
           }
         }
