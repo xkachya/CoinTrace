@@ -1,10 +1,24 @@
 # LDC1101 в системі плагінів CoinTrace: Архітектурний аналіз
 
-**Тип документа:** Технічний аналіз та специфікація реалізації
-**Версія:** 1.4.0
-**Дата:** 14 березня 2026 (оновлено: 16 березня 2026 — v1.3.0: §A LHR 24-bit ADR-LHR-001; §B fSENSOR вимірювання ADR-FREQ-001; §C RP_SET optimization; §D HIGH_Q_SENSOR ADR-HQ-001; §E INTB v2 roadmap ADR-INTB-001; §F температурна компенсація ADR-TEMP-001; §G coil guidelines | хвиля 5: M-1 staleFlag без mutex; M-3 polling contract COIN_REMOVED; L-1 convTimeMs; I-1 lastCalibrationTime; I-2 reconfigureSensor async | 17 березня 2026 — v1.3.1: аудит-відповідь F-03 §9.2.2.2 ref; F-05 spiMutex≡spi_vspi_mutex; TODO lhrContinuous path; calMaxAgeSec placeholder clarification; §10 бекло rows 6–9 | 16 березня 2026 — v1.3.2: видалено §12 dual-chip/dual-freq roadmap (LDC1614, dL_ratio, 9D vector) | 20 березня 2026 — v1.3.3: §2 пункт 5 CLKIN/CLDO/PWM hardware; §7 clkin_freq_hz уточнено LHR-only; §10 задача 10 LEDC timer | 28 березня 2026 — v1.4.0: Wave 8 C-7c §8.2 Quick Screen API: getLiveRp(), getLiveL(), isLDataValid(), recalibrate())
-**Статус:** Актуальний (v1.4.0)  
+**Тип документа:** Технічний аналіз та специфікація реалізації  
+**Версія:** 1.5.0  
+**Дата:** 14 березня 2026  
+**Статус:** Актуальний (v1.5.0)  
 **Джерело:** Texas Instruments LDC1101 Datasheet SNOSD01D (May 2015 – Revised October 2016) | TI App Note SNOA944
+
+<details>
+<summary>Changelog</summary>
+
+| Дата | Версія | Зміни |
+|------|--------|-------|
+| 16 березня 2026 | v1.3.0 | §A LHR 24-bit ADR-LHR-001; §B fSENSOR вимірювання ADR-FREQ-001; §C RP_SET optimization; §D HIGH_Q_SENSOR ADR-HQ-001; §E INTB v2 roadmap ADR-INTB-001; §F температурна компенсація ADR-TEMP-001; §G coil guidelines; хвиля 5: M-1 staleFlag без mutex; M-3 polling contract COIN_REMOVED; L-1 convTimeMs; I-1 lastCalibrationTime; I-2 reconfigureSensor async |
+| 17 березня 2026 | v1.3.1 | Аудит-відповідь F-03 §9.2.2.2 ref; F-05 spiMutex≡spi_vspi_mutex; TODO lhrContinuous path; calMaxAgeSec placeholder clarification; §10 бекло rows 6–9 |
+| 16 березня 2026 | v1.3.2 | Видалено §12 dual-chip/dual-freq roadmap (LDC1614, dL_ratio, 9D vector) |
+| 20 березня 2026 | v1.3.3 | §2 пункт 5 CLKIN/CLDO/PWM hardware; §7 clkin_freq_hz уточнено LHR-only; §10 задача 10 LEDC timer |
+| 28 березня 2026 | v1.4.0 | Wave 8 C-7c §8.2 Quick Screen API: `getLiveRp()`, `getLiveL()`, `isLDataValid()`, `recalibrate()` |
+| 30 березня 2026 | v1.5.0 | §8.3 ADR-STAB-001 Signal Stability Tracking — dual cache + nested StabilityTracker; task 11 у §10 |
+
+</details>
 
 ---
 
@@ -18,6 +32,7 @@
 6. [SPI шина і конкурентний доступ](#6-spi-шина-і-конкурентний-доступ)
 7. [Конфігураційний файл](#7-конфігураційний-файл)
 8. [Референсна реалізація](#8-референсна-реалізація)
+   - [8.3 Signal Stability Tracking (ADR-STAB-001)](#83-signal-stability-tracking--adr-stab-001)
 9. [Часові характеристики і точність](#9-часові-характеристики-і-точність)
 10. [Відповідність архітектурним контрактам](#10-відповідність-архітектурним-контрактам)
 11. [Апаратні рекомендації для котушки](#11-апаратні-рекомендації-для-котушки)
@@ -1429,6 +1444,192 @@ private:
 };
 ```
 
+### 8.3 Signal Stability Tracking — ADR-STAB-001
+
+#### Проблема
+
+Після покладання монети або додавання/зняття spacer-ів механічна нестабільність спричиняє тимчасовий шум RP сигналу. Поточні засоби захисту покривають не всі контексти:
+
+| Тип нестабільності | Причина | Тривалість | Поточний захист |
+|--------------------|---------|-----------|----------------|
+| A. Hand presence | Рука над котушкою при першому покладанні | ~400 мс | ✅ `QUICK_SETTLE_MS=400` (main.cpp) |
+| **B. Mechanical settling** | Монета/spacer ще рухається після ENTER | ~100–300 мс | ❌ **Відсутній для STEP_1/STEP_3/STEP_DRIFT** |
+| C. RESP_TIME transient | 1–2 конверсії після зміни об'єкта | ~5 мс | ✅ Capture debounce (5 samples) |
+
+**Непокритий gap (тип B):** handlers `STEP_1`, `STEP_3` та `STEP_DRIFT` у `main.cpp` виконують негайний single read після натискання ENTER — без перевірки стабільності. При швидкому натисканні (spacer ще тремтить) можлива похибка 0.5–2%.
+
+#### Аналіз варіантів (відхилені)
+
+> ❌ **Варіант I — Timer-only у caller (main.cpp):** `if (elapsed < MEAS_SETTLE_MS) return;`  
+> Сліпий до фізичного стану. Якщо монета стабілізувалась за 80 мс — система однаково чекає 300 мс. Якщо сигнал нестабільний 400 мс — все одно захоплює. Відхилено: не надає фізичної гарантії.
+
+> ❌ **Варіант II — Окремий клас `StabilityTracker.h`:**  
+> Самостійний файл для ~30 рядків коду в одному плагіні — надмірна складність. Відхилено: overkill.
+
+> ❌ **Варіант III — Прапорець без dual cache:**  
+> `isSignalStable()` повертає `true`, але між цим викликом і `getLiveRp()` може спрацювати `update()`. Race condition: `stable=true` не гарантує що захоплений live reading відповідав стабільному стану. Відхилено: семантична неконсистентність.
+
+#### ADR-STAB-001 — Обране рішення: Dual cache + nested StabilityTracker
+
+> ✅ **Рішення:** Nested `StabilityTracker` struct у private зоні плагіна. Два незалежні кеші: **live cache** (існуючий, незмінний) та **stable cache** (новий, атомарно оновлюється коли N=8 зразків консистентні). Новий публічний API повністю адитивний — жодного breaking change.
+
+**Чому dual cache вирішує race condition Варіанту III:** `stableCache_` оновлюється атомарно в `update()` як єдиний snapshot коли всі 8 зразків стабільні. `getStableRp()` повертає frozen snapshot — жодного race між `isSignalStable()` та `getStableRp()`.
+
+#### Специфікація: StabilityTracker
+
+```cpp
+// private: nested struct — ~36 bytes BSS, нульовий вплив на публічний контракт
+struct StabilityTracker {
+    uint16_t buf[8] = {};   // circular buffer, N=8 samples (~160 мс @ 50 Hz)
+    uint8_t  head   = 0;    // next write position
+    uint8_t  count  = 0;    // samples accumulated (0–8)
+    float    sigma  = 0.0f; // rolling σ(RP) over last N samples
+    float    mean   = 0.0f; // rolling mean (frozen into stableCache_.rpRaw)
+    bool     stable = false;// true if sigma < stabThreshRp_ AND count == 8
+
+    void reset() { *this = StabilityTracker{}; }
+
+    // Called from update() after successful burst read (~5 μs worst case)
+    void feed(uint16_t rpRaw, float stabThresh) {
+        buf[head] = rpRaw;
+        head = (head + 1) & 7;          // power-of-2 wrap (N=8 hardcoded)
+        if (count < 8) ++count;
+        if (count < 8) { stable = false; return; }
+
+        // Compute mean and sigma over full window
+        float sum = 0, sumSq = 0;
+        for (uint8_t i = 0; i < 8; i++) { sum += buf[i]; sumSq += (float)buf[i] * buf[i]; }
+        mean  = sum / 8.0f;
+        sigma = sqrtf(sumSq / 8.0f - mean * mean);
+        stable = (sigma < stabThresh);
+    }
+} stab_;
+```
+
+#### Специфікація: Stable cache
+
+```cpp
+// Оновлюється тільки в update() (той самий контекст що live cache)
+// → захищений існуючим dataMutex_ без окремого mutex
+struct StableCache {
+    uint16_t rpRaw = 0;     // mean RP з 8 samples (truncated to uint16)
+    uint16_t lRaw  = 0;     // поточний lRaw при моменті фіксації
+    bool     valid = false; // true якщо stab_.stable
+} stableCache_;
+```
+
+#### Зміни в `update()` (адитивні)
+
+```cpp
+// ПІСЛЯ existing burst read + cache_.rpRaw / cache_.lRaw update:
+stab_.feed(rpRaw, stabThreshRp_);    // ~5 мкс
+
+if (stab_.stable) {
+    // Atomic stable snapshot — same mutex context as live cache
+    stableCache_.rpRaw = static_cast<uint16_t>(stab_.mean);
+    stableCache_.lRaw  = lRaw;
+    stableCache_.valid = true;
+}
+```
+
+#### Скидання StabilityTracker
+
+`stab_.reset()` + `stableCache_.valid = false` викликається при:
+
+1. **IDLE_NO_COIN → COIN_PRESENT** transition у `updateCoinState_()` — монета щойно покладена
+2. `recalibrate()` — нова базова лінія
+3. `calibrate()` — повна рекалібровка
+
+#### Новий публічний API (повністю адитивний)
+
+```cpp
+// ── Signal Stability API (ADR-STAB-001) ──────────────────────────────────────
+// getStableRp() / getStableL(): frozen snapshot — немає race з isSignalStable().
+// isSignalStable(): true якщо count==8 і σ(RP) < stabThreshRp_.
+// getSignalSigma(): поточний σ(RP) — для Serial diagnostics і Discovery.
+// Thread safety: stableCache_ записується тільки з update(); dataMutex_ достатній.
+
+float getStableRp() const {
+    if (!dataMutex_) return 0.0f;
+    if (xSemaphoreTake(dataMutex_, pdMS_TO_TICKS(50)) != pdTRUE) return 0.0f;
+    const float rp = stableCache_.valid ? static_cast<float>(stableCache_.rpRaw) : 0.0f;
+    xSemaphoreGive(dataMutex_);
+    return rp;
+}
+
+float getStableL() const {
+    if (!dataMutex_) return 0.0f;
+    if (xSemaphoreTake(dataMutex_, pdMS_TO_TICKS(50)) != pdTRUE) return 0.0f;
+    const float l = stableCache_.valid ? static_cast<float>(stableCache_.lRaw) : 0.0f;
+    xSemaphoreGive(dataMutex_);
+    return l;
+}
+
+bool  isSignalStable() const { return stab_.stable; }   // lock-free (bool, 1 byte, Xtensa LX7)
+float getSignalSigma() const { return stab_.sigma; }    // lock-free (float, atomic read)
+```
+
+#### Нові config параметри в `ldc1101.json`
+
+```json
+"stab_sigma_thresh_rp": 50.0,
+"stab_n_samples": 8
+```
+
+| Параметр | Default | Опис |
+|----------|---------|------|
+| `stab_sigma_thresh_rp` | `50.0` | σ(RP) поріг для `isSignalStable()`. ~0.09% від basRp=57344. Уточнити після C-6 EXP-2. |
+| `stab_n_samples` | `8` | Розмір вікна. 8 × 20 мс = 160 мс при 50 Hz. N=8 hardcode у реалізації. |
+
+#### Consumer pattern у main.cpp — STEP_1/3/DRIFT handlers
+
+```cpp
+// Нова константа:
+static constexpr uint32_t MEAS_STEP_SETTLE_MS = 300;  // fallback timer, мс
+
+// У STEP_1 / STEP_3 / STEP_DRIFT ENTER handler (перед capture):
+const uint32_t elapsed   = millis() - sMeas.stepMs;
+const bool readyByTimer  = (elapsed >= MEAS_STEP_SETTLE_MS);
+const bool readyBySignal = gLDC ? gLDC->isSignalStable() : false;
+
+if (!readyByTimer && !readyBySignal) {
+    // Показати "Hold steady..." — не захоплювати
+    return;  // наступний loop() спробує знову
+}
+
+// Capture: prefer stable snapshot якщо доступний
+ISensorPlugin::SensorData d = gLDC->read();     // live fallback
+float rpCapture = (readyBySignal && gLDC->getStableRp() > 0.0f)
+                  ? gLDC->getStableRp()
+                  : d.value1;
+float lCapture  = (readyBySignal && gLDC->getStableL() > 0.0f)
+                  ? gLDC->getStableL()
+                  : d.value2;
+```
+
+#### Взаємодія з Discovery Mode (Wave 9)
+
+Discovery capture loop читає SPI напряму через `spiReadPublic()` — **повністю минає `update()`**. `StabilityTracker` та Discovery tight loop є **ортогональними**, нульова взаємодія.
+
+Discovery може опціонально використати `isSignalStable()` як early release з settleMs:
+
+```cpp
+while (!ldc->isSignalStable() && millis() - settleStart < settleMs) delay(5);
+```
+
+Залишається опціональним — timer-based settle є fallback, і EXP-6 (settling time analysis) навмисно вимірює перехідний процес.
+
+#### Вплив на контракти
+
+| Контракт | Вплив |
+|----------|-------|
+| `update() ≤ 10 мс` (PLUGIN_CONTRACT §1.2) | +~5 мкс (0.05% бюджету). Поточний фактичний час < 0.5 мс → запас 20×. ✅ |
+| `getLiveRp()` / `getLiveL()` / `read()` семантика | Не змінюється — завжди newest single reading ✅ |
+| `ISensorPlugin` interface | Не змінюється ✅ |
+| Native tests (135 PASS) | Не порушуються. +1 новий тест для `StabilityTracker::feed()` ✅ |
+| Thread safety `dataMutex_` | `stableCache_` під тим же mutex що live cache ✅ |
+| Discovery tight loop | Повністю ортогональний ✅ |
+
 ---
 
 ## 9. Часові характеристики і точність
@@ -1498,6 +1699,7 @@ private:
 | 8 | Metal Separation Analysis: перерахунок dL з LHR data | `FINGERPRINT_DB_ARCHITECTURE.md` |
 | 9 | `convTimeMs()`: використовувати `measuredFSensor` коли доступний (F-04) | `LDC1101Plugin.h` / R-01 |
 | 10 | **LHR hardware:** сконфігурувати ESP32-S3 LEDC timer для виводу 16 MHz на GPIO → дріт до MIKROE-3240 mikroBUS Pin 16 (PWM/CLKIN). Без цього LHR дає некоректний fSENSOR. | ADR-LHR-001, `LDC1101Plugin.h` v1.5, `docs/hardware/LDC1101_WIRING.md` |
+| 11 | **ADR-STAB-001:** Реалізувати `StabilityTracker` + dual stable cache + `getStableRp()`/`getStableL()`/`isSignalStable()`/`getSignalSigma()` у `LDC1101Plugin.h`. Додати `MEAS_STEP_SETTLE_MS` guard у STEP_1/3/DRIFT handlers у `main.cpp`. Поріг `stab_sigma_thresh_rp` уточнити після C-6 EXP-2. | `LDC1101Plugin.h` v1.5, `main.cpp`, `ldc1101.json` |
 
 ---
 
@@ -1532,5 +1734,5 @@ private:
 ---
 
 *Документ підготовлено для архітектора та імплементора `LDC1101Plugin`.*
-*Версія: 1.4.0 | Дата: 28 березня 2026*
+*Версія: 1.5.0 | Дата: 30 березня 2026*
 *Верифіковано по: TI LDC1101 Datasheet SNOSD01D – May 2015 – Revised October 2016 | TI App Note SNOA944 "Optimizing L Measurement Resolution"*

@@ -5,7 +5,7 @@
 **Статус:** Специфікація — реалізація в Wave 9 Sprint 2  
 **Wave:** 9 "Measurement Science"  
 **Predecessor:** Wave 8 C-5 Deep Analysis Audit (2026-03-27)  
-**Cross-ref:** `LDC1101_ARCHITECTURE.md v1.3.3`, `WAVE8_COMPLETION_WAVE9_DISCOVERY_PLAN.md`, `FINGERPRINT_DB_ARCHITECTURE.md`, `QUICK_SCREEN_SPEC.md`, `METAL_MATCHER_ARCHITECTURE.md`
+**Cross-ref:** `LDC1101_ARCHITECTURE.md v1.5.0`, `WAVE8_COMPLETION_WAVE9_DISCOVERY_PLAN.md`, `FINGERPRINT_DB_ARCHITECTURE.md`, `QUICK_SCREEN_SPEC.md`, `METAL_MATCHER_ARCHITECTURE.md`
 
 ---
 
@@ -246,6 +246,13 @@ struct CaptureStats {
 **sizeof(CaptureStats):** 2×(8+8+2+2+128) + (8+4+4+2) + (2+2) + (4×9) ≈ **348 bytes** на стеку. Безпечно для 8 KB main task stack.
 
 ### Capture loop
+
+> **Optional enhancement (ADR-STAB-001, Wave 9 D-2b):** Якщо `StabilityTracker` реалізовано, фаза settling може використати `isSignalStable()` як early release замість фіксованого `delay(settleMs)`:
+> ```cpp
+> const uint32_t t0 = millis();
+> while (!ldc->isSignalStable() && millis() - t0 < settleMs) delay(5);
+> ```
+> Timer залишається fallback (сигнал не завжди стабілізується раніше). Корисно для EXP-6 (settling time analysis) — зменшує зайве очікування при вже стабільному сигналі.
 
 ```cpp
 // Викликається з measurement state machine при discovery_enabled=true

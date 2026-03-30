@@ -1,8 +1,8 @@
 # Wave 9 Roadmap — Measurement Science
 
-**Статус:** 📋 Planned — очікує завершення Wave 8 C-7  
-**Версія:** 1.0.0  
-**Дата:** 2026-03-27  
+**Статус:** � Active — Wave 8 CLOSED (2026-03-30), Wave 9 implementation ready  
+**Версія:** 1.2.0  
+**Дата:** 2026-03-27 (оновлено: 2026-03-30)  
 **Попередня хвиля:** Wave 8 — Connectivity + Infrastructure + Sensor Integration (C-7 MetalMatcher + Quick Screen = final milestone)  
 **Тригер:** C-5 Deep Analysis Audit (2026-03-27) — виявлено обмеження 2-dimensional effective vector, rp[2] saturation 80%, dL1_n ferro blindness  
 **Cross-ref:** `WAVE8_COMPLETION_WAVE9_DISCOVERY_PLAN.md`, `DISCOVERY_MODE_SPEC.md`, `C5_DEEP_ANALYSIS_AUDIT.md`
@@ -47,7 +47,8 @@ C-5 аудит встановив три факти які визначають 
 |--------|-------|-----|-------------|--------|------|
 | D-1 Multi-sample capture | D | ❌ | Wave 8 C-7 done | 📋 Planned | N~600 samples per step, reservoir median, σ |
 | D-2 LHR continuous mode | D | ❌ | Wave 8 C-7 done | 📋 Planned | 24-bit fSENSOR в кожному update() |
-| D-3 Raw dump to SD | D | ❌ | D-1, D-2 | 📋 Planned | JSON session file з повною статистикою |
+| **D-2b StabilityTracker (ADR-STAB-001)** | D | ❌ | D-2 | 📋 Planned | `StabilityTracker` + dual cache в `LDC1101Plugin.h`; STEP_1/3/DRIFT settling guard у `main.cpp` |
+| D-3 Raw dump to SD | D | ❌ | D-1, D-2, D-2b | 📋 Planned | JSON session file з повною статистикою per step |
 | C-6 Discovery HW Session | C | ✅ | D-1, D-2, D-3 | 📋 Planned | 5 old + 2-4 new coins, raw dump collection |
 | A-1 Offline analysis | A | ❌ | C-6 data | 📋 Planned | Python: Δf, σ, LHR precision, pairwise distances |
 | A-2 Vector v2 decision | A | ❌ | A-1 | 📋 Planned | ADR: which dimensions, which weights |
@@ -112,6 +113,37 @@ C-5 аудит встановив три факти які визначають 
 **Timing overhead в update():** ~20 μs worst case (1 SPI status read + 3 SPI data reads). 0.1% від 20 ms бюджету.
 
 **LHR_STATUS error handling:** Bits ERR_ZC, ERR_OR, ERR_UR, ERR_OF — log warning once, skip cache update, wait for next conversion. Деталі: DISCOVERY_MODE_SPEC.md §5.
+
+---
+
+### D-2b: StabilityTracker (ADR-STAB-001)
+
+**Специфікація:** `LDC1101_ARCHITECTURE.md v1.5.0 §8.3`
+
+**Що:** Реалізувати nested `StabilityTracker` struct у `LDC1101Plugin.h` з dual cache pattern. Додати `readyByTimer || readyBySignal` guard у STEP_1/3/DRIFT handlers у `main.cpp`.
+
+**Чому:** Поточні STEP_1/3/DRIFT handlers роблять immediate single read після ENTER — без перевірки стабільності. При швидкому натисканні (spacer ще тремтить) можлива похибка 0.5–2%. `StabilityTracker` вирішує це на рівні сигналу (не тільки таймера), повертаючи frozen snapshot з N=8 послідовних зразків з σ(RP) < `stab_sigma_thresh_rp`.
+
+**Зміни:**
+
+| Файл | Зміна |
+|------|-------|
+| `lib/LDC1101Plugin/src/LDC1101Plugin.h` | `StabilityTracker` struct, `StableCache` struct, `stab_.feed()` в `update()`, `getStableRp()`/`getStableL()`/`isSignalStable()`/`getSignalSigma()` |
+| `src/main.cpp` | `MEAS_STEP_SETTLE_MS=300` constant; `readyByTimer \|\| readyBySignal` guard в STEP_1/3/DRIFT |
+| `data/plugins/ldc1101.json` | `stab_sigma_thresh_rp: 50.0`, `stab_n_samples: 8` |
+
+**Config:**
+
+```json
+"stab_sigma_thresh_rp": 50.0,
+"stab_n_samples": 8
+```
+
+**Timing overhead в update():** ~5 мкс worst case (N=8 mul/add + 1 sqrtf). <0.05% від 10 мс бюджету.
+
+**Тест:** +1 unit test для `StabilityTracker::feed()` (стабільний + нестабільний вхід).
+
+**Поріг `stab_sigma_thresh_rp=50.0`:** Початкове консервативне значення (~0.09% від basRp=57344). Уточнюється після EXP-2 (real noise floor per metal per step).
 
 ---
 
@@ -192,7 +224,7 @@ C-5 аудит встановив три факти які визначають 
 | Код | Що перевіряємо | Критерій успіху |
 |-----|---------------|----------------|
 | **EXP-1** | Δf розрізняє XFE (Fe+Cu) від XCU (чиста Cu) | Δf(XFE) < 0 AND Δf(XCU) > 0 (протилежні знаки) |
-| **EXP-2** | Multi-sample σ(RP) відрізняється per metal | σ(RP) for Al ≠ σ(RP) for Ag (statistically significant) |
+| **EXP-2** | Multi-sample σ(RP) відрізняється per metal | σ(RP) for Al ≠ σ(RP) for Ag (statistically significant). **Additional output:** optimal `stab_sigma_thresh_rp` для production (must be above worst-case settling σ, below metal-specific σ differences) |
 | **EXP-3** | LHR 24-bit дає кращу fSENSOR роздільність ніж L_DATA 16-bit | LHR fSensor σ < L_DATA-derived fSensor σ |
 | **EXP-4** | Ag999 vs Ag925 розділяються по dRp1_n або Δf | Pairwise distance > 2σ between XAG999 and XAG925 |
 | **EXP-5** | Discovery медіана точніша за single read (C-5 comparison) | σ(centroid) для Discovery < σ(centroid) для C-5 single-read |
@@ -408,5 +440,6 @@ Discovery Mode — **практично безкоштовний** з точки
 
 ---
 
+*Версія 1.2.0 (2026-03-30) — AI-1: додано задачу D-2b StabilityTracker (ADR-STAB-001) + секція Track D; AI-3: розширено EXP-2 scope (додано stab_sigma_thresh_rp calibration output); статус оновлено Active — Wave 8 CLOSED.*  
 *Версія 1.1.0 (2026-03-30) — додано критерій закриття TECHNICAL_DEBT.md до Wave 9 exit criteria.*  
 *Версія 1.0.0 — initial Wave 9 roadmap, created 2026-03-27 based on C-5 Deep Analysis Audit findings and WAVE8_COMPLETION_WAVE9_DISCOVERY_PLAN.md.*
