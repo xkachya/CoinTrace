@@ -385,41 +385,81 @@ SILVER_THRESH = 35.0%  → Ag (33.4%) → SILVER ✅; Fe (36.6%) → ? (35–37.
 
 ---
 
-## §7 — HW-QS-5: MetalMatcher через HTTP POST /api/v1/database/match
+## §7 — HW-QS-5: matchFull() через Serial + HTTP
 
 **Мета:** перевірити що `matchFull()` у `doMeasCompute()` дає результат з DB.
 
-**Потребує:** SD картка з `/CoinTrace/index.json` (fingerprint DB) та WiFi з'єднання.
+**Потребує:** SD картка з `/CoinTrace/database/index.json` + `/CoinTrace/matcher.json` (обидва є у sd_seed) та WiFi з'єднання.
 
-### Кроки
+> **Передумови (Serial при старті):**
+> ```
+> [Cache]   FingerprintCache ready — 5 entries   ← SD змонтована, index.json завантажено
+> [Matcher] Config loaded — sigma=0.35 ...        ← або "Using default config" якщо SD без matcher.json
+> ```
+> Якщо `FingerprintCache unavailable` — перевірити SD, re-flash або повторити §0.
 
-1. Підкласти срібну монету → Quick Screen → ENTER → пройти повний 4-кроковий цикл
-2. По завершенні перевірити Serial:
-   ```
-   [Meas] Vec: dRp1=NNNN  k1=N.NNN  k2=N.NNN  slope=N.NNNN  dL1=NNN
-   [Meas] Match: <назва монети>  conf=N.NN
-   ```
+### Крок 1 — повний цикл вимірювання
 
-### HTTP перевірка (якщо DB завантажена)
+1. Підкласти срібну монету зі spacer 0.6mm → Quick Screen активний
+2. **ENTER** → STEP_BASE → **ENTER** → STEP_1 → **ENTER** → STEP_3 → **ENTER** → STEP_DRIFT → **ENTER**
+3. По завершенні COMPUTE — перевірити Serial:
+
+```
+[Meas] Vec: dRp1=NNNN  k1=N.NNN  k2=N.NNN  slope=N.NNNN  dL1=NNN
+[Meas] #1: XAG999 "American Silver Eagle 1oz"  dist=N.NNN  conf=N.NN  algo=full
+[Meas] #2: ...
+[Meas] Saved #NN — 4pos [...]  conf=N.NN
+```
+
+> `[Meas] Matcher not ready — skipping match` при відсутній DB — acceptable.
+
+### Крок 2 — читання збереженого виміру через HTTP
+
+Endpoint `GET /api/v1/measure/{id}`. ID = meas_count − 1 (з `/api/v1/status`):
 
 ```powershell
-# Замінити IP на реальний
-$ip = "192.168.88.53"
+$ip = "192.168.88.53"   # замінити на реальний IP (Serial → [WiFi])
 
-# Запит до бази — пряме query по вектору
-$body = '{"dRp1_n": 0.085, "k1": 0.72, "k2": 0.61, "slope": -0.0041, "dL1_n": 0.12}'
+# 1. Отримати meas_count
+$status = Invoke-RestMethod "http://$ip/api/v1/status"
+$id = $status.meas_count - 1
+Write-Host "Latest measurement ID: $id"
+
+# 2. Завантажити вимір
+Invoke-RestMethod "http://$ip/api/v1/measure/$id" | ConvertTo-Json
+```
+
+Очікуваний відповідь (фрагмент):
+```json
+{
+  "id": 3,
+  "metal_code": "XAG999",
+  "coin_name": "American Silver Eagle 1oz",
+  "conf": 0.87
+}
+```
+
+> ⚠️ `GET /api/v1/measurements/latest` — не існує. Завжди через `meas_count − 1`.
+
+### Крок 3 — пряме query вектора (опційно)
+
+Для ручного тестування без повного циклу — POST з центроїдом XAG999 (C-5 hw-verified):
+
+```powershell
+# XAG999 centroid з index.json (C-5 hw-verified 2026-03-27)
+$body = '{"algo_ver":1,"protocol_id":"p3_MIKROE3240_b06_012mm",
+          "vector":{"dRp1_n":-10.675,"k1":1.22315,"k2":1.35472,"slope":0.17736,"dL1_n":-2.4176}}'
 Invoke-RestMethod -Method POST -Uri "http://$ip/api/v1/database/match" `
     -ContentType "application/json" -Body $body
-
-# Або переглянути результат останнього вимірювання
-Invoke-RestMethod "http://$ip/api/v1/measurements/latest"
 ```
+
+Очікуваний результат: `match.metal_code = "XAG999"`, `conf > 0.9`.
 
 ### Критерій PASS
 
-- [ ] Serial показує `[Meas] Match:` рядок з conf > 0 (якщо DB не порожня)
-- [ ] Або `[Meas] Matcher not ready — skipping match` якщо DB відсутня (acceptable)
-- [ ] HTTP GET `/api/v1/measurements/latest` повертає запис з `metal_code` та `coin_name`
+- [ ] Serial показує `[Meas] Vec:` + `[Meas] #1:` з `conf > 0` (якщо DB ready)
+- [ ] Або `[Meas] Matcher not ready — skipping match` якщо SD порожня (acceptable)
+- [ ] `GET /api/v1/measure/{meas_count-1}` повертає запис з `metal_code` і `conf > 0`
 
 ---
 
