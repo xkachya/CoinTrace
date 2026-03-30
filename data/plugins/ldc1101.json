@@ -14,5 +14,8 @@
   "lhr_rcount": 65535,
   "lhr_continuous": true,
   "stab_sigma_thresh_rp": 50.0,
-  "stab_n_samples": 8
+  "stab_n_samples": 8,
+  "discovery_enabled": true,
+  "discovery_capture_ms": 2000,
+  "discovery_settle_ms": 300
 }

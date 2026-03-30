@@ -45,7 +45,7 @@ C-5 аудит встановив три факти які визначають 
 
 | Задача | Track | HW? | Залежить від | Статус | Опис |
 |--------|-------|-----|-------------|--------|------|
-| D-1 Multi-sample capture | D | ❌ | Wave 8 C-7 done | 📋 Planned | N~600 samples per step, reservoir median, σ |
+| D-1 Multi-sample capture | D | ❌ | Wave 8 C-7 done | ✅ Done (2026-03-31) | N~600 samples per step, reservoir median, σ |
 | D-2 LHR continuous mode | D | ❌ | Wave 8 C-7 done | ✅ Done (2026-03-30) | 24-bit fSENSOR в кожному update() |
 | **D-2b StabilityTracker (ADR-STAB-001)** | D | ❌ | D-2 | ✅ Done (2026-03-30) | `StabilityTracker` + dual cache в `LDC1101Plugin.h`; STEP_1/3/DRIFT settling guard у `main.cpp` |
 | D-3 Raw dump to SD | D | ❌ | D-1, D-2, D-2b | 📋 Planned | JSON session file з повною статистикою per step |

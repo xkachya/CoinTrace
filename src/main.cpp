@@ -131,6 +131,72 @@ static constexpr float QUICK_FERRO_THRESH_L_RAW = 100.0f;  // dL_raw > +100 ct �
 static constexpr uint32_t QUICK_SETTLE_MS       = 400;     // ms after COIN_PRESENT before drawing Quick Screen
 static constexpr uint32_t MEAS_STEP_SETTLE_MS   = 300;     // ms — hybrid settle fallback for STEP_1/3/DRIFT (ADR-STAB-001)
 
+#ifdef DISCOVERY_MODE
+// ── D-1: Multi-sample capture structs + file-scope state ─────────────────────
+// ADR-D6: all SPI access in capture loop via public LDC1101Plugin wrappers.
+// Activated when discovery_enabled=true in ldc1101.json AND SD card mounted.
+
+struct CaptureStats {
+    double   rpSum   = 0.0, rpSumSq = 0.0;
+    double   lSum    = 0.0, lSumSq  = 0.0;
+    uint64_t lhrSum  = 0;
+    uint16_t rpMin   = 65535, rpMax = 0;
+    uint16_t lMin    = 65535, lMax  = 0;
+    uint32_t lhrMin  = 0xFFFFFFUL, lhrMax = 0;
+    uint16_t rpReservoir[64] = {}, lReservoir[64] = {};
+    uint16_t count = 0, failCount = 0, lhrCount = 0;
+    float    rpMedian = 0.0f, rpMean = 0.0f, rpSigma = 0.0f;
+    float    lMedian  = 0.0f, lMean  = 0.0f, lSigma  = 0.0f;
+    float    lhrMean  = 0.0f, fSensorHz = 0.0f;
+
+    void reset() { *this = CaptureStats{}; }
+
+    void finalize(uint32_t fClkinHz) {
+        if (count == 0) return;
+        // Means
+        rpMean = static_cast<float>(rpSum / count);
+        lMean  = static_cast<float>(lSum  / count);
+        // Sigma
+        const float rpVar = static_cast<float>(rpSumSq / count) - rpMean * rpMean;
+        const float lVar  = static_cast<float>(lSumSq  / count) - lMean  * lMean;
+        rpSigma = rpVar > 0.0f ? sqrtf(rpVar) : 0.0f;
+        lSigma  = lVar  > 0.0f ? sqrtf(lVar)  : 0.0f;
+        // Medians — sort reservoir (reservoir has min(count,64) valid entries)
+        const uint16_t n = count < 64 ? count : 64;
+        uint16_t rpBuf[64], lBuf[64];
+        memcpy(rpBuf, rpReservoir, n * sizeof(uint16_t));
+        memcpy(lBuf,  lReservoir,  n * sizeof(uint16_t));
+        // Simple insertion sort — N ≤ 64, O(N²) is fine on embedded
+        for (uint16_t i = 1; i < n; i++) {
+            const uint16_t rk = rpBuf[i], lk = lBuf[i];
+            int16_t j = i - 1;
+            while (j >= 0 && rpBuf[j] > rk) { rpBuf[j + 1] = rpBuf[j]; j--; }
+            rpBuf[j + 1] = rk;
+            j = i - 1;
+            while (j >= 0 && lBuf[j] > lk)  { lBuf[j + 1] = lBuf[j];  j--; }
+            lBuf[j + 1] = lk;
+        }
+        rpMedian = (n % 2 == 1) ? rpBuf[n / 2]
+                                 : (rpBuf[n / 2 - 1] + rpBuf[n / 2]) * 0.5f;
+        lMedian  = (n % 2 == 1) ? lBuf[n / 2]
+                                 : (lBuf[n / 2 - 1]  + lBuf[n / 2])  * 0.5f;
+        // LHR — fSENSOR = lhrMean * fCLKIN / 2^24  (no ×2; ADR-LHR-001 corrected formula)
+        if (lhrCount > 0) {
+            lhrMean   = static_cast<float>(lhrSum) / lhrCount;
+            fSensorHz = lhrMean * static_cast<float>(fClkinHz) / 16777216.0f;
+        }
+    }
+};
+
+// 4-step reservoir (base / 1mm / 2mm / drift). 4 × 348 B = 1,392 B BSS — within budget.
+static CaptureStats sDiscoverySteps[4];
+
+// Runtime discovery flags — set once during setup() after plugin + SD initialise.
+static bool     sDiscoveryActive    = false;
+static uint32_t sDiscoverySettleMs  = 300;
+static uint32_t sDiscoveryCaptureMs = 2000;
+#endif // DISCOVERY_MODE
+
 // Reset to true when coin is removed → forces full redraw on next placement.
 // File-scope so loop() can reset it outside drawQuickScreen() (QUICK_SCREEN_SPEC §5).
 static bool sQuickScreenFresh = true;
@@ -166,6 +232,145 @@ static QuickClass classifyQuick(float dRpPct, bool isFerro) {
 // drawMeasStep_full()  — full-screen redraw on each state transition
 // drawMeasResult()     — full-screen result view after COMPUTE step
 // doMeasCompute()      — runs vector math, FP match, save; called on STEP_DRIFT capture
+
+#ifdef DISCOVERY_MODE
+// drawCaptureProgress() — partial-redraw progress bar during discovery capture loop.
+// Called every ~100 ms from discoveryCaptureStep(); updates progress bar + live stats.
+// ⚠️ SPI bus: display and LDC1101 share SPI (VSPI). Strategy A (single task) — no
+//    mutex needed. fillRect() costs ~2-5 ms; call at most every 100 ms.
+static void drawCaptureProgress(uint8_t stepIdx, const CaptureStats& s,
+                                uint32_t elapsedMs, uint32_t totalMs,
+                                float rpMeanLive, float rpSigLive, float fSLive) {
+    static uint8_t sLastStepIdx = 0xFF;  // force full redraw on first call per step
+    const bool fullRedraw = (stepIdx != sLastStepIdx);
+    if (fullRedraw) {
+        sLastStepIdx = stepIdx;
+        M5Cardputer.Display.fillScreen(BLACK);
+        M5Cardputer.Display.setTextSize(1);
+        M5Cardputer.Display.setTextColor(CYAN);
+        M5Cardputer.Display.setCursor(4, 6);
+        M5Cardputer.Display.print("DISCOVERY CAPTURE");
+        M5Cardputer.Display.setTextColor(WHITE);
+        M5Cardputer.Display.setCursor(4, 18);
+        static const char* labels[] = {"BASE (0.6mm)", "ADDON (1.6mm)", "ADDON (2.6mm)", "DRIFT (0.6mm)"};
+        M5Cardputer.Display.printf("Step: %s", labels[stepIdx < 4 ? stepIdx : 0]);
+    }
+
+    // Progress bar (x=10, y=34, w=180, h=10)
+    const int pct    = (int)(elapsedMs * 100UL / (totalMs > 0 ? totalMs : 1));
+    const int filled = 180 * pct / 100;
+    M5Cardputer.Display.fillRect(10, 34, 180, 10, BLACK);
+    if (filled > 0) M5Cardputer.Display.fillRect(10, 34, filled, 10, GREEN);
+    M5Cardputer.Display.drawRect(10, 34, 180, 10, DARKGREY);
+    M5Cardputer.Display.setCursor(194, 36);
+    M5Cardputer.Display.setTextColor(DARKGREY);
+    M5Cardputer.Display.printf("%u%%", pct < 100 ? pct : 100);
+
+    // Live stats row: N + RP mean ± sigma
+    M5Cardputer.Display.fillRect(0, 48, 240, 14, BLACK);
+    M5Cardputer.Display.setTextColor(YELLOW);
+    M5Cardputer.Display.setCursor(4, 56);
+    M5Cardputer.Display.printf("N=%u  RP:%.0f+/-%.0f", s.count, rpMeanLive, rpSigLive);
+
+    // LHR row
+    M5Cardputer.Display.fillRect(0, 64, 240, 14, BLACK);
+    if (s.lhrCount > 0) {
+        M5Cardputer.Display.setTextColor(WHITE);
+        M5Cardputer.Display.setCursor(4, 72);
+        M5Cardputer.Display.printf("LHR:%u  fS:%.0fHz", s.lhrCount, fSLive);
+    }
+}
+
+// discoveryCaptureStep() — blocking multi-sample capture for one measurement step.
+// Settles for settleMs, then accumulates RP+L+LHR samples for captureMs.
+// Vitter's Algorithm R reservoir (N=64) used for median estimation.
+// Returns populated CaptureStats (finalize() called internally).
+// ⚠️ Blocks loop() for (settleMs + captureMs) ≈ 2.3 s per call.
+static CaptureStats discoveryCaptureStep(uint8_t stepIdx,
+                                         uint32_t settleMs,
+                                         uint32_t captureMs) {
+    CaptureStats s;
+
+    // Settle phase — wait for mechanical + electrical transients to subside
+    delay(settleMs);
+
+    const uint32_t  startMs      = millis();
+    uint32_t        lastDisplayMs = 0;
+    const uint32_t  dtMs          = gLDC ? gLDC->convTimeMs() + 2 : 16;
+    const uint8_t   LHR_STATUS_DRDYB = 0x01;   // LHR_STATUS bit0 — 0=data ready (inverted)
+
+    while (millis() - startMs < captureMs) {
+        // ── RP + L read ──────────────────────────────────────────────────
+        uint16_t rp = 0, l = 0;
+        if (gLDC && gLDC->readMeasurementBurstPublic(rp, l)) {
+            if (rp > 0 && rp < 65535) {
+                s.rpSum   += rp;
+                s.rpSumSq += (double)rp * rp;
+                if (rp < s.rpMin) s.rpMin = rp;
+                if (rp > s.rpMax) s.rpMax = rp;
+                s.lSum    += l;
+                s.lSumSq  += (double)l * l;
+                if (l < s.lMin) s.lMin = l;
+                if (l > s.lMax) s.lMax = l;
+
+                // Vitter's Algorithm R — uniform reservoir sampling
+                if (s.count < 64) {
+                    s.rpReservoir[s.count] = rp;
+                    s.lReservoir[s.count]  = l;
+                } else {
+                    const uint32_t j = (uint32_t)(esp_random() % (s.count + 1));
+                    if (j < 64) {
+                        s.rpReservoir[j] = rp;
+                        s.lReservoir[j]  = l;
+                    }
+                }
+                s.count++;
+            } else {
+                s.failCount++;
+            }
+        } else {
+            s.failCount++;
+        }
+
+        // ── LHR read (non-blocking check) ────────────────────────────────
+        if (gLDC) {
+            const uint8_t lhrStat = gLDC->spiReadPublic(0x3B);  // REG_LHR_STATUS = 0x3B
+            if (!(lhrStat & LHR_STATUS_DRDYB)) {                 // 0 = data ready
+                const uint32_t lhrRaw = gLDC->readLHRBurstPublic();
+                if (lhrRaw > 0 && lhrRaw < 0xFFFFFFUL) {
+                    s.lhrSum += lhrRaw;
+                    if (lhrRaw < s.lhrMin) s.lhrMin = lhrRaw;
+                    if (lhrRaw > s.lhrMax) s.lhrMax = lhrRaw;
+                    s.lhrCount++;
+                }
+            }
+        }
+
+        // ── Display update every ~100 ms ─────────────────────────────────
+        const uint32_t now = millis();
+        if (now - lastDisplayMs >= 100) {
+            lastDisplayMs = now;
+            float rpMeanLive = 0.0f, rpSigLive = 0.0f, fSLive = 0.0f;
+            if (s.count > 0) {
+                rpMeanLive = static_cast<float>(s.rpSum / s.count);
+                const float rpVar = static_cast<float>(s.rpSumSq / s.count) - rpMeanLive * rpMeanLive;
+                rpSigLive = rpVar > 0.0f ? sqrtf(rpVar) : 0.0f;
+            }
+            if (s.lhrCount > 0 && gLDC) {
+                const float lhrMeanLive = static_cast<float>(s.lhrSum) / s.lhrCount;
+                fSLive = lhrMeanLive * static_cast<float>(gLDC->getClkinFreqHz()) / 16777216.0f;
+            }
+            drawCaptureProgress(stepIdx, s, now - startMs, captureMs,
+                                rpMeanLive, rpSigLive, fSLive);
+        }
+
+        delay(dtMs);
+    }
+
+    s.finalize(gLDC ? gLDC->getClkinFreqHz() : 16000000UL);
+    return s;
+}
+#endif // DISCOVERY_MODE
 
 static void drawMeasIdle() {
     M5Cardputer.Display.fillScreen(BLACK);
@@ -761,6 +966,22 @@ void setup() {
   gLogger.info("System", "CoinTrace ready — %d/%d plugins initialised",
                gPluginSystem.readyCount(), gPluginSystem.pluginCount());
 
+#ifdef DISCOVERY_MODE
+  // ── 5a. Discovery mode config (D-1) ──────────────────────────────────────
+  // discovery_enabled in ldc1101.json AND SD card mounted = discovery active.
+  // Config keys are already loaded into gConfig by step 4i above.
+  {
+      const bool disc = gConfig.getBool("ldc1101.discovery_enabled", false);
+      sDiscoveryActive    = disc && gSDCard.isAvailable();
+      sDiscoverySettleMs  = gConfig.getUInt32("ldc1101.discovery_settle_ms",  300UL);
+      sDiscoveryCaptureMs = gConfig.getUInt32("ldc1101.discovery_capture_ms", 2000UL);
+      gLogger.info("Discovery", "mode %s (enabled=%d sd=%d settle=%ums cap=%ums)",
+                   sDiscoveryActive ? "ACTIVE" : "inactive",
+                   disc, gSDCard.isAvailable(),
+                   (unsigned)sDiscoverySettleMs, (unsigned)sDiscoveryCaptureMs);
+  }
+#endif // DISCOVERY_MODE
+
   // ── STEP-0 HW VERIFICATION: initial calibrate() baseline measurement ─────
   // Temporary probe to measure real RP baseline and fSENSOR on actual hardware.
   // Results to be recorded in docs/hardware/HW_VERIFICATION_JOURNAL.md §Step-0.
@@ -887,13 +1108,37 @@ void loop() {
         } else {
           switch (sMeas.state) {
             case MeasState::STEP_BASE:
+#ifdef DISCOVERY_MODE
+              if (sDiscoveryActive) {
+                sDiscoverySteps[0] = discoveryCaptureStep(0, sDiscoverySettleMs, sDiscoveryCaptureMs);
+                sMeas.m.rp[0] = sDiscoverySteps[0].rpMedian;
+                sMeas.m.l[0]  = sDiscoverySteps[0].lMedian;
+                gLogger.info("Meas", "Step 1/4 BASE capture: N=%u  RP=%.0f+/-%.1f  L=%.0f  fS=%.0fHz",
+                             sDiscoverySteps[0].count, sDiscoverySteps[0].rpMedian,
+                             sDiscoverySteps[0].rpSigma, sDiscoverySteps[0].lMedian,
+                             sDiscoverySteps[0].fSensorHz);
+              } else {
+#endif
               sMeas.m.rp[0] = d.value1;  sMeas.m.l[0] = d.value2;
               gLogger.info("Meas", "Step 1/4 (0.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
+#ifdef DISCOVERY_MODE
+              }
+#endif
               sMeas.state  = MeasState::STEP_1;
               sMeas.stepMs = millis();
-              drawMeasStep_full(sMeas, (uint16_t)d.value1);
+              drawMeasStep_full(sMeas, (uint16_t)sMeas.m.rp[0]);
               break;
             case MeasState::STEP_1: {
+#ifdef DISCOVERY_MODE
+              if (sDiscoveryActive) {
+                sDiscoverySteps[1] = discoveryCaptureStep(1, sDiscoverySettleMs, sDiscoveryCaptureMs);
+                sMeas.m.rp[1] = sDiscoverySteps[1].rpMedian;
+                sMeas.m.l[1]  = sDiscoverySteps[1].lMedian;
+                gLogger.info("Meas", "Step 2/4 ADDON capture: N=%u  RP=%.0f+/-%.1f  L=%.0f",
+                             sDiscoverySteps[1].count, sDiscoverySteps[1].rpMedian,
+                             sDiscoverySteps[1].rpSigma, sDiscoverySteps[1].lMedian);
+              } else {
+#endif
               const uint32_t elapsed1   = millis() - sMeas.stepMs;
               const bool rByTimer1      = elapsed1 >= MEAS_STEP_SETTLE_MS;
               const bool rBySignal1     = gLDC && gLDC->isSignalStable();
@@ -908,12 +1153,25 @@ void loop() {
               gLogger.info("Meas", "Step 2/4 (1.6mm): RP=%.0f  L=%.0f%s  sigma=%.1f",
                            rp1, l1, rBySignal1 ? " [stable]" : "",
                            gLDC ? gLDC->getSignalSigma() : 0.0f);
+#ifdef DISCOVERY_MODE
+              }
+#endif
               sMeas.state  = MeasState::STEP_3;
               sMeas.stepMs = millis();
-              drawMeasStep_full(sMeas, (uint16_t)rp1);
+              drawMeasStep_full(sMeas, (uint16_t)sMeas.m.rp[1]);
               break;
             }
             case MeasState::STEP_3: {
+#ifdef DISCOVERY_MODE
+              if (sDiscoveryActive) {
+                sDiscoverySteps[2] = discoveryCaptureStep(2, sDiscoverySettleMs, sDiscoveryCaptureMs);
+                sMeas.m.rp[2] = sDiscoverySteps[2].rpMedian;
+                sMeas.m.l[2]  = sDiscoverySteps[2].lMedian;
+                gLogger.info("Meas", "Step 3/4 ADDON capture: N=%u  RP=%.0f+/-%.1f  L=%.0f",
+                             sDiscoverySteps[2].count, sDiscoverySteps[2].rpMedian,
+                             sDiscoverySteps[2].rpSigma, sDiscoverySteps[2].lMedian);
+              } else {
+#endif
               const uint32_t elapsed3   = millis() - sMeas.stepMs;
               const bool rByTimer3      = elapsed3 >= MEAS_STEP_SETTLE_MS;
               const bool rBySignal3     = gLDC && gLDC->isSignalStable();
@@ -928,12 +1186,25 @@ void loop() {
               gLogger.info("Meas", "Step 3/4 (2.6mm): RP=%.0f  L=%.0f%s  sigma=%.1f",
                            rp3, l3, rBySignal3 ? " [stable]" : "",
                            gLDC ? gLDC->getSignalSigma() : 0.0f);
+#ifdef DISCOVERY_MODE
+              }
+#endif
               sMeas.state  = MeasState::STEP_DRIFT;
               sMeas.stepMs = millis();
-              drawMeasStep_full(sMeas, (uint16_t)rp3);
+              drawMeasStep_full(sMeas, (uint16_t)sMeas.m.rp[2]);
               break;
             }
             case MeasState::STEP_DRIFT: {
+#ifdef DISCOVERY_MODE
+              if (sDiscoveryActive) {
+                sDiscoverySteps[3] = discoveryCaptureStep(3, sDiscoverySettleMs, sDiscoveryCaptureMs);
+                sMeas.m.rp[3] = sDiscoverySteps[3].rpMedian;
+                sMeas.m.l[3]  = sDiscoverySteps[3].lMedian;
+                gLogger.info("Meas", "Step 4/4 DRIFT capture: N=%u  RP=%.0f+/-%.1f  fS=%.0fHz",
+                             sDiscoverySteps[3].count, sDiscoverySteps[3].rpMedian,
+                             sDiscoverySteps[3].rpSigma, sDiscoverySteps[3].fSensorHz);
+              } else {
+#endif
               const uint32_t elapsedD   = millis() - sMeas.stepMs;
               const bool rByTimerD      = elapsedD >= MEAS_STEP_SETTLE_MS;
               const bool rBySignalD     = gLDC && gLDC->isSignalStable();
@@ -947,6 +1218,9 @@ void loop() {
               sMeas.m.rp[3] = rpD;  sMeas.m.l[3] = lD;
               gLogger.info("Meas", "Step 4/4 drift (0.6mm): RP=%.0f  L=%.0f%s",
                            rpD, lD, rBySignalD ? " [stable]" : "");
+#ifdef DISCOVERY_MODE
+              }
+#endif
               sMeas.state = MeasState::COMPUTE;
               doMeasCompute();
               break;
@@ -1040,13 +1314,37 @@ void loop() {
               } else {
                 switch (sMeas.state) {
                   case MeasState::STEP_BASE:
+#ifdef DISCOVERY_MODE
+                    if (sDiscoveryActive) {
+                      sDiscoverySteps[0] = discoveryCaptureStep(0, sDiscoverySettleMs, sDiscoveryCaptureMs);
+                      sMeas.m.rp[0] = sDiscoverySteps[0].rpMedian;
+                      sMeas.m.l[0]  = sDiscoverySteps[0].lMedian;
+                      gLogger.info("Meas", "Step 1/4 BASE capture: N=%u  RP=%.0f+/-%.1f  L=%.0f  fS=%.0fHz",
+                                   sDiscoverySteps[0].count, sDiscoverySteps[0].rpMedian,
+                                   sDiscoverySteps[0].rpSigma, sDiscoverySteps[0].lMedian,
+                                   sDiscoverySteps[0].fSensorHz);
+                    } else {
+#endif
                     sMeas.m.rp[0] = d.value1;  sMeas.m.l[0] = d.value2;
                     gLogger.info("Meas", "Step 1/4 (0.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
+#ifdef DISCOVERY_MODE
+                    }
+#endif
                     sMeas.state  = MeasState::STEP_1;
                     sMeas.stepMs = millis();
-                    drawMeasStep_full(sMeas, (uint16_t)d.value1);
+                    drawMeasStep_full(sMeas, (uint16_t)sMeas.m.rp[0]);
                     break;
                   case MeasState::STEP_1: {
+#ifdef DISCOVERY_MODE
+                    if (sDiscoveryActive) {
+                      sDiscoverySteps[1] = discoveryCaptureStep(1, sDiscoverySettleMs, sDiscoveryCaptureMs);
+                      sMeas.m.rp[1] = sDiscoverySteps[1].rpMedian;
+                      sMeas.m.l[1]  = sDiscoverySteps[1].lMedian;
+                      gLogger.info("Meas", "Step 2/4 ADDON capture: N=%u  RP=%.0f+/-%.1f  L=%.0f",
+                                   sDiscoverySteps[1].count, sDiscoverySteps[1].rpMedian,
+                                   sDiscoverySteps[1].rpSigma, sDiscoverySteps[1].lMedian);
+                    } else {
+#endif
                     const uint32_t el1  = millis() - sMeas.stepMs;
                     const bool rt1      = el1 >= MEAS_STEP_SETTLE_MS;
                     const bool rs1      = gLDC && gLDC->isSignalStable();
@@ -1061,12 +1359,25 @@ void loop() {
                     gLogger.info("Meas", "Step 2/4 (1.6mm): RP=%.0f  L=%.0f%s  sigma=%.1f",
                                  rp1k, l1k, rs1 ? " [stable]" : "",
                                  gLDC ? gLDC->getSignalSigma() : 0.0f);
+#ifdef DISCOVERY_MODE
+                    }
+#endif
                     sMeas.state  = MeasState::STEP_3;
                     sMeas.stepMs = millis();
-                    drawMeasStep_full(sMeas, (uint16_t)rp1k);
+                    drawMeasStep_full(sMeas, (uint16_t)sMeas.m.rp[1]);
                     break;
                   }
                   case MeasState::STEP_3: {
+#ifdef DISCOVERY_MODE
+                    if (sDiscoveryActive) {
+                      sDiscoverySteps[2] = discoveryCaptureStep(2, sDiscoverySettleMs, sDiscoveryCaptureMs);
+                      sMeas.m.rp[2] = sDiscoverySteps[2].rpMedian;
+                      sMeas.m.l[2]  = sDiscoverySteps[2].lMedian;
+                      gLogger.info("Meas", "Step 3/4 ADDON capture: N=%u  RP=%.0f+/-%.1f  L=%.0f",
+                                   sDiscoverySteps[2].count, sDiscoverySteps[2].rpMedian,
+                                   sDiscoverySteps[2].rpSigma, sDiscoverySteps[2].lMedian);
+                    } else {
+#endif
                     const uint32_t el3  = millis() - sMeas.stepMs;
                     const bool rt3      = el3 >= MEAS_STEP_SETTLE_MS;
                     const bool rs3      = gLDC && gLDC->isSignalStable();
@@ -1081,12 +1392,25 @@ void loop() {
                     gLogger.info("Meas", "Step 3/4 (2.6mm): RP=%.0f  L=%.0f%s  sigma=%.1f",
                                  rp3k, l3k, rs3 ? " [stable]" : "",
                                  gLDC ? gLDC->getSignalSigma() : 0.0f);
+#ifdef DISCOVERY_MODE
+                    }
+#endif
                     sMeas.state  = MeasState::STEP_DRIFT;
                     sMeas.stepMs = millis();
-                    drawMeasStep_full(sMeas, (uint16_t)rp3k);
+                    drawMeasStep_full(sMeas, (uint16_t)sMeas.m.rp[2]);
                     break;
                   }
                   case MeasState::STEP_DRIFT: {
+#ifdef DISCOVERY_MODE
+                    if (sDiscoveryActive) {
+                      sDiscoverySteps[3] = discoveryCaptureStep(3, sDiscoverySettleMs, sDiscoveryCaptureMs);
+                      sMeas.m.rp[3] = sDiscoverySteps[3].rpMedian;
+                      sMeas.m.l[3]  = sDiscoverySteps[3].lMedian;
+                      gLogger.info("Meas", "Step 4/4 DRIFT capture: N=%u  RP=%.0f+/-%.1f  fS=%.0fHz",
+                                   sDiscoverySteps[3].count, sDiscoverySteps[3].rpMedian,
+                                   sDiscoverySteps[3].rpSigma, sDiscoverySteps[3].fSensorHz);
+                    } else {
+#endif
                     const uint32_t elD  = millis() - sMeas.stepMs;
                     const bool rtD      = elD >= MEAS_STEP_SETTLE_MS;
                     const bool rsD      = gLDC && gLDC->isSignalStable();
@@ -1099,6 +1423,9 @@ void loop() {
                     const float lDk  = (rsD && gLDC->getStableL()  > 0.0f) ? gLDC->getStableL()  : d.value2;
                     sMeas.m.rp[3] = rpDk;  sMeas.m.l[3] = lDk;
                     gLogger.info("Meas", "Step 4/4 drift (0.6mm): RP=%.0f  L=%.0f", rpDk, lDk);
+#ifdef DISCOVERY_MODE
+                    }
+#endif
                     sMeas.state = MeasState::COMPUTE;
                     doMeasCompute();
                     break;
