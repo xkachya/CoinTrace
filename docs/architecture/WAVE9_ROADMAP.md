@@ -48,7 +48,7 @@ C-5 аудит встановив три факти які визначають 
 | D-1 Multi-sample capture | D | ❌ | Wave 8 C-7 done | ✅ Done (2026-03-31) | N~600 samples per step, reservoir median, σ |
 | D-2 LHR continuous mode | D | ❌ | Wave 8 C-7 done | ✅ Done (2026-03-30) | 24-bit fSENSOR в кожному update() |
 | **D-2b StabilityTracker (ADR-STAB-001)** | D | ❌ | D-2 | ✅ Done (2026-03-30) | `StabilityTracker` + dual cache в `LDC1101Plugin.h`; STEP_1/3/DRIFT settling guard у `main.cpp` |
-| D-3 Raw dump to SD | D | ❌ | D-1, D-2, D-2b | 📋 Planned | JSON session file з повною статистикою per step |
+| D-3 Raw dump to SD | D | ❌ | D-1, D-2, D-2b | � In progress | JSON session file з повною статистикою per step |
 | C-6 Discovery HW Session | C | ✅ | D-1, D-2, D-3 | 📋 Planned | 5 old + 2-4 new coins, raw dump collection |
 | A-1 Offline analysis | A | ❌ | C-6 data | 📋 Planned | Python: Δf, σ, LHR precision, pairwise distances |
 | A-2 Vector v2 decision | A | ❌ | A-1 | 📋 Planned | ADR: which dimensions, which weights |
@@ -90,6 +90,14 @@ C-5 аудит встановив три факти які визначають 
 **Timing:** ~2.3 s per step (300 ms settle + 2000 ms capture). 4 steps × 2.3 s = 9.2 s capture overhead per coin.
 
 **Production impact:** При `discovery_enabled=false` — zero overhead (if-guard at entry). Single-read production flow unchanged.
+
+**HW verified 2026-03-31 (Ag999, 1oz Eagle, Cardputer-Adv + MIKROE-3240):**
+- N=110 per step (2000 ms capture) — `RESP_TIME_BITS=7` → `convTimeMs_()=15 ms` → `delay(17 ms)` → `2000/17≈117`; reservoir[64] filled at N>64. Spec estimated N~600 based on incorrect `convTimeMs=3.3 ms`.
+- fSENSOR@BASE = 1,407,734 Hz (+55% від baseline 909 kHz) — eddy current shift Ag999 під'яскравлює L, що збільшує fSENSOR
+- LHR drift: +2,068 Hz за ~90 с (Step 4 vs Step 1) — термальний дрейф зафіксовано 24-bit LHR; 16-bit L_DATA не відрізняє
+- `lhr_n=0` на Steps 2 та 3 (known limitation): при 1.6 mm та 2.6 mm відстані LHR_STATUS.DRDYB ніколи не переходить в 0 протягом 2 с capture window — LHR конверсія не завершується (fSENSOR зміщується на цих відстанях). Впливи на D-3: `lhr_n=0` для steps 1 та 2 в JSON — це очікувана поведінка.
+- `rp_sigma=0.0` на Steps 2 та 3 — жорсткий акриловий спейсер → сигнал стабільний до LSB
+- Vec k1=1.215 k2=1.347 slope=0.1735 — ідентично попереднім C-5 сесіям, вимірювання відтворювані
 
 ---
 

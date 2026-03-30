@@ -195,6 +195,8 @@ static CaptureStats sDiscoverySteps[4];
 static bool     sDiscoveryActive    = false;
 static uint32_t sDiscoverySettleMs  = 300;
 static uint32_t sDiscoveryCaptureMs = 2000;
+static char     sDiscoverySessionFile[52] = {};  // "/CoinTrace/discovery/session_XXXXX.json"
+static uint16_t sDiscoveryMeasIndex       = 0;   // per-session measurement counter
 #endif // DISCOVERY_MODE
 
 // Reset to true when coin is removed → forces full redraw on next placement.
@@ -582,6 +584,102 @@ static void drawMeasResult(const MeasSession& s) {
     }
 }
 
+// ── D-3: Raw dump to SD ───────────────────────────────────────────────────────
+// Serialises the full 4-step CaptureStats + production vector + discovery_derived
+// to a per-session JSON file on the SD card.
+// Called from doMeasCompute() before sMeas is reset, only when sDiscoveryActive.
+// Heap: DynamicJsonDocument(3072) allocated + freed within this function (~50 ms).
+// SD path: /CoinTrace/discovery/session_<millis/1000>.json (one file per boot).
+// Thread safety: acquires gCtx.spiMutex for the full mkdir + open + write + close.
+#ifdef DISCOVERY_MODE
+static void saveDiscoveryDump(const MatchResult& mr) {
+    if (!sDiscoveryActive) return;
+    if (!gSDCard.isAvailable()) {
+        gLogger.warning("Discovery", "SD not available — dump skipped");
+        return;
+    }
+
+    DynamicJsonDocument doc(3072);
+    doc["index"]      = sDiscoveryMeasIndex;
+    doc["coin_name"]  = sMeas.m.coin_name;
+    doc["metal_code"] = sMeas.m.metal_code;
+
+    const char* stepNames[] = {"base_0.6mm", "addon_1.6mm", "addon_2.6mm", "drift_0.6mm"};
+    JsonArray stepsArr = doc.createNestedArray("steps");
+    for (int i = 0; i < 4; i++) {
+        JsonObject s = stepsArr.createNestedObject();
+        s["step"]      = stepNames[i];
+        s["rp_median"] = sDiscoverySteps[i].rpMedian;
+        s["rp_mean"]   = roundf(sDiscoverySteps[i].rpMean   * 10.0f) / 10.0f;
+        s["rp_sigma"]  = roundf(sDiscoverySteps[i].rpSigma  * 10.0f) / 10.0f;
+        s["rp_min"]    = sDiscoverySteps[i].rpMin;
+        s["rp_max"]    = sDiscoverySteps[i].rpMax;
+        s["rp_n"]      = sDiscoverySteps[i].count;
+        s["rp_fail"]   = sDiscoverySteps[i].failCount;
+        s["l_median"]  = sDiscoverySteps[i].lMedian;
+        s["l_mean"]    = roundf(sDiscoverySteps[i].lMean   * 10.0f) / 10.0f;
+        s["l_sigma"]   = roundf(sDiscoverySteps[i].lSigma  * 10.0f) / 10.0f;
+        s["l_min"]     = sDiscoverySteps[i].lMin;
+        s["l_max"]     = sDiscoverySteps[i].lMax;
+        if (sDiscoverySteps[i].lhrCount > 0) {
+            s["lhr_mean"]   = roundf(sDiscoverySteps[i].lhrMean);
+            s["lhr_min"]    = sDiscoverySteps[i].lhrMin;
+            s["lhr_max"]    = sDiscoverySteps[i].lhrMax;
+            s["lhr_n"]      = sDiscoverySteps[i].lhrCount;
+            s["fSensor_hz"] = roundf(sDiscoverySteps[i].fSensorHz * 10.0f) / 10.0f;
+        }
+    }
+
+    // Production vector (same normalised axes as MetalMatcher)
+    JsonObject pv = doc.createNestedObject("production_vector");
+    pv["dRp1_n"] = roundf(VectorCompute::dRp1_n(sMeas.m) * 1000.0f) / 1000.0f;
+    pv["k1"]     = roundf(VectorCompute::k1(sMeas.m)     * 10000.0f) / 10000.0f;
+    pv["k2"]     = roundf(VectorCompute::k2(sMeas.m)     * 10000.0f) / 10000.0f;
+    pv["slope"]  = roundf(VectorCompute::slope(sMeas.m)  * 10000.0f) / 10000.0f;
+    pv["dL1_n"]  = roundf(VectorCompute::dL1_n(sMeas.m)  * 10000.0f) / 10000.0f;
+
+    // Discovery-specific derived parameters
+    JsonObject dd = doc.createNestedObject("discovery_derived");
+    const float baseFS = gLDC ? gLDC->getFSensor() : 0.0f;
+    if (sDiscoverySteps[0].fSensorHz > 0.0f && baseFS > 0.0f)
+        dd["delta_f_base_hz"] = roundf((sDiscoverySteps[0].fSensorHz - baseFS) * 10.0f) / 10.0f;
+    dd["rp_sigma_base"]       = roundf(sDiscoverySteps[0].rpSigma * 10.0f) / 10.0f;
+    dd["l_sigma_base"]        = roundf(sDiscoverySteps[0].lSigma  * 10.0f) / 10.0f;
+    const float bRp = gLDC ? gLDC->getBaseline() : 0.0f;
+    dd["dRpPct_baseline"]     = (bRp > 1.0f)
+        ? roundf((bRp - sDiscoverySteps[0].rpMedian) / bRp * 1000.0f) / 10.0f
+        : 0.0f;
+    dd["baseline_rp_session"] = roundf(bRp);
+
+    // Match result (may be empty if matcher not ready or drift warn active)
+    JsonObject mrJ = doc.createNestedObject("match_result");
+    mrJ["metal_code"] = mr.metal_code;
+    mrJ["confidence"] = roundf(mr.confidence * 1000.0f) / 1000.0f;
+    mrJ["distance"]   = roundf(mr.distance   * 10000.0f) / 10000.0f;
+    mrJ["algo"]       = (mr.algo == 0) ? "FULL" : "QUICK";
+
+    // Write to SD under spiMutex
+    if (xSemaphoreTake(gCtx.spiMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        SD.mkdir("/CoinTrace/discovery");  // idempotent — no-op if dir exists
+        File f = SD.open(sDiscoverySessionFile, FILE_APPEND);
+        if (f) {
+            if (sDiscoveryMeasIndex > 0) f.print(",\n");
+            serializeJson(doc, f);
+            f.close();
+            gLogger.info("Discovery", "Dump #%u → %s (%u B heap)",
+                         sDiscoveryMeasIndex, sDiscoverySessionFile,
+                         (unsigned)doc.memoryUsage());
+        } else {
+            gLogger.warning("Discovery", "SD open failed: %s", sDiscoverySessionFile);
+        }
+        xSemaphoreGive(gCtx.spiMutex);
+    } else {
+        gLogger.warning("Discovery", "spiMutex timeout — dump skipped");
+    }
+    ++sDiscoveryMeasIndex;
+}
+#endif // DISCOVERY_MODE
+
 static void doMeasCompute() {
     // ── 1. Drift check (rp[3] vs rp[0]) ───────────────────────────────────
     const float drift = VectorCompute::driftRatio(sMeas.m);
@@ -603,8 +701,9 @@ static void doMeasCompute() {
     // ── 3. Fingerprint match via MetalMatcher (skip on drift — unreliable vector) ──
     // matchFull() normalises internally via VectorCompute (ADR-M6).
     // logTopCandidates() emits #1..#4 with per-axis dist breakdown to UART.
+    MatchResult mr = {};  // always declared — used by D-3 saveDiscoveryDump()
     if (gMatcher.isReady() && !sMeas.driftWarn) {
-        const MatchResult mr = gMatcher.matchFull(sMeas.m);
+        mr = gMatcher.matchFull(sMeas.m);
         gMatcher.logTopCandidates(mr);
         if (mr.valid) {
             strlcpy(sMeas.m.metal_code, mr.metal_code, sizeof(sMeas.m.metal_code));
@@ -630,6 +729,11 @@ static void doMeasCompute() {
     // stays visible as long as the coin remains on the coil.
     drawMeasResult(sMeas);
     sResultPending = true;
+
+#ifdef DISCOVERY_MODE
+    // ── 5a. D-3 raw dump to SD (before sMeas is cleared) ──────────────────
+    saveDiscoveryDump(mr);
+#endif
 
     // ── 6. Reset session — next trigger requires coin removal + re-placement
     sMeas = {};
@@ -975,10 +1079,17 @@ void setup() {
       sDiscoveryActive    = disc && gSDCard.isAvailable();
       sDiscoverySettleMs  = gConfig.getUInt32("ldc1101.discovery_settle_ms",  300UL);
       sDiscoveryCaptureMs = gConfig.getUInt32("ldc1101.discovery_capture_ms", 2000UL);
+      if (sDiscoveryActive) {
+          snprintf(sDiscoverySessionFile, sizeof(sDiscoverySessionFile),
+                   "/CoinTrace/discovery/session_%lu.json", millis() / 1000UL);
+          sDiscoveryMeasIndex = 0;
+      }
       gLogger.info("Discovery", "mode %s (enabled=%d sd=%d settle=%ums cap=%ums)",
                    sDiscoveryActive ? "ACTIVE" : "inactive",
                    disc, gSDCard.isAvailable(),
                    (unsigned)sDiscoverySettleMs, (unsigned)sDiscoveryCaptureMs);
+      if (sDiscoveryActive)
+          gLogger.info("Discovery", "Session file: %s", sDiscoverySessionFile);
   }
 #endif // DISCOVERY_MODE
 
