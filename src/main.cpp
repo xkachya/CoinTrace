@@ -905,8 +905,9 @@ void loop() {
               const float rp1 = (rBySignal1 && gLDC->getStableRp() > 0.0f) ? gLDC->getStableRp() : d.value1;
               const float l1  = (rBySignal1 && gLDC->getStableL()  > 0.0f) ? gLDC->getStableL()  : d.value2;
               sMeas.m.rp[1] = rp1;  sMeas.m.l[1] = l1;
-              gLogger.info("Meas", "Step 2/4 (1.6mm): RP=%.0f  L=%.0f%s",
-                           rp1, l1, rBySignal1 ? " [stable]" : "");
+              gLogger.info("Meas", "Step 2/4 (1.6mm): RP=%.0f  L=%.0f%s  sigma=%.1f",
+                           rp1, l1, rBySignal1 ? " [stable]" : "",
+                           gLDC ? gLDC->getSignalSigma() : 0.0f);
               sMeas.state  = MeasState::STEP_3;
               sMeas.stepMs = millis();
               drawMeasStep_full(sMeas, (uint16_t)rp1);
@@ -924,8 +925,9 @@ void loop() {
               const float rp3 = (rBySignal3 && gLDC->getStableRp() > 0.0f) ? gLDC->getStableRp() : d.value1;
               const float l3  = (rBySignal3 && gLDC->getStableL()  > 0.0f) ? gLDC->getStableL()  : d.value2;
               sMeas.m.rp[2] = rp3;  sMeas.m.l[2] = l3;
-              gLogger.info("Meas", "Step 3/4 (2.6mm): RP=%.0f  L=%.0f%s",
-                           rp3, l3, rBySignal3 ? " [stable]" : "");
+              gLogger.info("Meas", "Step 3/4 (2.6mm): RP=%.0f  L=%.0f%s  sigma=%.1f",
+                           rp3, l3, rBySignal3 ? " [stable]" : "",
+                           gLDC ? gLDC->getSignalSigma() : 0.0f);
               sMeas.state  = MeasState::STEP_DRIFT;
               sMeas.stepMs = millis();
               drawMeasStep_full(sMeas, (uint16_t)rp3);
@@ -1044,26 +1046,63 @@ void loop() {
                     sMeas.stepMs = millis();
                     drawMeasStep_full(sMeas, (uint16_t)d.value1);
                     break;
-                  case MeasState::STEP_1:
-                    sMeas.m.rp[1] = d.value1;  sMeas.m.l[1] = d.value2;
-                    gLogger.info("Meas", "Step 2/4 (1.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
+                  case MeasState::STEP_1: {
+                    const uint32_t el1  = millis() - sMeas.stepMs;
+                    const bool rt1      = el1 >= MEAS_STEP_SETTLE_MS;
+                    const bool rs1      = gLDC && gLDC->isSignalStable();
+                    if (!rt1 && !rs1) {
+                      gLogger.info("Meas", "Step 2/4: hold steady (sigma=%.1f, %u ms)",
+                                   gLDC ? gLDC->getSignalSigma() : 0.0f, el1);
+                      break;
+                    }
+                    const float rp1k = (rs1 && gLDC->getStableRp() > 0.0f) ? gLDC->getStableRp() : d.value1;
+                    const float l1k  = (rs1 && gLDC->getStableL()  > 0.0f) ? gLDC->getStableL()  : d.value2;
+                    sMeas.m.rp[1] = rp1k;  sMeas.m.l[1] = l1k;
+                    gLogger.info("Meas", "Step 2/4 (1.6mm): RP=%.0f  L=%.0f%s  sigma=%.1f",
+                                 rp1k, l1k, rs1 ? " [stable]" : "",
+                                 gLDC ? gLDC->getSignalSigma() : 0.0f);
                     sMeas.state  = MeasState::STEP_3;
                     sMeas.stepMs = millis();
-                    drawMeasStep_full(sMeas, (uint16_t)d.value1);
+                    drawMeasStep_full(sMeas, (uint16_t)rp1k);
                     break;
-                  case MeasState::STEP_3:
-                    sMeas.m.rp[2] = d.value1;  sMeas.m.l[2] = d.value2;
-                    gLogger.info("Meas", "Step 3/4 (2.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
+                  }
+                  case MeasState::STEP_3: {
+                    const uint32_t el3  = millis() - sMeas.stepMs;
+                    const bool rt3      = el3 >= MEAS_STEP_SETTLE_MS;
+                    const bool rs3      = gLDC && gLDC->isSignalStable();
+                    if (!rt3 && !rs3) {
+                      gLogger.info("Meas", "Step 3/4: hold steady (sigma=%.1f, %u ms)",
+                                   gLDC ? gLDC->getSignalSigma() : 0.0f, el3);
+                      break;
+                    }
+                    const float rp3k = (rs3 && gLDC->getStableRp() > 0.0f) ? gLDC->getStableRp() : d.value1;
+                    const float l3k  = (rs3 && gLDC->getStableL()  > 0.0f) ? gLDC->getStableL()  : d.value2;
+                    sMeas.m.rp[2] = rp3k;  sMeas.m.l[2] = l3k;
+                    gLogger.info("Meas", "Step 3/4 (2.6mm): RP=%.0f  L=%.0f%s  sigma=%.1f",
+                                 rp3k, l3k, rs3 ? " [stable]" : "",
+                                 gLDC ? gLDC->getSignalSigma() : 0.0f);
                     sMeas.state  = MeasState::STEP_DRIFT;
                     sMeas.stepMs = millis();
-                    drawMeasStep_full(sMeas, (uint16_t)d.value1);
+                    drawMeasStep_full(sMeas, (uint16_t)rp3k);
                     break;
-                  case MeasState::STEP_DRIFT:
-                    sMeas.m.rp[3] = d.value1;  sMeas.m.l[3] = d.value2;
-                    gLogger.info("Meas", "Step 4/4 drift (0.6mm): RP=%.0f  L=%.0f", d.value1, d.value2);
+                  }
+                  case MeasState::STEP_DRIFT: {
+                    const uint32_t elD  = millis() - sMeas.stepMs;
+                    const bool rtD      = elD >= MEAS_STEP_SETTLE_MS;
+                    const bool rsD      = gLDC && gLDC->isSignalStable();
+                    if (!rtD && !rsD) {
+                      gLogger.info("Meas", "Step 4/4: hold steady (sigma=%.1f, %u ms)",
+                                   gLDC ? gLDC->getSignalSigma() : 0.0f, elD);
+                      break;
+                    }
+                    const float rpDk = (rsD && gLDC->getStableRp() > 0.0f) ? gLDC->getStableRp() : d.value1;
+                    const float lDk  = (rsD && gLDC->getStableL()  > 0.0f) ? gLDC->getStableL()  : d.value2;
+                    sMeas.m.rp[3] = rpDk;  sMeas.m.l[3] = lDk;
+                    gLogger.info("Meas", "Step 4/4 drift (0.6mm): RP=%.0f  L=%.0f", rpDk, lDk);
                     sMeas.state = MeasState::COMPUTE;
                     doMeasCompute();
                     break;
+                  }
                   default: break;
                 }
               }

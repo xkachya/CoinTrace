@@ -46,8 +46,8 @@ C-5 аудит встановив три факти які визначають 
 | Задача | Track | HW? | Залежить від | Статус | Опис |
 |--------|-------|-----|-------------|--------|------|
 | D-1 Multi-sample capture | D | ❌ | Wave 8 C-7 done | 📋 Planned | N~600 samples per step, reservoir median, σ |
-| D-2 LHR continuous mode | D | ❌ | Wave 8 C-7 done | 📋 Planned | 24-bit fSENSOR в кожному update() |
-| **D-2b StabilityTracker (ADR-STAB-001)** | D | ❌ | D-2 | 📋 Planned | `StabilityTracker` + dual cache в `LDC1101Plugin.h`; STEP_1/3/DRIFT settling guard у `main.cpp` |
+| D-2 LHR continuous mode | D | ❌ | Wave 8 C-7 done | ✅ Done (2026-03-30) | 24-bit fSENSOR в кожному update() |
+| **D-2b StabilityTracker (ADR-STAB-001)** | D | ❌ | D-2 | ✅ Done (2026-03-30) | `StabilityTracker` + dual cache в `LDC1101Plugin.h`; STEP_1/3/DRIFT settling guard у `main.cpp` |
 | D-3 Raw dump to SD | D | ❌ | D-1, D-2, D-2b | 📋 Planned | JSON session file з повною статистикою per step |
 | C-6 Discovery HW Session | C | ✅ | D-1, D-2, D-3 | 📋 Planned | 5 old + 2-4 new coins, raw dump collection |
 | A-1 Offline analysis | A | ❌ | C-6 data | 📋 Planned | Python: Δf, σ, LHR precision, pairwise distances |

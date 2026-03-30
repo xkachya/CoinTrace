@@ -129,7 +129,8 @@ private:
         uint32_t     staleCount     = 0;     // consecutive DRDYB=1 calls (LA-7)
         uint32_t     lastSuccess    = 0;
         HealthStatus status         = HealthStatus::UNKNOWN;
-        bool         lhrErrorLogged = false; // prevent LHR error log spam (D-2)
+        bool         lhrErrorLogged  = false; // prevent LHR error log spam (D-2)
+        bool         lhrFirstValid    = false; // one-shot INFO when LHR data first arrives
     } ds_;
 
     // Dynamic error message buffer (prevents dangling pointer from snprintf locals)
@@ -249,7 +250,7 @@ public:
     bool isLDataValid() const { return clkinGpio_ >= 0; }
 
     // Returns the most recent 24-bit LHR_DATA as float (ADR-LHR-001, D-2).
-    // Convert to fSENSOR [Hz] via: fSENSOR = getLiveLHR() * 2 * fCLKIN / 16777216.
+    // Convert to fSENSOR [Hz] via: fSENSOR = getLiveLHR() * fCLKIN / 16777216.
     // Returns 0.0f if lhr_continuous=false, CLKIN not wired, or no read yet.
     // Thread-safe: acquires dataMutex_ with 50 ms timeout.
     float getLiveLHR() const {
@@ -508,6 +509,16 @@ public:
                         xSemaphoreGive(dataMutex_);
                     }
                     ds_.lhrErrorLogged = false;
+                    if (!ds_.lhrFirstValid) {
+                        // fSENSOR [Hz] = lhrRaw * fCLKIN / 2^24  (LDC1101 datasheet §7.3.5)
+                        const float fSensor = static_cast<float>(lhrRaw)
+                                              * static_cast<float>(clkinFreqHz_)
+                                              / 16777216.0f;
+                        ctx_->log->info(getName(),
+                            "LHR first valid: raw=%lu  fSENSOR=%.1f kHz",
+                            (unsigned long)lhrRaw, fSensor / 1000.0f);
+                        ds_.lhrFirstValid = true;
+                    }
                 }
             }
         }
