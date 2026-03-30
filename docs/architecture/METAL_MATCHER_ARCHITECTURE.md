@@ -1,8 +1,8 @@
 # MetalMatcher Architecture — CoinTrace
 
-**Версія:** 1.4.0
-**Дата:** 2026-03-28
-**Статус:** ✅ РЕАЛІЗОВАНО (Wave 8 C-7a, 2026-03-28)
+**Версія:** 1.5.0
+**Дата:** 2026-03-30
+**Статус:** ✅ РЕАЛІЗОВАНО ТА HW-VERIFIED (Wave 8 C-7, 2026-03-30)
 
 | Компонент | Файл | Статус |
 |-----------|------|--------|
@@ -10,13 +10,14 @@
 | `MetalMatcher.cpp` | `lib/StorageManager/src/MetalMatcher.cpp` | ✅ Реалізовано |
 | `test_metal_matcher.cpp` | `test/test_metal_matcher/test_metal_matcher.cpp` | ✅ 13 тестів |
 | `FingerprintCache::query()` weights | `lib/StorageManager/src/FingerprintCache.h/.cpp` | ✅ Реалізовано (C-7f) |
-| `drawQuickScreen()` / `classifyQuick()` | `src/main.cpp` | 🔲 Pending (C-7b) |
-| `gMatcher` integration в `main.cpp` | `src/main.cpp` | 🔲 Pending (C-7e) |
+| `drawQuickScreen()` / `classifyQuick()` | `src/main.cpp` | ✅ Реалізовано + hw-verified (C-7b, 2026-03-30) |
+| `gMatcher` integration в `main.cpp` | `src/main.cpp` | ✅ Реалізовано + hw-verified (C-7e, 2026-03-30) |
 
 **Cross-ref:** `FINGERPRINT_DB_ARCHITECTURE.md`, `MEMORY_MAP.md`, `WAVE8_ROADMAP.md §C-7`,
 `MEASUREMENT_WORKFLOW.md`, `PLUGIN_INTERFACES_EXTENDED.md §5`, `QUICK_SCREEN_SPEC.md`
 
 **Changelog:**
+- 1.5.0 (2026-03-30) — C-7b/e hw-verified: `drawQuickScreen()`/`classifyQuick()` та `gMatcher` integration у `main.cpp` перевірені на залізі (HW-QS-4 PASS, HW-QS-5 PASS). Таблицю компонентів оновлено з Pending → done. Статус: IMPLEMENTED AND HW-VERIFIED.
 - 1.4.0 (2026-03-28) — C-7a реалізовано: `MetalMatcher.h/.cpp` створено, `FingerprintCache::query()` розширено параметром `weights`, 13 unit tests. Статус оновлено з SPEC → IMPLEMENTED.
 - 1.3.0 (2026-03-27) — C-5 hw-data sync: (A) `full_weights[4]` dL1_n 2.0→1.0 (p3 всі метали |dL1_n|≈2.4, нульова дискримінація); (B) `sigma` 0.3→0.35 (C-5 empirical, відповідає FingerprintCache::CONFIDENCE_SIGMA); (C) `ferro_thresh_dL1_n` 0.05→99.0 (DISABLED — p3 dL1_n всі метали ≈ −2.4 >> 0.05, re-enable після Wave 9 S-5); (D) matcher.json приклад + таблиця defaults оновлені.
 - 1.2.0 (2026-03-26) — Pre-implementation sync: (A) §3 arch diagram виправлено: `quickScreen()` → `drawQuickScreen()` з явним Phase 1/2 split; (B) §3 Quick Screen data flow розділено на два блоки Phase 1 (threshold, без MetalMatcher) та Phase 2 (matchQuick, після C-5); (C) §9 Quick Screen handler замінено — Phase 1 передає raw значення у drawQuickScreen() без matchQuick(), Phase 2 описано як внутрішня заміна всередині drawQuickScreen(); (D) виправлено `dL_uH` → `dL_raw` в §9 (unit naming відповідно до QS_SPEC v1.1.0).

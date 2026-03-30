@@ -404,7 +404,9 @@ Discovery Mode — **практично безкоштовний** з точки
 - [ ] Quick Screen Phase 2 operational (or Phase 1 with justified threshold calibration)
 - [ ] matcher.json v2 on SD with validated weights
 - [ ] Decision documented: custom coil needed for v2? (based on Δf and skin depth analysis)
+- [ ] `TECHNICAL_DEBT.md` оновлено: TD-03/TD-05/TD-06/TD-07/TD-08/TD-09 статуси відображають результати Wave 9
 
 ---
 
+*Версія 1.1.0 (2026-03-30) — додано критерій закриття TECHNICAL_DEBT.md до Wave 9 exit criteria.*  
 *Версія 1.0.0 — initial Wave 9 roadmap, created 2026-03-27 based on C-5 Deep Analysis Audit findings and WAVE8_COMPLETION_WAVE9_DISCOVERY_PLAN.md.*
