@@ -599,15 +599,16 @@ static void saveDiscoveryDump(const MatchResult& mr) {
         return;
     }
 
-    DynamicJsonDocument doc(3072);
+    // ArduinoJson v7: dynamic allocation, no fixed capacity.
+    JsonDocument doc;
     doc["index"]      = sDiscoveryMeasIndex;
     doc["coin_name"]  = sMeas.m.coin_name;
     doc["metal_code"] = sMeas.m.metal_code;
 
     const char* stepNames[] = {"base_0.6mm", "addon_1.6mm", "addon_2.6mm", "drift_0.6mm"};
-    JsonArray stepsArr = doc.createNestedArray("steps");
+    JsonArray stepsArr = doc["steps"].to<JsonArray>();
     for (int i = 0; i < 4; i++) {
-        JsonObject s = stepsArr.createNestedObject();
+        JsonObject s = stepsArr.add<JsonObject>();
         s["step"]      = stepNames[i];
         s["rp_median"] = sDiscoverySteps[i].rpMedian;
         s["rp_mean"]   = roundf(sDiscoverySteps[i].rpMean   * 10.0f) / 10.0f;
@@ -631,7 +632,7 @@ static void saveDiscoveryDump(const MatchResult& mr) {
     }
 
     // Production vector (same normalised axes as MetalMatcher)
-    JsonObject pv = doc.createNestedObject("production_vector");
+    JsonObject pv = doc["production_vector"].to<JsonObject>();
     pv["dRp1_n"] = roundf(VectorCompute::dRp1_n(sMeas.m) * 1000.0f) / 1000.0f;
     pv["k1"]     = roundf(VectorCompute::k1(sMeas.m)     * 10000.0f) / 10000.0f;
     pv["k2"]     = roundf(VectorCompute::k2(sMeas.m)     * 10000.0f) / 10000.0f;
@@ -639,7 +640,7 @@ static void saveDiscoveryDump(const MatchResult& mr) {
     pv["dL1_n"]  = roundf(VectorCompute::dL1_n(sMeas.m)  * 10000.0f) / 10000.0f;
 
     // Discovery-specific derived parameters
-    JsonObject dd = doc.createNestedObject("discovery_derived");
+    JsonObject dd = doc["discovery_derived"].to<JsonObject>();
     const float baseFS = gLDC ? gLDC->getFSensor() : 0.0f;
     if (sDiscoverySteps[0].fSensorHz > 0.0f && baseFS > 0.0f)
         dd["delta_f_base_hz"] = roundf((sDiscoverySteps[0].fSensorHz - baseFS) * 10.0f) / 10.0f;
@@ -652,11 +653,17 @@ static void saveDiscoveryDump(const MatchResult& mr) {
     dd["baseline_rp_session"] = roundf(bRp);
 
     // Match result (may be empty if matcher not ready or drift warn active)
-    JsonObject mrJ = doc.createNestedObject("match_result");
+    JsonObject mrJ = doc["match_result"].to<JsonObject>();
     mrJ["metal_code"] = mr.metal_code;
     mrJ["confidence"] = roundf(mr.confidence * 1000.0f) / 1000.0f;
     mrJ["distance"]   = roundf(mr.distance   * 10000.0f) / 10000.0f;
     mrJ["algo"]       = (mr.algo == 0) ? "FULL" : "QUICK";
+
+    // Check for heap allocation failure (doc.overflowed() in v7 = malloc failed)
+    if (doc.overflowed()) {
+        gLogger.warning("Discovery", "JSON alloc failed (heap OOM) — dump skipped");
+        return;
+    }
 
     // Write to SD under spiMutex
     if (xSemaphoreTake(gCtx.spiMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
@@ -666,9 +673,9 @@ static void saveDiscoveryDump(const MatchResult& mr) {
             if (sDiscoveryMeasIndex > 0) f.print(",\n");
             serializeJson(doc, f);
             f.close();
-            gLogger.info("Discovery", "Dump #%u → %s (%u B heap)",
+            gLogger.info("Discovery", "Dump #%u → %s (%u B JSON)",
                          sDiscoveryMeasIndex, sDiscoverySessionFile,
-                         (unsigned)doc.memoryUsage());
+                         (unsigned)measureJson(doc));
         } else {
             gLogger.warning("Discovery", "SD open failed: %s", sDiscoverySessionFile);
         }
