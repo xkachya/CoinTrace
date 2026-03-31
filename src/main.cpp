@@ -670,8 +670,8 @@ static void saveDiscoveryDump(const MatchResult& mr) {
         SD.mkdir("/CoinTrace/discovery");  // idempotent — no-op if dir exists
         File f = SD.open(sDiscoverySessionFile, FILE_APPEND);
         if (f) {
-            if (sDiscoveryMeasIndex > 0) f.print(",\n");
             serializeJson(doc, f);
+            f.print('\n');  // NDJSON: one JSON object per line, no commas
             f.close();
             gLogger.info("Discovery", "Dump #%u → %s (%u B JSON)",
                          sDiscoveryMeasIndex, sDiscoverySessionFile,
@@ -1087,8 +1087,10 @@ void setup() {
       sDiscoverySettleMs  = gConfig.getUInt32("ldc1101.discovery_settle_ms",  300UL);
       sDiscoveryCaptureMs = gConfig.getUInt32("ldc1101.discovery_capture_ms", 2000UL);
       if (sDiscoveryActive) {
+          // esp_random() gives 32-bit hardware RNG — no collision risk across boots.
           snprintf(sDiscoverySessionFile, sizeof(sDiscoverySessionFile),
-                   "/CoinTrace/discovery/session_%lu.json", millis() / 1000UL);
+                   "/CoinTrace/discovery/session_%08lx.ndjson",
+                   (unsigned long)esp_random());
           sDiscoveryMeasIndex = 0;
       }
       gLogger.info("Discovery", "mode %s (enabled=%d sd=%d settle=%ums cap=%ums)",
