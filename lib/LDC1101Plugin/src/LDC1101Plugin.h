@@ -90,14 +90,19 @@ private:
     //
     // Nibble table for MIKROE-3240 (fSENSOR_baseline = 909 kHz):
     //   0x0 → fSENSOR_min = 500 kHz  (too low — unlikely to catch real halts)
-    //   0x6 → fSENSOR_min = 800 kHz  (109 kHz below baseline — conservative, hw-verified 2026-03-24 ✓)
-    //   0x7 → fSENSOR_min = 889 kHz  (20 kHz below baseline — optimal, hw-verified 2026-03-24 ✓)
+    //   0x4 → fSENSOR_min = 667 kHz  (143 kHz below new baseline 810 kHz — ADR-LDC-002 D-4 updated)
+    //   0x5 → fSENSOR_min = 727 kHz  (83 kHz below 810 kHz — marginal)
+    //   0x6 → fSENSOR_min = 800 kHz  (was used at 909 kHz; only 9.8kHz margin at 810kHz — UNSAFE)
+    //   0x7 → fSENSOR_min = 889 kHz  (DANGEROUS at 810 kHz — triggers NO_OSC at baseline!)
     //   0xD → fSENSOR_min = 2.67 MHz (MikroE SDK legacy default — intended for small coils)
-    //   0xF → fSENSOR_min = 8.0 MHz  (DANGEROUS: triggers NO_OSC at 909 kHz)
+    //   0xF → fSENSOR_min = 8.0 MHz  (DANGEROUS: triggers NO_OSC at 810 kHz)
     //
+    // NOTE: fSENSOR baseline changed 909→810 kHz after D-4 (TC1/TC2 fix). Nibble updated 6→4 (2026-04-01).
     // Config key: ldc1101.min_freq_nibble (default matches this field)
-    uint8_t  minFreqNibble_       = 0x06;       // 800 kHz threshold — 109 kHz margin, hw-verified
-    uint8_t  rpSetValue_          = 0x26;       // MIKROE-3240 default (ADR-LDC-001)
+    uint8_t  minFreqNibble_       = 0x04;       // 667 kHz threshold — 143 kHz margin at 810 kHz, ADR-LDC-002
+    uint8_t  rpSetValue_          = 0x36;       // ADR-LDC-002: RPMAX=12kΩ (was 0x26=24kΩ, §9.1.4)
+    uint8_t  tc1Val_              = 0xD5;       // ADR-LDC-002: C1=6pF,R1=148.8kΩ,τ₁=893ns (§9.1.5, CSENSOR=330pF)
+    uint8_t  tc2Val_              = 0xFE;       // ADR-LDC-002: C2=24pF,R2=43.3kΩ,τ₂=1039ns (§9.1.6, RPMIN=1.5kΩ)
     uint32_t clkinFreqHz_         = 16000000UL;
     int      clkinGpio_           = -1;         // -1 = CLKIN not connected; ≥ 0 = LEDC output (ADR-CLKIN-002)
     float    coinDetectThreshold_ = 0.90f;      // DETECT:  RP < baseline × 0.90
@@ -356,7 +361,9 @@ public:
         csPin_                 = ctx_->config->getInt   ("ldc1101.spi_cs_pin",            5);
         respTimeBits_          = ctx_->config->getUInt8 ("ldc1101.resp_time_bits",      0x07);
         minFreqNibble_         = ctx_->config->getUInt8 ("ldc1101.min_freq_nibble",     0x06);
-        rpSetValue_            = ctx_->config->getUInt8 ("ldc1101.rp_set",              0x26);
+        rpSetValue_            = ctx_->config->getUInt8 ("ldc1101.rp_set",              0x36);
+        tc1Val_                = ctx_->config->getUInt8 ("ldc1101.tc1_val",             0xD5);
+        tc2Val_                = ctx_->config->getUInt8 ("ldc1101.tc2_val",             0xFE);
         clkinFreqHz_           = ctx_->config->getUInt32("ldc1101.clkin_freq_hz",  16000000UL);
         clkinGpio_             = ctx_->config->getInt   ("ldc1101.clkin_gpio",             -1);
         coinDetectThreshold_   = ctx_->config->getFloat ("ldc1101.coin_detect_threshold",  0.85f);
@@ -810,21 +817,22 @@ private:
         spiWrite_(REG_START_CONFIG, FUNC_MODE_SLEEP);
         delay(2);
 
-        // RP_SET: ADR-LDC-001 — default 0x26 (RP_MAX=24kΩ / RP_MIN=1.5kΩ, MIKROE-3240)
+        // RP_SET: ADR-LDC-002 — 0x36 (RPMAX=12kΩ / RPMIN=1.5kΩ) per §9.1.4 constraint
+        // RPD∞=8,348Ω → 8,348 ≤ RPMAX ≤ 16,696Ω → 12kΩ ✓ (was 0x26=24kΩ, violated upper bound)
         spiWrite_(REG_RP_SET, rpSetValue_);
 
-        // TC1/TC2: MikroE SDK values for MIKROE-3240 PCB compensation
-        //   TC1=0x1F → C1=0.75pF, R1=21.1kΩ (τ₁=15.8 ns)
-        //   TC2=0x3F → C2=3pF,   R2=30.5kΩ (τ₂=91.5 ns)
-        spiWrite_(REG_TC1, 0x1F);
-        spiWrite_(REG_TC2, 0x3F);
+        // TC1/TC2: ADR-LDC-002 — datasheet §9.1.5–9.1.6 for MIKROE-3240 (CSENSOR=330pF, fSENSOR=909kHz)
+        //   TC1=0xD5 → C1=6pF, R1=148.8kΩ, τ₁=893ns (target=825ns; was 0x1F τ=15.8ns ×52 error)
+        //   TC2=0xFE → C2=24pF, R2=43.3kΩ, τ₂=1039ns (target=990ns; was 0x3F τ=91.5ns ×11 error)
+        spiWrite_(REG_TC1, tc1Val_);
+        spiWrite_(REG_TC2, tc2Val_);
 
         // Readback verification (LA-5: consistent policy for TC1, TC2, RP_SET, DIG_CONFIG)
-        if (spiRead_(REG_TC1) != 0x1F) {
+        if (spiRead_(REG_TC1) != tc1Val_) {
             ctx_->log->error(getName(), "TC1 verify failed");
             return false;
         }
-        if (spiRead_(REG_TC2) != 0x3F) {
+        if (spiRead_(REG_TC2) != tc2Val_) {
             ctx_->log->error(getName(), "TC2 verify failed");
             return false;
         }

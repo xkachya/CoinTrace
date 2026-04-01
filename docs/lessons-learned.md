@@ -329,3 +329,48 @@ monitor_port = COM4   ; FT232RL (не USB-CDC COM3)
 **Правило:** На ESP32-S3 з Native USB-CDC ніколи не використовуй `Serial` для debug UART якщо потрібен повний бут-лог. Використовуй окремий UART peripheral через зовнішній адаптер.
 
 ---
+
+## 2026-04-01 — LDC1101: TC1/TC2 MikroE SDK defaults — ×52 та ×11 помилки
+
+**Середовище:** LDC1101 Click Board MIKROE-3240 (CSENSOR=330 pF), LSENSOR≈116.7 μH, fSENSOR=811.5 kHz  
+**Симптом:** Дві срібні монети (Kangaroo Ag999, Olympic Ag900) повертали `rp_raw = 39321` (0x9999) з `σ = 0.0` через всі 5 вимірів. Також 14/20 монет насичувались на кроках addon_1.6mm/2.6mm з hex-паліндромами: `0xB6DB`=46811, `0xCCCC`=52428.  
+**Причина:** MikroE Arduino SDK та готові приклади для MIKROE-3240 містять `TC1=0x1F` (τ=15.8 ns) та `TC2=0x3F` (τ=91.5 ns) — значення *не розраховані* за формулами TI Datasheet §9.1.5/9.1.6, а просто MikroE legacy defaults. Для CSENSOR=330 pF, fSENSOR=811 kHz, RPMIN=1.5 kΩ правильні значення:
+```
+τ₁_target = 0.75026 / 811500 = 925 ns  →  TC1=0xD5 (τ=893 ns, −3.5%)
+τ₂_target = 1.0 / (1500 × 330e-12) = 2020 ns  →  TC2=0xFE (τ=1039 ns)
+```
+Занадто малі TC1/TC2 → петля AGC нестабільна → DAC застрягає ("SAT-lock") на hex-паліндромних точках рівноваги.  
+**Рішення:**
+1. Розрахувати TC1/TC2 по TI Datasheet §9.1.5/9.1.6 для конкретного CSENSOR і fSENSOR своєї схеми
+2. Змінити `data/plugins/ldc1101.json`: `tc1_val`, `tc2_val`, `rp_set`
+3. Flash двома кроками: `pio run -e cointrace-dev -t upload` + `pio run -e uploadfs-sys -t uploadfs`
+
+**SAT-lock діагностика** (характерні ознаки в session NDJSON):
+- `rp_raw = 39321` (0x9999) — hex-паліндром, `σ = 0.0` фізично неможливий
+- `rp_raw = 46811` (0xB6DB), `52428` (0xCCCC) — інші точки SAT-lock
+- Однакове значення через всі N=5 вимірів → регулятор застряг
+
+**Побічний ефект:** fSENSOR з неправильними TC1/TC2 показує артефактне значення. У даному проекті 909 kHz → 811.5 kHz після виправлення. Будь-які розрахунки LSENSOR на основі fSENSOR до виправлення є неправильними (92.9 μH vs реальних 116.7 μH).  
+**Де в коді:** `lib/LDC1101Plugin/src/LDC1101Plugin.h` — `tc1Val_`, `tc2Val_`, `configure_()`; `data/plugins/ldc1101.json`  
+**Документація:** `docs/architecture/LDC1101_ARCHITECTURE.md` — ADR-LDC-002; `docs/external/2026-04-01.D4_SENSOR_CALIBRATION_PLAN.md`  
+**Правило:** При будь-якій зміні котушки/конденсатора — *обов'язково* перерахувати TC1/TC2 по TI §9.1.5/9.1.6. Ніколи не довіряти SDK defaults без перевірки по схемі та формулах. SAT-lock ознака: σ=0 + hex-паліндром у rp_raw.
+
+---
+
+## 2026-04-01 — LDC1101: min_freq_nibble потрібно коригувати при зміні fSENSOR
+
+**Середовище:** LDC1101Plugin, `data/plugins/ldc1101.json`, D-4 після виправлення TC1/TC2  
+**Симптом:** Після D-4 flash перший boot пройшов нормально, але fSENSOR змістився з 909 kHz → 811.5 kHz. Nibble=6 залишав лише 9.8 kHz запас до LOW_LIMIT (800 kHz) — при будь-якій важкій монеті або тепловому зсуві міг тригернутись NO_OSC fault.  
+**Причина:** min_freq_nibble встановлюється виходячи з fSENSOR baseline. При зміні TC1/TC2 або схеми fSENSOR може суттєво змінитись, і старий nibble стає небезпечним.  
+**Рішення:** Nibble=4 → threshold=667 kHz → margin=143 kHz (17.6%) — безпечний запас для даного fSENSOR=811.5 kHz.  
+
+| nibble | threshold | margin при 811.5 kHz |
+|--------|-----------|---------------------|
+| 6 | 800 kHz | 9.8 kHz ← небезпечно |
+| 5 | 727 kHz | 84 kHz ← мінімально |
+| **4** | **667 kHz** | **143 kHz ✅** |
+
+**Де в коді:** `lib/LDC1101Plugin/src/LDC1101Plugin.h` `minFreqNibble_`; `data/plugins/ldc1101.json` `min_freq_nibble`  
+**Правило:** Після будь-якої зміни TC1/TC2 — повірити fSENSOR baseline по boot log і перерахувати min_freq_nibble. Цільовий margin: ≥ 15% від fSENSOR.
+
+---

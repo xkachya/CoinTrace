@@ -39,7 +39,7 @@ curl "http://<device_ip>/api/v1/log?n=200&level=INFO"
 
 5) Перевірка осциляції (NO_OSC)
 - У логах або при `runSelfTest()` сигналізується `NO_SENSOR_OSC` / `Coil not oscillating`.
-- Якщо це трапляється — тимчасово збільште RP_SET (наприклад інкрементуйте 0x26 → 0x2E) або перевірте котушку/плата.
+- Якщо це трапляється — перевірте котушку/схему і RP_SET (має задовольняти §9.1.4: `RPD∞ ≤ RPMAX ≤ 2×RPD∞`).
 
 6) Калібрування
 - Запустіть калібрування (через API, CLI або trigger в коді):
@@ -61,11 +61,33 @@ curl "http://<device_ip>/api/v1/log?n=200&level=DEBUG"
 ```
 - Переконатися: `successRate >= 90%` у нормальних умовах, `getHealthStatus()` → `OK` або `OK_WITH_WARNINGS`.
 
-9) Оптимізація RP_SET та RESP_TIME
+9) Верифікація TC1/TC2 по TI Datasheet (обов'язково при новій котушці)
+
+> ⚠️ **КРИТИЧНО:** MikroE SDK/приклади для MIKROE-3240 мають TC1=0x1F (τ=15.8 ns) та TC2=0x3F (τ=91.5 ns) — *некоректні* MikroE legacy defaults (×52 та ×11 помилка). Це спричиняє SAT-lock артефакти: rp_raw=39321/46811/52428 з σ=0.
+
+Розрахунок по TI §9.1.5/9.1.6:
+```
+τ₁_target = 0.75026 / fSENSOR_baseline
+τ₂_target = 1.0 / (RPMIN × CSENSOR)
+```
+Для MIKROE-3240 (CSENSOR=330 pF, fSENSOR=811 kHz, RPMIN=1.5 kΩ):
+- TC1=0xD5 (τ₁=893 ns), TC2=0xFE (τ₂=1039 ns)
+
+Конфіг: встановити `tc1_val` та `tc2_val` в `data/plugins/ldc1101.json`.
+Flash обов'язково двома кроками:
+```sh
+pio run -e cointrace-dev -t upload       # firmware
+pio run -e uploadfs-sys -t uploadfs      # LittleFS (ldc1101.json)
+```
+Перевірити в boot log: `TC1=0xD5, TC2=0xFE` та відсутність SAT-lock у вимірах.
+Деталі: `docs/architecture/LDC1101_ARCHITECTURE.md` ADR-LDC-002, `docs/lessons-learned.md` 2026-04-01.
+
+10) Оптимізація RP_SET та RESP_TIME
 - Якщо `NO_OSC` або погана якість — змініть `ldc1101.rp_set` у конфігу та повторіть кроки 3–8.
+- RP_SET має задовольняти §9.1.4: `RPD∞ ≤ RPMAX ≤ 2×RPD∞`. Поточне значення MIKROE-3240: `rp_set=54` (0x36, RPMAX=12 kΩ).
 - Для вищого SNR використовувати `resp_time_bits=0x07` (default в коді). Для вищого throughput — зменшити (тестувати SNR).
 
-10) Температурний тест
+11) Температурний тест
 - Обов'язково перевірити drift baseline при зміні температури. Якщо drift значний, планувати періодичну перекалібровку або temperature compensation.
 
 Типові лог-рядки для верифікації

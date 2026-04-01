@@ -1,11 +1,11 @@
 # Wave 9 Roadmap — Measurement Science
 
-**Статус:** � Active — Wave 8 CLOSED (2026-03-30), Wave 9 implementation ready  
-**Версія:** 1.2.0  
-**Дата:** 2026-03-27 (оновлено: 2026-03-30)  
+**Статус:** 🔄 Active — Wave 8 CLOSED (2026-03-30), Wave 9 D-4 implementation ready  
+**Версія:** 1.3.0  
+**Дата:** 2026-03-27 (оновлено: 2026-04-01 — D-3 Done, C-6 Done, D-4 added, C-6b planned)  
 **Попередня хвиля:** Wave 8 — Connectivity + Infrastructure + Sensor Integration (C-7 MetalMatcher + Quick Screen = final milestone)  
 **Тригер:** C-5 Deep Analysis Audit (2026-03-27) — виявлено обмеження 2-dimensional effective vector, rp[2] saturation 80%, dL1_n ferro blindness  
-**Cross-ref:** `WAVE8_COMPLETION_WAVE9_DISCOVERY_PLAN.md`, `DISCOVERY_MODE_SPEC.md`, `C5_DEEP_ANALYSIS_AUDIT.md`
+**Cross-ref:** `WAVE8_COMPLETION_WAVE9_DISCOVERY_PLAN.md`, `DISCOVERY_MODE_SPEC.md`, `C5_DEEP_ANALYSIS_AUDIT.md`, `2026-04-01.D4_SENSOR_CALIBRATION_PLAN.md`
 
 ---
 
@@ -48,14 +48,18 @@ C-5 аудит встановив три факти які визначають 
 | D-1 Multi-sample capture | D | ❌ | Wave 8 C-7 done | ✅ Done (2026-03-31) | N~600 samples per step, reservoir median, σ |
 | D-2 LHR continuous mode | D | ❌ | Wave 8 C-7 done | ✅ Done (2026-03-30) | 24-bit fSENSOR в кожному update() |
 | **D-2b StabilityTracker (ADR-STAB-001)** | D | ❌ | D-2 | ✅ Done (2026-03-30) | `StabilityTracker` + dual cache в `LDC1101Plugin.h`; STEP_1/3/DRIFT settling guard у `main.cpp` |
-| D-3 Raw dump to SD | D | ❌ | D-1, D-2, D-2b | � In progress | JSON session file з повною статистикою per step |
-| C-6 Discovery HW Session | C | ✅ | D-1, D-2, D-3 | 📋 Planned | 5 old + 2-4 new coins, raw dump collection |
-| A-1 Offline analysis | A | ❌ | C-6 data | 📋 Planned | Python: Δf, σ, LHR precision, pairwise distances |
+| D-3 Raw dump to SD | D | ❌ | D-1, D-2, D-2b | ✅ Done (2026-04-01) | NDJSON per-measurement append, `esp_random()` filename, ArduinoJson v7 |
+| **D-4 Sensor Physical Calibration** | D | ✅ | D-3, C-6 analysis | 🔄 **Ready** | TC1/TC2 fix (×52/×11 errors); RP_SET RPMAX correction. ADR-LDC-002 |
+| C-6 Discovery HW Session | C | ✅ | D-1, D-2, D-3 | ✅ Done (2026-04-01) ⚠️ old config | 100 вимірів, 20 монет. RP-дані: old config (TC1/TC2 bug). LHR-дані: валідні |
+| **C-6b Re-verification HW Session** | C | ✅ | D-4 ✅ | 📋 Planned | Re-test SAT-lock монет + контроль. Верифікація AC-1..AC-5 |
+| A-1 Offline analysis | A | ❌ | C-6 LHR + C-6b RP | 📋 Planned | Python: Δf, σ, LHR precision, pairwise distances |
 | A-2 Vector v2 decision | A | ❌ | A-1 | 📋 Planned | ADR: which dimensions, which weights |
 | A-3 Quick Screen Phase 2 | A | ⚠️ | A-2 | 📋 Planned | matchQuick() + quick_centroid entries in DB |
 | A-4 index.json gen 3 + matcher.json v2 | A | ⚠️ | A-2, A-3 | 📋 Planned | Updated DB + weights from analysis |
 
 > **Naming convention:** Track D = "Discovery" (нові firmware capabilities для збору даних). Track C continues sensor-specific HW sessions з Wave 8 numbering. Track A = "Analysis" (offline processing + firmware integration of results).
+
+> **⚠️ C-6 Data Note (2026-04-01):** C-6 сесії виконані з TC1=0x1F/TC2=0x3F (помилка ×52/×11 від даташіту). **LHR-дані повністю валідні** — не залежать від TC1/TC2. **RP-дані** потребують повторного вимірювання в C-6b після D-4 fix. SAT-lock значення 0x9999/0xB6DB/0xCCCC у деяких монетах — артефакт bug TC1/TC2, не фізичне насичення.
 
 ---
 
@@ -177,9 +181,43 @@ C-5 аудит встановив три факти які визначають 
 
 ---
 
-## 3. Track C continued — HW Session C-6
+### D-4: Sensor Physical Calibration
+
+**Специфікація:** `docs/external/2026-04-01.D4_SENSOR_CALIBRATION_PLAN.md`
+
+**Статус:** 🔄 Ready for implementation (2026-04-01)
+
+**Що:** Виправити три помилки конфігурації LDC1101, виявлені при аналізі схеми MIKROE-3240 та TI Datasheet §9.1.4–9.1.6:
+1. TC1 (0x02): `0x1F` → `0xD5` — часова константа завищена в ×52
+2. TC2 (0x03): `0x3F` → `0xFE` — часова константа завищена в ×11
+3. RP_SET (0x01): `0x26` → `0x36` — RPMAX порушує правило RPD∞ ≤ RPMAX ≤ 2×RPD∞
+
+**Чому:** Неправильні TC1/TC2 спричиняли regulation loop lock artifacts в C-6 даних (rp_raw=39321, 46811, 52428 для деяких монет). RPMAX=24kΩ при RPD∞=8.35kΩ порушує формулу §9.1.4 (ліміт 16.7kΩ).
+
+| Зміна | Файл | До | Після |
+|-------|------|-----|-------|
+| TC1 | `LDC1101Plugin.h` + `ldc1101.json` | `0x1F` (τ=15.8ns) | `0xD5` (τ=893ns) |
+| TC2 | `LDC1101Plugin.h` + `ldc1101.json` | `0x3F` (τ=91.5ns) | `0xFE` (τ=1039ns) |
+| RP_SET | `ldc1101.json` | 38 (0x26, RPMAX=24kΩ) | 54 (0x36, RPMAX=12kΩ) |
+
+**HW Prerequisite:** C-6 виконана (дані отримані — є baseline для порівняння)
+
+**Після D-4:** HW Session C-6b для верифікації (AC-1..AC-5 у `D4_SENSOR_CALIBRATION_PLAN.md §10`).
+
+**Очікувані зміни:**
+- Новий baseline rp_raw: ~61,400 (з 57,344)
+- Kangaroo Ag999 / Olympic 1984 Ag900: SAT-lock зникає, реальне значення ~39,400–40,200
+- LHR baseline (lhr_base): без змін (LHR не залежить від TC1/TC2/RP_SET)
+
+---
+
+## 3. Track C continued — HW Sessions C-6 / C-6b
 
 ### C-6: Discovery HW Session
+
+**Статус: ✅ Done (2026-04-01) — з OLD CONFIG (TC1/TC2 bug)**
+
+> **⚠️ Data Validity:** LHR-дані (lhr_mean, lhr_base) — повністю валідні. RP-дані (rp_base, k1, k2, slope) зібрані з TC1/TC2 bug і потребують C-6b для оновлення.
 
 **Prerequisite:** D-1, D-2, D-3 implemented and verified. Firmware з `-D DISCOVERY_MODE` flashed.
 

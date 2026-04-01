@@ -1,9 +1,9 @@
 # LDC1101 в системі плагінів CoinTrace: Архітектурний аналіз
 
 **Тип документа:** Технічний аналіз та специфікація реалізації  
-**Версія:** 1.5.0  
+**Версія:** 1.6.0  
 **Дата:** 14 березня 2026  
-**Статус:** Актуальний (v1.5.0)  
+**Статус:** Актуальний (v1.6.0)  
 **Джерело:** Texas Instruments LDC1101 Datasheet SNOSD01D (May 2015 – Revised October 2016) | TI App Note SNOA944
 
 <details>
@@ -17,6 +17,7 @@
 | 20 березня 2026 | v1.3.3 | §2 пункт 5 CLKIN/CLDO/PWM hardware; §7 clkin_freq_hz уточнено LHR-only; §10 задача 10 LEDC timer |
 | 28 березня 2026 | v1.4.0 | Wave 8 C-7c §8.2 Quick Screen API: `getLiveRp()`, `getLiveL()`, `isLDataValid()`, `recalibrate()` |
 | 30 березня 2026 | v1.5.0 | §8.3 ADR-STAB-001 Signal Stability Tracking — dual cache + nested StabilityTracker; task 11 у §10 |
+| 1 квітня 2026 | v1.6.0 | §4 ADR-LDC-002: TC1 0x1F→0xD5 (τ: 15.8ns→893ns, ×52 bug); TC2 0x3F→0xFE (τ: 91.5ns→1039ns, ×11 bug); RP_SET 0x26→0x36 (RPMAX 24kΩ→12kΩ §9.1.4 constraint) — PENDING HW C-6b |
 
 </details>
 
@@ -149,11 +150,11 @@ RP вимірюється через кількість енергії для п
 |---|---|---|---|
 | b000 | 96 kΩ | b000 | 96 kΩ |
 | b001 | 48 kΩ | b001 | 48 kΩ |
-| b010 | 24 kΩ ← поточний | b010 | 24 kΩ |
-| b011 | 12 kΩ | b011 | 12 kΩ |
+| b010 | 24 kΩ ← **був поточним** (ADR-LDC-002: замінено) | b010 | 24 kΩ |
+| b011 | 12 kΩ ← **поточний** (ADR-LDC-002) | b011 | 12 kΩ |
 | b100 | 6 kΩ | b100 | 6 kΩ |
 | b101 | 3 kΩ | b101 | 3 kΩ |
-| b110 | 1.5 kΩ ← поточний | b110 | 1.5 kΩ |
+| b110 | 1.5 kΩ ← поточний (без змін) | b110 | 1.5 kΩ |
 | b111 | 0.75 kΩ | b111 | 0.75 kΩ |
 
 > **R-01 hardware тест:** виконати процедуру з NBU Ag999 при ініціальному тестуванні хардверу → зафіксувати оптимальний `rp_set` → оновити ADR-LDC-001. Якщо `0x26` задовільний — задокументувати як підтверджений.
@@ -185,26 +186,49 @@ RP вимірюється через кількість енергії для п
 
 Офіційна робоча конфігурація з MikroE SDK `ldc1101_default_cfg()` (отримано 2026-03-13):
 
+> ⚠️ **ADR-LDC-002 (2026-04-01) — TC1/TC2 BUG, PENDING HW VERIFICATION (C-6b):**
+>
+> Значення TC1/TC2 з MikroE SDK є **хибними** (×52/×11 занадто швидкі). Розрахунки за datasheet §9.1.5–9.1.6:
+>
+> - **CSENSOR = 330 pF** (C4 на схемі MIKROE-3240 v100, підтверджено фото 2026-04-01)
+> - **TC1:** τ₁\_target = 0.75026 / fSENSOR = 0.75026 / 909,000 = **825 ns**  
+>   Розрахований: `0xD5` → C1=6pF, R1=148.8kΩ, τ₁=893 ns (похибка +8%, OK)  
+>   MikroE SDK `0x1F` → τ₁=**15.8 ns** — помилка **×52**
+> - **TC2:** τ₂\_target = 2 × RPMIN × CSENSOR = 2×1500×330pF = **990 ns**  
+>   Розрахований: `0xFE` → C2=24pF, R2=43.3kΩ, τ₂=1039 ns (похибка +5%, OK)  
+>   MikroE SDK `0x3F` → τ₂=**91.5 ns** — помилка **×11**
+> - **RP_SET RPMAX:** RPD∞=8,348Ω → правило: 8,348 ≤ RPMAX ≤ 16,696Ω  
+>   MikroE SDK `0x26` → RPMAX=24kΩ — **порушення §9.1.4**  
+>   Розрахований: `0x36` → RPMAX=12kΩ — в межах правила ✓
+>
+> **Наслідок bug:** regulation loop lock artifacts у C-6 (rp\_raw=39321/46811/52428 для Kangaroo Ag999, Olympic 1984 Ag900). LHR дані незатронуті.
+>
+> **Файли:** `ldc1101.json` ← `rp_set:54, tc1_val:213, tc2_val:254` | `LDC1101Plugin.h` ← `tc1Val_/tc2Val_` members
+>
+> Детальні розрахунки: `docs/external/2026-04-01.D4_SENSOR_CALIBRATION_PLAN.md`
+
 | Регістр | Адреса | Значення | Параметри |
 |---|---|---|---|
-| RP_SET  | `0x01` | `0x26` | RP_MAX=24 kΩ / RP_MIN=1.5 kΩ (ADR-LDC-001) |
-| TC1     | `0x02` | `0x1F` | C1=0.75 pF, R1=21.1 kΩ → τ₁=15.8 ns |
-| TC2     | `0x03` | `0x3F` | C2=3 pF, R2=30.5 kΩ → τ₂=91.5 ns |
-| DIG_CFG | `0x04` | `0xD4` | MIN_FREQ nibble=0xD (MikroE SDK legacy) + RESP_TIME=768 cycles (0x04) |
+| RP_SET  | `0x01` | ~~`0x26`~~ → **`0x36`** | ~~RPMAX=24kΩ~~ → RPMAX=12kΩ / RPMIN=1.5kΩ (ADR-LDC-001, **ADR-LDC-002**) |
+| TC1     | `0x02` | ~~`0x1F`~~ → **`0xD5`** | ~~C1=0.75pF, R1=21.1kΩ, τ₁=15.8ns~~ → C1=6pF, R1=148.8kΩ, **τ₁=893ns** (**ADR-LDC-002**) |
+| TC2     | `0x03` | ~~`0x3F`~~ → **`0xFE`** | ~~C2=3pF, R2=30.5kΩ, τ₂=91.5ns~~ → C2=24pF, R2=43.3kΩ, **τ₂=1039ns** (**ADR-LDC-002**) |
+| DIG_CFG | `0x04` | `0x47` | MIN_FREQ nibble=4 (667kHz threshold, ADR-MINFREQ-001 **updated D-4**) + RESP_TIME=6144 cycles (0x07, ADR-RESP-001) |
 
 TC1/TC2 компенсують паразитні ємності і опори PCB доріжок MIKROE-3240. Значення специфічні для цієї плати. Записувати в Sleep mode до переходу в Active mode.
 
-**DIG_CFG=0xD4 (MikroE SDK legacy, НЕ використовувати для MIKROE-3240):** Nibble=0xD задає поріг watchdog-таймера за формулою `fSENSOR_min = 8 MHz / (16 − nibble)` (datasheet §8.6.5): 8 MHz / (16−13) = **2.67 MHz** — це набагато вище за наш baseline 909 kHz, тобто конвертація завжди зупинялась би. Значення 118 kHz у MikroE документації — **помилка перекладу** (hw-верифіковано S-4b).
+**DIG_CFG=0xD4 (MikroE SDK legacy, НЕ використовувати для MIKROE-3240):** Nibble=0xD задає поріг watchdog-таймера за формулою `fSENSOR_min = 8 MHz / (16 − nibble)` (datasheet §8.6.5): 8 MHz / (16−13) = **2.67 MHz** — це набагато вище за наш baseline 810 kHz, тобто конвертація завжди зупинялась би. Значення 118 kHz у MikroE документації — **помилка перекладу** (hw-верифіковано S-4b).
 
-> ⚠️ **ADR-MINFREQ-001 (hw-verified 2026-03-24):** Використовувати `min_freq_nibble=6` (threshold=800 kHz, фактичний DIG_CONFIG=`0x67`). Це залишає 109 kHz margin нижче baseline fSENSOR=909 kHz, запобігаючи false-halt при незначних змінах індуктивності монетою. Nibble=7 (threshold=889 kHz, margin=20 kHz) — занадто малий запас.
+> ⚠️ **ADR-MINFREQ-001 (updated 2026-04-01, D-4):** Використовувати `min_freq_nibble=4` (threshold=667 kHz, фактичний DIG_CONFIG=`0x47`).
 >
-> **Таблиця nibble → threshold:**
+> **Історія зміни:** D-4 (2026-04-01) виправлення TC1/TC2 відкрило що справжній fSENSOR baseline = **810 kHz** (а не 909 kHz). Попередній nibble=6 (threshold=800 kHz) залишав лише **9.8 kHz margin** — недостатньо для феромагнітних монет. Змінено на nibble=4 (margin=143 kHz).
 >
-> | nibble (DIG_CONFIG[7:4]) | threshold = 8 MHz / (16-nibble) | Примітка |
+> | nibble (DIG_CONFIG[7:4]) | threshold = 8 MHz / (16-nibble) | При baseline 810 kHz |
 > |---|---|---|
 > | 0x0 | 500 kHz | — |
-> | 0x6 | **800 kHz** ← ВИКОРИСТОВУЄМО | margin 109 kHz від 909 kHz |
-> | 0x7 | 889 kHz | margin 20 kHz — занадто малий |
+> | 0x4 | **667 kHz** ← **ПОТОЧНИЙ** | margin 143 kHz ✓ |
+> | 0x5 | 727 kHz | margin 83 kHz — мінімально |
+> | 0x6 | 800 kHz | margin **9.8 kHz — НЕБЕЗПЕЧНО** при 810 kHz |
+> | 0x7 | 889 kHz | **NO_OSC** при baseline 810 kHz! |
 > | 0xD | 2.67 MHz | MikroE SDK legacy — небезпечно |
 > | 0xF | 8.0 MHz | NO_OSC без монети (hw-підтверджено!) |
 >
@@ -1734,5 +1758,5 @@ while (!ldc->isSignalStable() && millis() - settleStart < settleMs) delay(5);
 ---
 
 *Документ підготовлено для архітектора та імплементора `LDC1101Plugin`.*
-*Версія: 1.5.0 | Дата: 30 березня 2026*
+*Версія: 1.6.0 | Дата: 1 квітня 2026*
 *Верифіковано по: TI LDC1101 Datasheet SNOSD01D – May 2015 – Revised October 2016 | TI App Note SNOA944 "Optimizing L Measurement Resolution"*
