@@ -26,6 +26,13 @@
 //   to the fingerprint vector when x is uniformly spaced.
 //   Consequence: full_weights[3] (slope) should be 0.0 in matcher.json for p3.
 //   Updated in Wave 8 C-5 alongside real hw DB reseed (2026-03-27).
+//   ⚠️ ADR-VEC-001 (2026-04-02): slope REMOVED from NDJSON production_vector (v2).
+//   slope() function retained for diagnostics / display (drawMeasResult shows k1/k2/slope).
+//
+// NOTE — df_n (frequency shift, v2 addition):
+//   df_n = (fSensor_coin − fSensor_empty) / fSensor_empty
+//   Computed in saveDiscoveryDump() (requires raw LHR Hz, not available in Measurement struct).
+//   Critical discriminant: Kangaroo Ag999 vs Olympic Ag900 — Δdf=10,322 Hz (20σ) vs Δrp=15 (0.6σ).
 
 #pragma once
 #include "Measurement.h"

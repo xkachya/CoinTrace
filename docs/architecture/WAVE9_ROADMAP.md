@@ -1,8 +1,8 @@
 # Wave 9 Roadmap — Measurement Science
 
-**Статус:** 🔄 Active — Wave 8 CLOSED (2026-03-30), Wave 9 D-4 implementation ready  
-**Версія:** 1.3.0  
-**Дата:** 2026-03-27 (оновлено: 2026-04-01 — D-3 Done, C-6 Done, D-4 added, C-6b planned)  
+**Статус:** 🔄 Active — Wave 8 CLOSED (2026-03-30), Wave 9 D-4/C-6b Done, D-5 ready  
+**Версія:** 1.4.0  
+**Дата:** 2026-03-27 (оновлено: 2026-04-02 — D-4 Done, C-6b Done, D-5 added, C-7 planned)  
 **Попередня хвиля:** Wave 8 — Connectivity + Infrastructure + Sensor Integration (C-7 MetalMatcher + Quick Screen = final milestone)  
 **Тригер:** C-5 Deep Analysis Audit (2026-03-27) — виявлено обмеження 2-dimensional effective vector, rp[2] saturation 80%, dL1_n ferro blindness  
 **Cross-ref:** `WAVE8_COMPLETION_WAVE9_DISCOVERY_PLAN.md`, `DISCOVERY_MODE_SPEC.md`, `C5_DEEP_ANALYSIS_AUDIT.md`, `2026-04-01.D4_SENSOR_CALIBRATION_PLAN.md`
@@ -49,10 +49,12 @@ C-5 аудит встановив три факти які визначають 
 | D-2 LHR continuous mode | D | ❌ | Wave 8 C-7 done | ✅ Done (2026-03-30) | 24-bit fSENSOR в кожному update() |
 | **D-2b StabilityTracker (ADR-STAB-001)** | D | ❌ | D-2 | ✅ Done (2026-03-30) | `StabilityTracker` + dual cache в `LDC1101Plugin.h`; STEP_1/3/DRIFT settling guard у `main.cpp` |
 | D-3 Raw dump to SD | D | ❌ | D-1, D-2, D-2b | ✅ Done (2026-04-01) | NDJSON per-measurement append, `esp_random()` filename, ArduinoJson v7 |
-| **D-4 Sensor Physical Calibration** | D | ✅ | D-3, C-6 analysis | 🔄 **Ready** | TC1/TC2 fix (×52/×11 errors); RP_SET RPMAX correction. ADR-LDC-002 |
+| **D-4 Sensor Physical Calibration** | D | ✅ | D-3, C-6 analysis | ✅ Done (2026-04-01) | TC1/TC2 fix (×52/×11 errors); RP_SET RPMAX correction. ADR-LDC-002. hw-verified C-6b ✅ |
 | C-6 Discovery HW Session | C | ✅ | D-1, D-2, D-3 | ✅ Done (2026-04-01) ⚠️ old config | 100 вимірів, 20 монет. RP-дані: old config (TC1/TC2 bug). LHR-дані: валідні |
-| **C-6b Re-verification HW Session** | C | ✅ | D-4 ✅ | 📋 Planned | Re-test SAT-lock монет + контроль. Верифікація AC-1..AC-5 |
-| A-1 Offline analysis | A | ❌ | C-6 LHR + C-6b RP | 📋 Planned | Python: Δf, σ, LHR precision, pairwise distances |
+| **C-6b Re-verification HW Session** | C | ✅ | D-4 ✅ | ✅ Done (2026-04-01) | 30 вимірів, 6 монет (Ag999×2, Ag900×3, Ag800×1). Zero SAT-lock. All AC pass. Audit: `2026-04-02.D4_C6b_AUDIT_REPORT.md` |
+| **D-5 NDJSON Vector v2 patch** | D | ❌ | D-4, C-6b analysis | 🔄 **Ready** | Remove redundant `slope`, add `df_n` (Δf/f_empty) to `production_vector`. ADR-VEC-001 |
+| **C-7 Full Discovery Session** | C | ✅ | D-5, new 2.6mm spacer | 📋 Planned | 10 монет × 5 вимірів (50 total). C-5 re-verify (D-4 config) + Olympic clean session |
+| A-1 Offline analysis | A | ❌ | C-6b + C-7 | 📋 Planned | Python: Δf, σ, LHR precision, pairwise distances, side A/B |
 | A-2 Vector v2 decision | A | ❌ | A-1 | 📋 Planned | ADR: which dimensions, which weights |
 | A-3 Quick Screen Phase 2 | A | ⚠️ | A-2 | 📋 Planned | matchQuick() + quick_centroid entries in DB |
 | A-4 index.json gen 3 + matcher.json v2 | A | ⚠️ | A-2, A-3 | 📋 Planned | Updated DB + weights from analysis |
@@ -209,9 +211,49 @@ C-5 аудит встановив три факти які визначають 
 - Kangaroo Ag999 / Olympic 1984 Ag900: SAT-lock зникає, реальне значення ~39,400–40,200
 - LHR baseline (lhr_base): без змін (LHR не залежить від TC1/TC2/RP_SET)
 
+**Результати hw-verification C-6b:**
+- fSENSOR = 811.5 kHz (baseline 63,652 замість artефактних 909 kHz/57,344)
+- Scaling factor C-6→C-6b: k=1.1100, verified <1.5% error для 4 control coins
+- Kangaroo Ag999: rp=44,655, Δf=552,225 Hz — реальні значення вперше
+- Olympic Ag900: rp=44,640, Δf=541,903 Hz — Δrp=15 (0.6σ), але Δdf=10,322 Hz (20σ)
+
 ---
 
-## 3. Track C continued — HW Sessions C-6 / C-6b
+### D-5: NDJSON Vector v2 patch (ADR-VEC-001)
+
+**Статус:** 🔄 Ready for implementation (2026-04-02)
+
+**Що:** Оновити `saveDiscoveryDump()` в `src/main.cpp` — два точкових зміни:
+1. **Видалити** `pv["slope"]` з `production_vector` — математично redundant для p3 protocol
+2. **Додати** `pv["df_n"]` = `(fSensor_coin − fSensor_empty) / fSensor_empty` — LHR-derived, нормалізований зсув частоти
+
+**Чому slope redundant:** При рівномірних spacer distances x={0, 1, 2} мм OLS slope спрощується до `slope = (k2 − 1) / 2`. Це лінійне перетворення k2 → нульова додаткова інформація. `matcher.json` вже має `full_weights[3]=0.0` з Wave 8 C-5 (2026-03-27). Функція `VectorCompute::slope()` залишається для display (`drawMeasResult()` показує k1/k2/slope).
+
+**Чому df_n критичний:** C-6b аналіз показав: Kangaroo Ag999 vs Olympic Ag900 нерозрізнимі по rp (Δ=15, 0.6σ), але розрізнені по df (Δ=10,322 Hz, 20σ) — 688× чутливіше. `df_n` — єдиний discriminant для цієї пари.
+
+**NDJSON production_vector schema v2:**
+```json
+{
+  "dRp1_n": -12.648,
+  "k1":     1.2265,
+  "k2":     1.3048,
+  "dL1_n":  -2.237,
+  "df_n":   0.4049
+}
+```
+
+**Зміни:**
+
+| Файл | Зміна |
+|------|-------|
+| `src/main.cpp` | `saveDiscoveryDump()`: move `baseFS` before `pv`, remove `pv["slope"]`, add `pv["df_n"]` |
+| `lib/StorageManager/src/VectorCompute.h` | Додати ADR-VEC-001 коментар до MATH NOTE |
+
+**Вплив на embedded matcher:** Нульовий — matcher читає `Measurement.rp[]`/`.l[]` через `VectorCompute`, не з NDJSON. `slope` вже weight=0. `df_n` не входить в поточний gen 2 matching — увійде в gen 3 DB після C-7+A-1.
+
+---
+
+## 3. Track C continued — HW Sessions C-6 / C-6b / C-7
 
 ### C-6: Discovery HW Session
 

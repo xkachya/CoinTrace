@@ -543,8 +543,8 @@ SD:\CoinTrace\discovery\
         "dRp1_n": -10.675,
         "k1": 1.223,
         "k2": 1.355,
-        "slope": 0.177,
-        "dL1_n": -2.418
+        "dL1_n": -2.418,
+        "df_n": 0.6807
     },
     "discovery_derived": {
         "delta_f_base_hz": -18.0,
@@ -614,21 +614,20 @@ void saveDiscoveryDump(
         }
     }
 
-    // Production vector
+    // Production vector v2 (ADR-VEC-001, 2026-04-02)
+    const float baseFS = gLDC ? gLDC->getFSensor() : 0.0f;  // fSENSOR empty baseline
     JsonObject pv = doc.createNestedObject("production_vector");
     pv["dRp1_n"] = round(VectorCompute::dRp1_n(m) * 1000) / 1000.0;
     pv["k1"]     = round(VectorCompute::k1(m) * 10000) / 10000.0;
     pv["k2"]     = round(VectorCompute::k2(m) * 10000) / 10000.0;
-    pv["slope"]  = round(VectorCompute::slope(m) * 10000) / 10000.0;
     pv["dL1_n"]  = round(VectorCompute::dL1_n(m) * 10000) / 10000.0;
+    if (steps[0].fSensorHz > 0 && baseFS > 0)
+        pv["df_n"] = round((steps[0].fSensorHz - baseFS) / baseFS * 10000) / 10000.0;
 
     // Discovery derived
     JsonObject dd = doc.createNestedObject("discovery_derived");
-    float baseFSensor = baselineLhr > 0
-        ? baselineLhr * 2.0f * fClkinHz / 16777216.0f
-        : 0.0f;
-    if (steps[0].fSensorHz > 0 && baseFSensor > 0)
-        dd["delta_f_base_hz"] = round((steps[0].fSensorHz - baseFSensor) * 10) / 10.0;
+    if (steps[0].fSensorHz > 0 && baseFS > 0)
+        dd["delta_f_base_hz"] = round((steps[0].fSensorHz - baseFS) * 10) / 10.0;
     dd["rp_sigma_base"]     = round(steps[0].rpSigma * 10) / 10.0;
     dd["l_sigma_base"]      = round(steps[0].lSigma * 10) / 10.0;
     dd["dRpPct_baseline"]   = (baselineRp > 1.0f)

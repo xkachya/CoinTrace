@@ -631,17 +631,21 @@ static void saveDiscoveryDump(const MatchResult& mr) {
         }
     }
 
-    // Production vector (same normalised axes as MetalMatcher)
+    // Production vector v2 (ADR-VEC-001, 2026-04-02):
+    //   Removed: slope (= (k2−1)/2 for p3 uniform spacing — zero information, weight=0)
+    //   Added:   df_n = (fSensor_coin − fSensor_empty) / fSensor_empty — LHR-derived
+    const float baseFS = gLDC ? gLDC->getFSensor() : 0.0f;  // fSENSOR empty baseline
+
     JsonObject pv = doc["production_vector"].to<JsonObject>();
     pv["dRp1_n"] = roundf(VectorCompute::dRp1_n(sMeas.m) * 1000.0f) / 1000.0f;
     pv["k1"]     = roundf(VectorCompute::k1(sMeas.m)     * 10000.0f) / 10000.0f;
     pv["k2"]     = roundf(VectorCompute::k2(sMeas.m)     * 10000.0f) / 10000.0f;
-    pv["slope"]  = roundf(VectorCompute::slope(sMeas.m)  * 10000.0f) / 10000.0f;
     pv["dL1_n"]  = roundf(VectorCompute::dL1_n(sMeas.m)  * 10000.0f) / 10000.0f;
+    if (sDiscoverySteps[0].fSensorHz > 0.0f && baseFS > 0.0f)
+        pv["df_n"] = roundf((sDiscoverySteps[0].fSensorHz - baseFS) / baseFS * 10000.0f) / 10000.0f;
 
     // Discovery-specific derived parameters
     JsonObject dd = doc["discovery_derived"].to<JsonObject>();
-    const float baseFS = gLDC ? gLDC->getFSensor() : 0.0f;
     if (sDiscoverySteps[0].fSensorHz > 0.0f && baseFS > 0.0f)
         dd["delta_f_base_hz"] = roundf((sDiscoverySteps[0].fSensorHz - baseFS) * 10.0f) / 10.0f;
     dd["rp_sigma_base"]       = roundf(sDiscoverySteps[0].rpSigma * 10.0f) / 10.0f;
