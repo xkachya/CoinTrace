@@ -133,7 +133,7 @@ bool FingerprintCache::init(LittleFSManager& lfs, SDCardManager* sdCard,
 //   dRp1_n = measured_dRp1 / 800.0f
 //   dL1_n  = measured_dL1  / 2000.0f
 
-uint8_t FingerprintCache::query(float dRp1_n, float k1, float k2, float slope, float dL1_n,
+uint8_t FingerprintCache::query(float dRp1_n, float k1, float k2, float df_n, float dL1_n,
                                 QueryResult* results, uint8_t maxResults,
                                 const float* weights) const {
     if (!ready_ || count_ == 0 || results == nullptr || maxResults == 0) return 0;
@@ -165,7 +165,7 @@ uint8_t FingerprintCache::query(float dRp1_n, float k1, float k2, float slope, f
         const float d0 = dRp1_n - e.dRp1_n;
         const float d1 = k1     - e.k1;
         const float d2 = k2     - e.k2;
-        const float d3 = slope  - e.slope;
+        const float d3 = df_n   - e.df_n;
         const float d4 = dL1_n  - e.dL1_n;
 
         // Weighted Euclidean distance. weights==nullptr → equal weights 1.0 (METAL_MATCHER_ARCHITECTURE.md §8).
@@ -341,7 +341,7 @@ bool FingerprintCache::buildFromSD(LittleFSManager& lfs, SDCardManager& sd,
         e.dRp1_n        = c["dRp1_n"]  | 0.0f;
         e.k1            = c["k1"]      | 0.0f;
         e.k2            = c["k2"]      | 0.0f;
-        e.slope         = c["slope"]   | 0.0f;
+        e.df_n          = c["df_n"]    | 0.0f;  // ADR-VEC-001: slope replaced by df_n
         e.dL1_n         = c["dL1_n"]   | 0.0f;
         e.radius_95pct  = entry["radius_95pct"]  | 0.0f;
         e.records_count = entry["records_count"] | 0;
@@ -413,7 +413,7 @@ bool FingerprintCache::loadFromLFS(fs::LittleFSFS& fs) {
         e.dRp1_n        = c["dRp1_n"]  | 0.0f;
         e.k1            = c["k1"]      | 0.0f;
         e.k2            = c["k2"]      | 0.0f;
-        e.slope         = c["slope"]   | 0.0f;
+        e.df_n          = c["df_n"]    | 0.0f;  // ADR-VEC-001: slope replaced by df_n
         e.dL1_n         = c["dL1_n"]   | 0.0f;
         e.radius_95pct  = entry["radius_95pct"]  | 0.0f;
         e.records_count = entry["records_count"] | 0;
@@ -445,10 +445,10 @@ bool FingerprintCache::saveToLFS(fs::LittleFSFS& fs, uint32_t generation) {
             "{\"id\":\"%s\",\"metal_code\":\"%s\",\"coin_name\":\"%s\","
             "\"protocol_id\":\"%s\","
             "\"centroid\":{\"dRp1_n\":%.4f,\"k1\":%.4f,\"k2\":%.4f,"
-            "\"slope\":%.4f,\"dL1_n\":%.4f},"
+            "\"df_n\":%.4f,\"dL1_n\":%.4f},"
             "\"radius_95pct\":%.4f,\"records_count\":%u}",
             e.id, e.metal_code, e.coin_name, e.protocol_id,
-            e.dRp1_n, e.k1, e.k2, e.slope, e.dL1_n,
+            e.dRp1_n, e.k1, e.k2, e.df_n, e.dL1_n,
             e.radius_95pct, (unsigned)e.records_count);
         f.print(buf);
     }

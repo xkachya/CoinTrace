@@ -55,9 +55,9 @@ struct MatchResult {
 
     // ── Debug / tuning ─────────────────────────────────────────────────────
     // Per-axis weighted contribution: √(wi·Δi²) for each component.
-    // Zero for axes where wi = 0 (e.g. slope with full_weights[3]=0, or k1/k2/slope in Quick).
+    // Zero for axes where wi = 0 (e.g. k1/k2 in Quick mode).
     // Use these for tuning: compare non-zero axes to identify which dimension drives mismatch.
-    float   dist_components[5]; // [dRp1_n, k1, k2, slope, dL1_n]
+    float   dist_components[5]; // [dRp1_n, k1, k2, df_n, dL1_n]
 
     // ── Alternatives ──────────────────────────────────────────────────────
     Alternative alternatives[3];
@@ -71,7 +71,7 @@ public:
 
     // ── Configuration (loaded from SD:/CoinTrace/matcher.json) ───────────────
     struct Config {
-        // Weights for 5D vector: [dRp1_n, k1, k2, slope, dL1_n]
+        // Weights for 5D vector: [dRp1_n, k1, k2, df_n, dL1_n]
         // C-5 defaults (METAL_MATCHER_ARCHITECTURE.md §7):
         float full_weights[5]    = {1.0f, 1.0f, 1.0f, 0.0f, 1.0f};
         // Quick Screen: k1/k2/slope=0.0 → only dRp1_n and dL1_n contribute
@@ -107,7 +107,7 @@ public:
     // Full 5D match. Normalizes Measurement internally via VectorCompute.
     // Requires complete 4-position cycle (rp[0..2] + l[0..1] valid).
     // Call from doMeasCompute() after STEP_DRIFT capture.
-    MatchResult matchFull(const Measurement& m) const;
+    MatchResult matchFull(const Measurement& m, float df_n = 0.0f) const;
 
     // Quick 2D match. Normalizes raw sensor values internally (ADR-M6).
     //   rpLive, lLive  — current live readings  (getLiveRp(), getLiveL())
@@ -137,6 +137,6 @@ private:
     // Shared implementation for matchFull and matchQuick.
     // Calls cache_->query() with the given weights, builds MatchResult with
     // dist_components[], is_ferro, alternatives[], and our cfg_.sigma confidence.
-    MatchResult doMatch(float dRp1_n, float k1, float k2, float slope,
+    MatchResult doMatch(float dRp1_n, float k1, float k2, float df_n,
                         float dL1_n, const float* weights, uint8_t algo) const;
 };

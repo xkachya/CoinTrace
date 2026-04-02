@@ -83,14 +83,14 @@ bool MetalMatcher::loadConfig(SDCardManager* sd, SemaphoreHandle_t spiMutex) {
 
 // ── matchFull() ───────────────────────────────────────────────────────────────
 
-MatchResult MetalMatcher::matchFull(const Measurement& m) const {
+MatchResult MetalMatcher::matchFull(const Measurement& m, float df_n) const {
     // Normalization inside (ADR-M6: caller never touches 800/2000 constants)
     const float dRp1_n = VectorCompute::dRp1_n(m);
     const float k1v    = VectorCompute::k1(m);
     const float k2v    = VectorCompute::k2(m);
-    const float slv    = VectorCompute::slope(m);
+    // df_n = (fSensor_coin - fSensor_empty) / fSensor_empty — passed from doMeasCompute() (ADR-VEC-001)
     const float dL1_n  = VectorCompute::dL1_n(m);
-    return doMatch(dRp1_n, k1v, k2v, slv, dL1_n, cfg_.full_weights, ALGO_FULL);
+    return doMatch(dRp1_n, k1v, k2v, df_n, dL1_n, cfg_.full_weights, ALGO_FULL);
 }
 
 // ── matchQuick() ──────────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ MatchResult MetalMatcher::matchQuick(float rpLive, float rpBase,
     // dL1_n:  (lLive−lBase)/2000   — L_DATA change relative to no-coin baseline
     const float dRp1_n = (rpBase > 1.0f) ? (rpBase - rpLive) / 800.0f : 0.0f;
     const float dL1_n  = (lLive - lBase) / 2000.0f;
-    // k1, k2, slope = 0.0 — unavailable in Quick (no spacers), quick_weights nullify them
+    // k1, k2, df_n = 0.0 — unavailable in Quick (no spacers), quick_weights nullify them
     return doMatch(dRp1_n, 0.0f, 0.0f, 0.0f, dL1_n, cfg_.quick_weights, ALGO_QUICK);
 }
 
@@ -119,7 +119,7 @@ MatchResult MetalMatcher::matchQuick(float rpLive, float rpBase,
 //   This means 2 expf() per cache entry. Acceptable overhead for v1 (<1% CPU).
 //   Optimisation path: cache_->query(…, return_distances_only) in Phase 2.
 
-MatchResult MetalMatcher::doMatch(float dRp1_n, float k1, float k2, float slope,
+MatchResult MetalMatcher::doMatch(float dRp1_n, float k1, float k2, float df_n,
                                   float dL1_n, const float* weights, uint8_t algo) const {
     MatchResult result = {};
     result.algo  = algo;
@@ -132,7 +132,7 @@ MatchResult MetalMatcher::doMatch(float dRp1_n, float k1, float k2, float slope,
     // Fetch top-4 from cache using our weights.
     // top-1 → result, top-2..top-4 → alternatives[].
     QueryResult qr[4] = {};
-    const uint8_t n = cache_->query(dRp1_n, k1, k2, slope, dL1_n, qr, 4, weights);
+    const uint8_t n = cache_->query(dRp1_n, k1, k2, df_n, dL1_n, qr, 4, weights);
 
     if (n == 0) {
         return result;
@@ -156,7 +156,7 @@ MatchResult MetalMatcher::doMatch(float dRp1_n, float k1, float k2, float slope,
     const float d0 = dRp1_n - top->dRp1_n;
     const float d1 = k1     - top->k1;
     const float d2 = k2     - top->k2;
-    const float d3 = slope  - top->slope;
+    const float d3 = df_n   - top->df_n;
     const float d4 = dL1_n  - top->dL1_n;
     result.dist_components[0] = sqrtf(weights[0] * d0 * d0);
     result.dist_components[1] = sqrtf(weights[1] * d1 * d1);

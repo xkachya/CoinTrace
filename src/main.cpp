@@ -711,10 +711,15 @@ static void doMeasCompute() {
 
     // ── 3. Fingerprint match via MetalMatcher (skip on drift — unreliable vector) ──
     // matchFull() normalises internally via VectorCompute (ADR-M6).
+    // df_n = (fSensor_coin - fSensor_empty) / fSensor_empty is passed explicitly (ADR-VEC-001).
     // logTopCandidates() emits #1..#4 with per-axis dist breakdown to UART.
     MatchResult mr = {};  // always declared — used by D-3 saveDiscoveryDump()
     if (gMatcher.isReady() && !sMeas.driftWarn) {
-        mr = gMatcher.matchFull(sMeas.m);
+        const float baseFS_rt  = gLDC ? gLDC->getFSensor() : 0.0f;
+        const float meas_df_n  = (sDiscoverySteps[0].fSensorHz > 0.0f && baseFS_rt > 0.0f)
+                                 ? (sDiscoverySteps[0].fSensorHz - baseFS_rt) / baseFS_rt
+                                 : 0.0f;
+        mr = gMatcher.matchFull(sMeas.m, meas_df_n);
         gMatcher.logTopCandidates(mr);
         if (mr.valid) {
             strlcpy(sMeas.m.metal_code, mr.metal_code, sizeof(sMeas.m.metal_code));

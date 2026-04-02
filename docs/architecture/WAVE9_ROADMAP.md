@@ -1,8 +1,8 @@
 # Wave 9 Roadmap — Measurement Science
 
-**Статус:** 🔄 Active — Wave 8 CLOSED (2026-03-30), Wave 9 D-4/C-6b Done, D-5 ready  
-**Версія:** 1.4.0  
-**Дата:** 2026-03-27 (оновлено: 2026-04-02 — D-4 Done, C-6b Done, D-5 added, C-7 planned)  
+**Статус:** 🔄 Active — Wave 8 CLOSED (2026-03-30), Wave 9 D-4/C-6b/D-5/C-7/A-1/D-6 Done  
+**Версія:** 1.5.0  
+**Дата:** 2026-03-27 (оновлено: 2026-04-03 — D-5 Done, C-7 Done, A-1 Done, D-6 Done, gen-3 DB deployed)  
 **Попередня хвиля:** Wave 8 — Connectivity + Infrastructure + Sensor Integration (C-7 MetalMatcher + Quick Screen = final milestone)  
 **Тригер:** C-5 Deep Analysis Audit (2026-03-27) — виявлено обмеження 2-dimensional effective vector, rp[2] saturation 80%, dL1_n ferro blindness  
 **Cross-ref:** `WAVE8_COMPLETION_WAVE9_DISCOVERY_PLAN.md`, `DISCOVERY_MODE_SPEC.md`, `C5_DEEP_ANALYSIS_AUDIT.md`, `2026-04-01.D4_SENSOR_CALIBRATION_PLAN.md`
@@ -52,12 +52,13 @@ C-5 аудит встановив три факти які визначають 
 | **D-4 Sensor Physical Calibration** | D | ✅ | D-3, C-6 analysis | ✅ Done (2026-04-01) | TC1/TC2 fix (×52/×11 errors); RP_SET RPMAX correction. ADR-LDC-002. hw-verified C-6b ✅ |
 | C-6 Discovery HW Session | C | ✅ | D-1, D-2, D-3 | ✅ Done (2026-04-01) ⚠️ old config | 100 вимірів, 20 монет. RP-дані: old config (TC1/TC2 bug). LHR-дані: валідні |
 | **C-6b Re-verification HW Session** | C | ✅ | D-4 ✅ | ✅ Done (2026-04-01) | 30 вимірів, 6 монет (Ag999×2, Ag900×3, Ag800×1). Zero SAT-lock. All AC pass. Audit: `2026-04-02.D4_C6b_AUDIT_REPORT.md` |
-| **D-5 NDJSON Vector v2 patch** | D | ❌ | D-4, C-6b analysis | 🔄 **Ready** | Remove redundant `slope`, add `df_n` (Δf/f_empty) to `production_vector`. ADR-VEC-001 |
-| **C-7 Full Discovery Session** | C | ✅ | D-5, new 2.6mm spacer | 📋 Planned | 10 монет × 5 вимірів (50 total). C-5 re-verify (D-4 config) + Olympic clean session |
-| A-1 Offline analysis | A | ❌ | C-6b + C-7 | 📋 Planned | Python: Δf, σ, LHR precision, pairwise distances, side A/B |
+| **D-5 NDJSON Vector v2 patch** | D | ❌ | D-4, C-6b analysis | ✅ **Done (2026-04-02)** | Remove redundant `slope`, add `df_n` (Δf/f_empty) to `production_vector`. ADR-VEC-001. Commit 4561c09 |
+| **C-7 Full Discovery Session** | C | ✅ | D-5, new 2.6mm spacer | ✅ **Done (2026-04-02)** | 9 монет × 5 вимірів (45 total). session_63824c66. 3 new types: XAG900, XKENNEDY, XCUZN |
+| A-1 Offline analysis | A | ❌ | C-6b + C-7 | ✅ **Done (2026-04-03)** | `scripts/a1_analysis.py`. EXP-C7-1/3/5 PASS. df_n = 16σ XCU/XZNNIP discriminant. Report: `A1_ANALYSIS_session_63824c66.md` |
 | A-2 Vector v2 decision | A | ❌ | A-1 | 📋 Planned | ADR: which dimensions, which weights |
 | A-3 Quick Screen Phase 2 | A | ⚠️ | A-2 | 📋 Planned | matchQuick() + quick_centroid entries in DB |
-| A-4 index.json gen 3 + matcher.json v2 | A | ⚠️ | A-2, A-3 | 📋 Planned | Updated DB + weights from analysis |
+| A-4 index.json gen 3 + matcher.json v2 | A | ⚠️ | A-2, A-3 | ✅ **Done (2026-04-03)** | 9 entries, df_n centroids. Weights [1.5,0,1,3.5,2.5] σ=0.35. Gen-3 DB deployed |
+| **D-6 df_n in real-time matcher** | D | ❌ | A-1, A-4 | ✅ **Done (2026-04-03)** | FingerprintCache/MetalMatcher/main.cpp: slope→df_n pipeline. Firmware reads gen-3 df_n field. Build: SUCCESS |
 
 > **Naming convention:** Track D = "Discovery" (нові firmware capabilities для збору даних). Track C continues sensor-specific HW sessions з Wave 8 numbering. Track A = "Analysis" (offline processing + firmware integration of results).
 

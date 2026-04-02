@@ -55,7 +55,7 @@ struct CacheEntry {
     float    dRp1_n;            // centroid, normalized = dRp1 / 800 Ohm
     float    k1;
     float    k2;
-    float    slope;
+    float    df_n;              // (fSensor_coin - fSensor_empty) / fSensor_empty  (ADR-VEC-001)
     float    dL1_n;             // normalized = dL1 / 2000 µH
     float    radius_95pct;
     uint16_t records_count;
@@ -143,10 +143,10 @@ public:
     //
     // Thread safe for concurrent reads (no writes after init()).
     //
-    // weights: optional array [w_dRp1_n, w_k1, w_k2, w_slope, w_dL1_n].
+    // weights: optional array [w_dRp1_n, w_k1, w_k2, w_df_n, w_dL1_n].  (ADR-VEC-001)
     //   nullptr → equal weights 1.0 (backward-compatible with all existing callers).
     //   MetalMatcher passes cfg_.full_weights or cfg_.quick_weights (METAL_MATCHER_ARCHITECTURE.md §8).
-    uint8_t query(float dRp1_n, float k1, float k2, float slope, float dL1_n,
+    uint8_t query(float dRp1_n, float k1, float k2, float df_n, float dL1_n,
                   QueryResult* results, uint8_t maxResults = QUERY_TOP_N,
                   const float* weights = nullptr) const;
 
