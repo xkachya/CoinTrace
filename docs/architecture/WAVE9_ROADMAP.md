@@ -1,8 +1,8 @@
 # Wave 9 Roadmap — Measurement Science
 
-**Статус:** 🔄 Active — Wave 8 CLOSED (2026-03-30), Wave 9 D-4/C-6b/D-5/C-7/A-1/D-6 Done  
-**Версія:** 1.5.0  
-**Дата:** 2026-03-27 (оновлено: 2026-04-03 — D-5 Done, C-7 Done, A-1 Done, D-6 Done, gen-3 DB deployed)  
+**Статус:** 🔄 Active — Wave 8 CLOSED (2026-03-30), Wave 9 D-4/C-6b/D-5/C-7/A-1/A-4/D-6 Done; A-5/D-7/D-7b/C-8 next  
+**Версія:** 1.6.0  
+**Дата:** 2026-03-27 (оновлено: 2026-04-03 — D-5 Done, C-7 Done, A-1 Done, D-6 Done, gen-3 DB deployed; A-5/D-7/D-7b/C-8/A-6 Planned)  
 **Попередня хвиля:** Wave 8 — Connectivity + Infrastructure + Sensor Integration (C-7 MetalMatcher + Quick Screen = final milestone)  
 **Тригер:** C-5 Deep Analysis Audit (2026-03-27) — виявлено обмеження 2-dimensional effective vector, rp[2] saturation 80%, dL1_n ferro blindness  
 **Cross-ref:** `WAVE8_COMPLETION_WAVE9_DISCOVERY_PLAN.md`, `DISCOVERY_MODE_SPEC.md`, `C5_DEEP_ANALYSIS_AUDIT.md`, `2026-04-01.D4_SENSOR_CALIBRATION_PLAN.md`
@@ -59,6 +59,11 @@ C-5 аудит встановив три факти які визначають 
 | A-3 Quick Screen Phase 2 | A | ⚠️ | A-2 | 📋 Planned | matchQuick() + quick_centroid entries in DB |
 | A-4 index.json gen 3 + matcher.json v2 | A | ⚠️ | A-2, A-3 | ✅ **Done (2026-04-03)** | 9 entries, df_n centroids. Weights [1.5,0,1,3.5,2.5] σ=0.35. Gen-3 DB deployed |
 | **D-6 df_n in real-time matcher** | D | ❌ | A-1, A-4 | ✅ **Done (2026-04-03)** | FingerprintCache/MetalMatcher/main.cpp: slope→df_n pipeline. Firmware reads gen-3 df_n field. Build: SUCCESS |
+| **A-5 dk_n spatial gradient analysis** | A | ❌ | A-1, C-7 data | 📋 Planned | Python: dk_n=df_n_1/df_n_0 з C-7 NDJSON steps[1]. Eagle↔Kennedy separation analysis. No HW needed |
+| **D-7 6D vector: add dk_n** | D | ❌ | A-5 | 📋 Planned | Add dk_n to CacheEntry + FingerprintCache::query() + index.json gen-4. Root-cause Eagle↔Kennedy ambiguity |
+| **D-7b LHR in production path** | D | ❌ | D-7 | 📋 Planned | Single LHR read in production STEP_BASE handler. Fixes meas_df_n=0.0 gap in non-DISCOVERY build |
+| **C-8 HW Session (A/B side control)** | C | ✅ | D-7 | 📋 Planned | Kennedy A+B×5, Kangaroo A+B×5. New: XAG800, XAU999. Validate dk_n geometry hypothesis |
+| **A-6 index.json gen-4 + matcher.json v3** | A | ⚠️ | C-8, D-7 | 📋 Planned | 6D centroids including dk_n. A/B-aware entries for Kennedy/Kangaroo. Updated weights |
 
 > **Naming convention:** Track D = "Discovery" (нові firmware capabilities для збору даних). Track C continues sensor-specific HW sessions з Wave 8 numbering. Track A = "Analysis" (offline processing + firmware integration of results).
 
@@ -254,6 +259,78 @@ C-5 аудит встановив три факти які визначають 
 
 ---
 
+### D-6: df_n в real-time matcher
+
+**Статус: ✅ Done (2026-04-03) — commit 483b93d**
+
+**Що:** Додати `df_n` (LHR-derived Δf/f) до `CacheEntry`, `FingerprintCache::query()`, `MetalMatcher`, та `main.cpp` render loop. Замінити застарілий `slope` у всьому matching pipeline.
+
+**Чому:** `slope` = лінійне перетворення k2 при рівномірних spacer distances → нульова додаткова інформація (weight=0 з Wave 8). `df_n` = 16σ discriminant для XCU↔XZNNIP (A-1 analysis), encodes eddy current coupling magnitude.
+
+**Зміни:**
+
+| Файл | Зміна |
+|------|-------|
+| `lib/StorageManager/src/FingerprintCache.h` | `CacheEntry.df_n` field; `query()` param; NDJSON `"df_n"` load |
+| `lib/StorageManager/src/MetalMatcher.h` | `matchFull()` 5th param `meas_df_n`; compute `dd5 = df_n − meas_df_n` |
+| `src/main.cpp` | `doMeasCompute()`: `meas_df_n` from `sDiscoverySteps[0].fSensorHz`; pass to `matchFull()` |
+| `data/sd_seed/CoinTrace/database/index.json` | gen-3: 9 entries with `"df_n"` field per coin |
+| `data/sd_seed/CoinTrace/matcher.json` | `full_weights: [1.5, 0, 1.0, 3.5, 2.5]` (dRp1_n, k1, k2, df_n, dL1_n) |
+
+**Результат:** Build SUCCESS. gen-3 DB deployed. σ=0.35, min_pair_dist=0.672 (Eagle↔Kennedy pair).
+
+**Known limitation (D-7b):** `meas_df_n` визначається тільки в `DISCOVERY_MODE` build. В production build `meas_df_n = 0.0f` → df_n weight=3.5 ефективно вимкнений. Вирішується в D-7b.
+
+**Display/log cosmetic:** `drawMeasResult()` та `doMeasCompute()` log line досі показують `slope=VectorCompute::slope()` — косметичний артефакт, не впливає на matching. Прибереться в D-7 або D-7b.
+
+---
+
+### D-7: 6D vector — add dk_n (spatial gradient)
+
+**Статус: 📋 Planned — залежить від A-5**
+
+**Що:** Додати новий признак `dk_n = df_n_1 / df_n_0` до embedding вектора:
+- `df_n_0` = `(fSensor@0.6mm − fSensor_base) / fSensor_base` (вже є)
+- `df_n_1` = `(fSensor@1.6mm − fSensor_base) / fSensor_base` (з `sDiscoverySteps[1]`)
+- `dk_n = df_n_1 / df_n_0` — просторовий градієнт, кодує діаметр монети
+
+**Чому:** Поточна Eagle↔Kennedy відстань = 0.672 (мін. пара в gen-3). `dk_n` кодує геометрію монети: велика монета (38mm Eagle) = повільніший LHR coupling спад → `dk_n` ближче до 1.0; менша монета (30mm Kennedy) = стрімкий спад → `dk_n` відрізняється. Дані вже є в C-7 NDJSON (`steps[1]["fSensor_hz"]`), без нових HW вимірювань для A-5.
+
+**Prerequisite:** A-5 підтверджує що dk_n розрізняє Eagle↔Kennedy з margin ≥ 0.5σ покращення у 6D space.
+
+**Зміни:**
+
+| Файл | Зміна |
+|------|-------|
+| `lib/StorageManager/src/FingerprintCache.h` | `CacheEntry.dk_n` field; `query()` 6th param; NDJSON `"dk_n"` load |
+| `lib/StorageManager/src/MetalMatcher.h` | `matchFull()` 6th param `meas_dk_n`; `dd6 = dk_n − meas_dk_n` |
+| `src/main.cpp` | `doMeasCompute()`: compute `meas_dk_n = meas_df_n_1 / meas_df_n_0`; pass to `matchFull()` |
+| `data/sd_seed/CoinTrace/database/index.json` | gen-4: add `"dk_n"` field per coin (з C-7 NDJSON даних) |
+| `data/sd_seed/CoinTrace/matcher.json` | Оновити `full_weights` — 6 компонентів |
+
+---
+
+### D-7b: LHR в production measurement path
+
+**Статус: 📋 Planned — залежить від D-7**
+
+**Що:** Виправити production build gap: в non-`DISCOVERY_MODE` build `sDiscoverySteps` array не існує → `meas_df_n = 0.0f` завжди. Додати один LHR read в стандартний measurement cycle.
+
+**Чому:** В поточній production build df_n weight=3.5 effectivately дорівнює нулю (всі монети scoreable рівно по цій осі). Це inverting matching logic для монет з різними df_n. Один LHR read займає ≈40ms — прийнятно.
+
+**Зміни:**
+
+| Файл | Зміна |
+|------|-------|
+| `src/main.cpp` | В `MEAS_STATE_STEP1` handler: `plugin.doLHRRead();` → `meas_df_n = (plugin.getFSensor() − baseFS) / baseFS` |
+| `src/main.cpp` | `doMeasCompute()`: видалити `#ifdef DISCOVERY_MODE` guard; консолідувати в одне місце |
+| `src/main.cpp` | `drawMeasResult()`: замінити `slope=%.4f` → `df_n=%.4f` з `meas_df_n` value |
+| `src/main.cpp` | `doMeasCompute()` log: замінити `slope=%.4f` → `df_n=%.4f` |
+
+**Timing:** +40ms до STEP_BASE capture (LHR conversion ≈1×35ms). Непомітно для юзера.
+
+---
+
 ## 3. Track C continued — HW Sessions C-6 / C-6b / C-7
 
 ### C-6: Discovery HW Session
@@ -318,6 +395,38 @@ C-5 аудит встановив три факти які визначають 
 | **EXP-4** | Ag999 vs Ag925 розділяються по dRp1_n або Δf | Pairwise distance > 2σ between XAG999 and XAG925 |
 | **EXP-5** | Discovery медіана точніша за single read (C-5 comparison) | σ(centroid) для Discovery < σ(centroid) для C-5 single-read |
 | **EXP-6** | Settling time 300ms достатній | First 50 samples vs last 50: mean difference < 0.5% |
+
+---
+
+### C-8: HW Session — A/B side control + gen-4 DB
+
+**Статус: 📋 Planned — залежить від D-7**
+
+**Мета:**
+1. Виміряти Kennedy Half Dollar та Kangaroo Ag999 з контролем сторін (Avers/Revers окремо)
+2. Визначити чи `dk_n` вирішує Eagle↔Kennedy ambiguity у реальних вимірах
+3. Зібрати нові типи (XAG800, XAU999) для розширення DB
+4. Зібрати дані для gen-4 DB (6D vector з dk_n)
+
+**Coin set:**
+
+| # | Монета | Metal code | Мета | Примітка |
+|---|--------|-----------|------|----------|
+| 1 | Kennedy Half Dollar (Ag400) | XKENNEDY | A-side×5 + B-side×5 | Найвищий σ_within=0.663 в gen-3 через A/B mix |
+| 2 | Australian Kangaroo 1oz Ag999 | XAG999_KANG | A-side×5 + B-side×5 | A df_n≈0.777, B df_n≈0.745 (3.0σ gap у gen-3) |
+| 3 | American Silver Eagle 1oz Ag999 | XAG999 | ×5 контроль | Baseline без A/B split |
+| 4 | Ag800 coin (TBD) | XAG800 | ×5 новий тип | Sterling 800/1000 (σ≈20 MS/m) — mid-range Ag |
+| 5 | Au999 coin (TBD) | XAU999 | ×5 новий тип | Gold (σ=45 MS/m, μr=1) — distinct dk_n signature |
+
+**Ключові експерименти C-8:**
+
+| Код | Що перевіряємо | Критерій успіху |
+|-----|---------------|----------------|
+| **EXP-C8-1** | dk_n розрізняє Eagle vs Kennedy | d(Eagle, Kennedy) у 6D > 1.0σ (vs поточних 0.672σ in 5D) |
+| **EXP-C8-2** | A/B quantification Kennedy | σ_within(A only) < 0.3 AND σ_within(B only) < 0.3 (vs mixed 0.663) |
+| **EXP-C8-3** | A/B quantification Kangaroo | σ_within(A only) < 0.2 AND σ_within(B only) < 0.2 (vs mixed 0.531) |
+| **EXP-C8-4** | XAG800 separates from XAG999 | pairwise dist > 1.0σ в 6D |
+| **EXP-C8-5** | XAU999 separates from all Ag types | pairwise dist > 2.0σ (фізично обґрунтовано: σAu≠σAg) |
 
 ---
 
@@ -413,42 +522,113 @@ C-5 аудит встановив три факти які визначають 
    - Можливо оновлений `sigma`
    - Можливо новий `ferro_thresh_dL1_n` (якщо Δf-based ferro detection замінить dL1_n-based)
 
+**Статус (фактичний):** ✅ **Done (2026-04-03)** — A-4 виконана паралельно з D-6 (не чекаючи A-2/A-3). gen-3 DB: 9 монет, 5D вектор з `df_n`, weights=[1.5,0,1,3.5,2.5], σ=0.35, min_dist=0.672.
+
 ---
 
-## 5. Рекомендована послідовність
+### A-5: dk_n spatial gradient analysis
 
-### Фаза 1: Discovery firmware (Sprint 2)
+**Статус: 📋 Planned — наступна задача**
 
-```
-Prerequisites:
-  Wave 8 C-7 MetalMatcher + Quick Screen Phase 1    ✅ (Wave 8 closure)
-  DISCOVERY_MODE_SPEC.md                             ✅ Готово (2026-03-27)
-  WAVE9_ROADMAP.md (цей документ)                    ✅ Готово (2026-03-27)
+**Що:** Використати наявні C-7 NDJSON дані для обчислення нового признаку `dk_n = df_n_1 / df_n_0`:
 
-Sprint 2 sequence:
-  D-2  LHR continuous mode        ~0.5 дні  (update() TODO → real, getLiveLHR())
-  D-1  Multi-sample capture       ~1 день   (captureStep(), reservoir sampling, progress bar)
-  D-3  Raw dump to SD             ~0.5 дні  (saveDiscoveryDump(), JSON serialization)
-  ──── firmware ready ─────────────────────
-  C-6  Discovery HW Session       ~1 день   (5+2-4 coins × 5 cycles, ~45 хвилин hw-time)
-```
+```python
+# df_n_0 — LHR @ 0.6mm (вже є в generation 3)
+df_n_0 = (steps[0]["fSensor_hz"] - baseFS) / baseFS
 
-### Фаза 2: Analysis та рішення (Sprint 3)
+# df_n_1 — LHR @ 1.6mm (є в C-7 NDJSON, але НЕ в DB)
+df_n_1 = (steps[1]["fSensor_hz"] - baseFS) / baseFS
 
-```
-  A-1  Offline analysis           ~1.5 дні  (Python script, plots, report)
-  A-2  Vector v2 ADR              ~0.5 дні  (decision document based on data)
-  A-3  Quick Screen Phase 2       ~0.5 дні  (matchQuick integration, quick_centroid)
-  A-4  index.json gen 3           ~0.5 дні  (new centroids, new coins, new weights)
+# dk_n — просторовий градієнт coupling
+dk_n = df_n_1 / df_n_0  # if abs(df_n_0) > 1e-6 else None
 ```
 
-### Загальна оцінка
+**Чому dk_n кодує діаметр монети:**
+
+$dk_n \approx e^{-\alpha \cdot d_{spacer} / R_{coin}}$
+
+де $R_{coin}$ — ефективний радіус монети, $\alpha$ — константа sensor geometry. Велика монета (Eagle 38.1mm): $dk_n \approx 0.51$. Мала монета (Kennedy 30.6mm): $dk_n \approx 0.37$. Ця різниця = потенційне рішення Eagle↔Kennedy ambiguity.
+
+**Чому без нових HW даних:** `steps[1]["fSensor_hz"]` вже присутній в C-7 NDJSON (`session_63824c66`). Дані є — потрібний тільки Python аналіз.
+
+**Prerequisite:** C-7 NDJSON на диску (вже є).
+
+**Tool:** Розширення `scripts/a1_analysis.py` (новий розділ dk_n).
+
+**Input:** `data/` NDJSON з C-7 session.
+
+**Аналіз:**
+
+| # | Що | Output |
+|---|---|--------|
+| 1 | dk_n per group (mean ± σ) | Table: dk_n stat для всіх 9 монет |
+| 2 | Eagle vs Kennedy separation | distance(XKENNEDY, XAG999_EAGLE) в [df_n, dk_n] space |
+| 3 | pairwise 6D distance matrix | Heatmap: baseline 5D vs extended 6D |
+| 4 | dk_n vs coin diameter correlation | Scatter: dk_n vs фізичний diameter (мм) |
+| 5 | Σ-within з dk_n | Порівняти з gen-3 σ=0.35: чи dk_n додає separation? |
+
+**Критерій успіху:** d(Eagle, Kennedy) у 6D space ≥ 1.0σ (vs поточних 0.672σ у 5D). Якщо так — D-7 виправданий.
+
+**Output:** Розділ `## dk_n Analysis` у `docs/external/A1_ANALYSIS_session_63824c66.md`.
+
+---
+
+### A-6: index.json gen-4 + matcher.json v3
+
+**Статус: 📋 Planned — залежить від C-8, D-7**
+
+**Prerequisite:** C-8 HW session + D-7 firmware (6D vector з dk_n).
+
+**Deliverables:**
+
+1. **index.json generation 4** — включає:
+   - 6D centroids: `[dRp1_n, k1, k2, df_n, dk_n, dL1_n]` per entry
+   - A/B-aware entries для Kennedy та Kangaroo (або окремі записи, або розширений radius)
+   - Нові монети: XAG800, XAU999 (з C-8 session)
+   - Оновлені centroids для всіх 9 gen-3 монет на основі більшої вибірки
+
+2. **matcher.json v3** — включає:
+   - `full_weights` для 6D vector (з dk_n)
+   - Оновлений `sigma` (очікується зменшення після кращого A/B контролю)
+
+**Критерій:** min_pairwise_distance > 1.0σ для всіх пар (поточний: 0.672σ Eagle↔Kennedy).
+
+---
+
+### Фаза 1: Discovery firmware (Sprint 2) — ✅ DONE
+
+```
+D-2  LHR continuous mode        ✅ Done (2026-03-30)
+D-1  Multi-sample capture       ✅ Done (2026-03-31)
+D-3  Raw dump to SD             ✅ Done (2026-04-01)
+D-4  Sensor calibration         ✅ Done (2026-04-01)
+C-6  Discovery HW Session       ✅ Done (2026-04-01) ⚠️ old config
+C-6b Re-verification HW         ✅ Done (2026-04-01)
+D-5  NDJSON Vector v2 patch     ✅ Done (2026-04-02)
+C-7  Full Discovery Session     ✅ Done (2026-04-02)
+A-1  Offline analysis           ✅ Done (2026-04-03)
+A-4  index.json gen-3           ✅ Done (2026-04-03)
+D-6  df_n in real-time matcher  ✅ Done (2026-04-03)
+```
+
+### Фаза 2: dk_n + production LHR (Sprint 4) — поточна фаза
+
+```
+A-5  dk_n spatial gradient analysis    ~0.5 дні  (Python: extend a1_analysis.py, no HW)
+D-7  6D vector: add dk_n               ~1 день   (CacheEntry, matchFull(), gen-4 schema)
+D-7b LHR в production path             ~0.5 дні  (STEP_BASE single LHR read, fixup display)
+C-8  HW Session A/B control            ~1 день   (Kennedy A/B×5, Kangaroo A/B×5, XAG800, XAU999)
+A-6  index.json gen-4 + matcher v3     ~0.5 дні  (6D centroids, updated weights)
+```
+
+### Загальна оцінка (оновлено)
 
 | Фаза | Зусилля | HW-час | Output |
 |------|---------|--------|--------|
 | Sprint 2 (firmware + HW) | ~3 робочі дні | ~1 день | Raw dump JSON, LHR data |
-| Sprint 3 (analysis + integration) | ~3 робочі дні | ~0.5 дні (hw-verify) | Vector v2, gen 3 DB, Phase 2 Quick Screen |
-| **Wave 9 total** | **~6 робочих днів** | **~1.5 дні** | **Data-driven classification architecture** |
+| Sprint 3 (analysis + integration) | ~3 робочі дні | ~0.5 дні | gen-3 DB, df_n pipeline |
+| Sprint 4 (dk_n + prod LHR) | ~3 робочі дні | ~1 день | gen-4 6D DB, Eagle↔Kennedy resolved |
+| **Wave 9 total** | **~9 робочих днів** | **~2.5 дні** | **6D data-driven classification, all pairs > 1σ** |
 
 ---
 
@@ -529,6 +709,8 @@ Discovery Mode — **практично безкоштовний** з точки
 
 ---
 
+*Версія 1.6.0 (2026-04-03) — A-5/D-7/D-7b/C-8/A-6 Planned tasks added; D-6/D-7/D-7b detail sections; C-8 HW session spec; A-5 dk_n analysis; A-6 gen-4 plan; Sprint 4 sequence; roadmap brought current after commit 483b93d.*  
+*Версія 1.5.0 (2026-04-03) — D-5/C-7/A-1/A-4/D-6 Done; gen-3 DB deployed (9 entries, df_n=3.5, σ=0.35).*  
 *Версія 1.2.0 (2026-03-30) — AI-1: додано задачу D-2b StabilityTracker (ADR-STAB-001) + секція Track D; AI-3: розширено EXP-2 scope (додано stab_sigma_thresh_rp calibration output); статус оновлено Active — Wave 8 CLOSED.*  
 *Версія 1.1.0 (2026-03-30) — додано критерій закриття TECHNICAL_DEBT.md до Wave 9 exit criteria.*  
 *Версія 1.0.0 — initial Wave 9 roadmap, created 2026-03-27 based on C-5 Deep Analysis Audit findings and WAVE8_COMPLETION_WAVE9_DISCOVERY_PLAN.md.*

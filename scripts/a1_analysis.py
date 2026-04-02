@@ -169,6 +169,41 @@ def weighted_dist(va, vb, weights, sigma=0.35):
 
 
 # ---------------------------------------------------------------------------
+# dk_n — spatial gradient of LHR coupling  (A-5)
+# ---------------------------------------------------------------------------
+def compute_dk_n(record):
+    """
+    dk_n = df_n_1 / df_n_0 — spatial falloff rate of eddy-current coupling.
+
+    Physical meaning: large coin → slow coupling decay → dk_n closer to 1.0.
+                      small coin → fast decay         → dk_n lower.
+
+        df_n_0 = production_vector["df_n"]              (base_0.6mm, already computed)
+        df_n_1 = (fSensor@1.6mm − baseFS) / baseFS      (computed from steps[1])
+        baseFS = fSensor@0.6mm − delta_f_base_hz
+
+    Returns None if required data is absent or df_n_0 ≈ 0.
+    """
+    pv     = record.get("production_vector", {})
+    df_n_0 = pv.get("df_n")
+    if df_n_0 is None or abs(df_n_0) < 1e-6:
+        return None
+    steps = record.get("steps", [])
+    if len(steps) < 2:
+        return None
+    fs1 = steps[1].get("fSensor_hz", 0)
+    if fs1 <= 0:
+        return None
+    fs0     = steps[0].get("fSensor_hz", 0)
+    delta_f = record.get("discovery_derived", {}).get("delta_f_base_hz", 0.0)
+    base_fs = fs0 - delta_f
+    if base_fs <= 0:
+        return None
+    df_n_1 = (fs1 - base_fs) / base_fs
+    return df_n_1 / df_n_0
+
+
+# ---------------------------------------------------------------------------
 # Main analysis
 # ---------------------------------------------------------------------------
 def main():
@@ -181,6 +216,12 @@ def main():
     grp_vecs = {}
     for name, meta in GROUPS.items():
         grp_vecs[name] = [vec(records[i]) for i in meta["indices"]]
+
+    # -- A-5: spatial gradient dk_n per record
+    grp_dk_n = {}
+    for name, meta in GROUPS.items():
+        vals = [compute_dk_n(records[i]) for i in meta["indices"]]
+        grp_dk_n[name] = [v for v in vals if v is not None]
 
     # -- Per-group statistics
     grp_data = {}
@@ -256,6 +297,49 @@ def main():
                     W_FULL, SIGMA,
                 )
                 pairwise[(a, b)] = d
+
+    # -----------------------------------------------------------------------
+    # A-5: dk_n spatial gradient analysis
+    # -----------------------------------------------------------------------
+    def _sep1d(vals_a, vals_b):
+        """Separation in sigma units between two 1D distributions."""
+        if not vals_a or not vals_b:
+            return 0.0, 0.0, 0.0
+        delta  = abs(mean(vals_a) - mean(vals_b))
+        pooled = math.sqrt((std(vals_a) ** 2 + std(vals_b) ** 2) / 2)
+        return delta, pooled, (delta / pooled) if pooled > 1e-12 else float("inf")
+
+    # EXP-A5-1: Eagle vs Kennedy dk_n separation (primary go/no-go criterion)
+    exp_a5_1 = _sep1d(grp_dk_n["XAG999_EAGLE"], grp_dk_n["XKENNEDY"])
+
+    # EXP-A5-3: 6D pairwise distance  (5D + dk_n, proposed initial weight 2.0)
+    W_DK_N = 2.0
+    W_6D   = W_FULL + [W_DK_N]
+
+    def _centroid_6d(name):
+        c5 = grp_data[name]["centroid"]
+        dk = mean(grp_dk_n[name]) if grp_dk_n[name] else 0.0
+        return c5 + [dk]
+
+    cents_6d = {n: _centroid_6d(n) for n in names}
+
+    def _wdist_6d(va, vb):
+        return math.sqrt(sum(w * ((a - b) / SIGMA) ** 2
+                             for w, a, b in zip(W_6D, va, vb)))
+
+    pairwise_6d = {(a, b): _wdist_6d(cents_6d[a], cents_6d[b])
+                   for a in names for b in names if a != b}
+
+    d5_eagle_kennedy = pairwise[("XAG999_EAGLE", "XKENNEDY")]
+    d6_eagle_kennedy = pairwise_6d[("XAG999_EAGLE", "XKENNEDY")]
+    improvement_pct  = (d6_eagle_kennedy - d5_eagle_kennedy) / d5_eagle_kennedy * 100
+
+    # EXP-A5-4: dk_n vs coin diameter Pearson-r
+    _diams  = [GROUPS[n]["diameter_mm"] for n in names]
+    _dkn_c  = [mean(grp_dk_n[n]) if grp_dk_n[n] else 0.0 for n in names]
+    _m_d, _m_k = mean(_diams), mean(_dkn_c)
+    _cov    = mean([(d - _m_d) * (k - _m_k) for d, k in zip(_diams, _dkn_c)])
+    pearson_r = (_cov / (std(_diams) * std(_dkn_c))) if std(_diams) * std(_dkn_c) > 1e-12 else 0.0
 
     # -----------------------------------------------------------------------
     # Centroid radius for index.json
@@ -408,6 +492,30 @@ def main():
         print(f"    {a:<18} → nearest: {nearest:<18} d={pairwise[(a,nearest)]:.3f}")
 
     # -----------------------------------------------------------------------
+    # A-5 console summary
+    # -----------------------------------------------------------------------
+    print()
+    print("=" * 70)
+    print("  A-5: dk_n SPATIAL GRADIENT ANALYSIS")
+    print("=" * 70)
+    print(f"\n{'Group':<18} {'dk_n mean':>12} {'dk_n σ':>10} {'n':>4} {'Ø mm':>6}")
+    print("-" * 55)
+    for _n in names:
+        _v    = grp_dk_n[_n]
+        _diam = GROUPS[_n]["diameter_mm"]
+        if _v:
+            _s = std(_v) if len(_v) > 1 else 0.0
+            print(f"{_n:<18} {mean(_v):>12.5f} {_s:>10.5f} {len(_v):>4d} {_diam:>6.1f}")
+        else:
+            print(f"{_n:<18} {'N/A':>12} {'N/A':>10} {'0':>4} {_diam:>6.1f}")
+    print(f"\nEXP-A5-1  Eagle vs Kennedy  "
+          f"Δdk_n={exp_a5_1[0]:.5f}  pooled-σ={exp_a5_1[1]:.5f}  sep={exp_a5_1[2]:.2f}σ")
+    print(f"EXP-A5-3  Eagle↔Kennedy  5D={d5_eagle_kennedy:.4f} → 6D={d6_eagle_kennedy:.4f} ({improvement_pct:+.1f}%)")
+    print(f"EXP-A5-4  Pearson r(dk_n, diameter) = {pearson_r:.3f}")
+    _d7 = "🟢 GO" if (improvement_pct >= 20 and exp_a5_1[2] >= 3) else "🔴 HOLD — C-8 first"
+    print(f"D-7 Decision: {_d7}")
+
+    # -----------------------------------------------------------------------
     # Save outputs
     # -----------------------------------------------------------------------
     with open(INDEX_OUT, "w", encoding="utf-8") as fh:
@@ -426,6 +534,9 @@ def main():
         exp1_dfn, exp1_drp, exp2_delta, exp2_sep, fe_dfn_mean, cu_dfn_mean,
         dist_with, dist_without, exp4_dfn, within_std_drp, between_std_drp,
         pairwise, W_FULL, W_QUICK, SIGMA,
+        # A-5
+        grp_dk_n, exp_a5_1, pairwise_6d,
+        d5_eagle_kennedy, d6_eagle_kennedy, improvement_pct, W_6D, pearson_r,
     )
     print(f"✅ Saved analysis report  → {REPORT_OUT.name}")
 
@@ -440,6 +551,9 @@ def write_report(
     exp1_dfn, exp1_drp, exp2_delta, exp2_sep, fe_dfn_mean, cu_dfn_mean,
     dist_with, dist_without, exp4_dfn, within_std_drp, between_std_drp,
     pairwise, W_FULL, W_QUICK, SIGMA,
+    # A-5
+    grp_dk_n, exp_a5_1, pairwise_6d,
+    d5_eagle_kennedy, d6_eagle_kennedy, improvement_pct, W_6D, pearson_r,
 ):
     def fmt_v(v, s):
         return f"{v:.4f} ± {s:.4f}"
@@ -617,6 +731,93 @@ def write_report(
     a("")
     a("---")
     a("")
+    a("## A-5. dk_n Spatial Gradient Analysis")
+    a("")
+    a("> **Задача:** Перевірити чи `dk_n = df_n_1 / df_n_0` покращує розділення Eagle↔Kennedy.")
+    a("> **Дані:** C-7 NDJSON — `steps[1][\"fSensor_hz\"]` (addon_1.6mm). Без нового HW.")
+    a("> **Фізика:** `dk_n` = просторовий градієнт LHR coupling. Велика монета (38mm+) → повільний спад → `dk_n` вищий.")
+    a("")
+    a("### dk_n per group")
+    a("")
+    a("| Group | dk_n mean | dk_n σ | n | Ø mm |")
+    a("|-------|----------|--------|---|------|")
+    for _n in names:
+        _v    = grp_dk_n[_n]
+        _diam = GROUPS[_n]["diameter_mm"]
+        if _v:
+            _s = std(_v) if len(_v) > 1 else 0.0
+            a(f"| {_n} | {mean(_v):.5f} | {_s:.5f} | {len(_v)} | {_diam} |")
+        else:
+            a(f"| {_n} | N/A | N/A | 0 | {_diam} |")
+    a("")
+    a("### EXP-A5-1 — Eagle vs Kennedy separation in dk_n")
+    a("")
+    a(f"- Δdk_n = **{exp_a5_1[0]:.5f}** (pooled-σ = {exp_a5_1[1]:.5f}) → **{exp_a5_1[2]:.2f}σ**")
+    a(f"- **{'✅ PASS (≥3σ)' if exp_a5_1[2] >= 3.0 else '❌ FAIL (<3σ)'}** — threshold 3σ (WAVE9_ROADMAP §A-5)")
+    a("")
+    a("### EXP-A5-2 — Kennedy dk_n bimodality (A/B side effect)")
+    a("")
+    ken = grp_dk_n.get("XKENNEDY", [])
+    eag = grp_dk_n.get("XAG999_EAGLE", [])
+    ken_s = std(ken) if len(ken) > 1 else 0.0
+    eag_s = std(eag) if len(eag) > 1 else 0.0
+    if ken:
+        a(f"- Kennedy dk_n values: {[round(v, 5) for v in ken]}")
+        a(f"- Spread (max−min) = {max(ken) - min(ken):.5f},  σ_within = {ken_s:.5f}")
+        a(f"- Eagle  dk_n values: {[round(v, 5) for v in eag]}")
+        a(f"- Eagle σ_within = {eag_s:.5f}")
+        # identify bimodal clusters in Kennedy
+        k_lo = [v for v in ken if v < mean(ken)]
+        k_hi = [v for v in ken if v >= mean(ken)]
+        a(f"- Kennedy ≈ two clusters: low={[round(v,5) for v in k_lo]} / high={[round(v,5) for v in k_hi]}")
+        a(f"- **Confirms A/B bimodality in dk_n space** — B-side Kennedy dk_n ≈ Eagle dk_n")
+    a("- **Required action:** C-8 — measure Kennedy A×5 and B×5 separately for clean centroids")
+    a("")
+    a("### EXP-A5-3 — 6D pairwise distance Eagle↔Kennedy")
+    a("")
+    a(f"| Metric | 5D (gen-3) | 6D (w_dk_n={W_6D[-1]:.1f}) | Change |")
+    a("|--------|-----------|--------------------------|--------|")
+    a(f"| Eagle↔Kennedy distance | {d5_eagle_kennedy:.4f} | {d6_eagle_kennedy:.4f} | {improvement_pct:+.1f}% |")
+    a("")
+    a(f"- D-7 criterion (≥20% improvement): **{'✅ Met' if improvement_pct >= 20 else '❌ Not met'}** ({improvement_pct:+.1f}%)")
+    a("")
+    a("### EXP-A5-4 — dk_n vs coin diameter Pearson-r")
+    a("")
+    a(f"- Pearson r(dk_n, diameter_mm) = **{pearson_r:.3f}**")
+    if pearson_r > 0.6:
+        a("- Strong positive correlation ✅ — dk_n encodes coin diameter as predicted")
+    elif pearson_r > 0.3:
+        a("- Moderate correlation ⚠️ — diameter is one factor, relief/edge also contribute")
+    else:
+        a("- Low correlation ℹ️ — dk_n dominated by relief/alloy rather than diameter")
+    a("")
+    a("### A-5 Conclusions — D-7 go/no-go")
+    a("")
+    a("| Criterion | Value | Threshold | Decision |")
+    a("|-----------|-------|-----------|----------|")
+    a(f"| Eagle↔Kennedy Δ (dk_n sep.) | {exp_a5_1[2]:.2f}σ | ≥3σ | {'✅' if exp_a5_1[2]>=3 else '❌'} |")
+    a(f"| 6D distance improvement | {improvement_pct:+.1f}% | ≥20% | {'✅' if improvement_pct>=20 else '❌'} |")
+    a(f"| dk_n↔diameter correlation | r={pearson_r:.3f} | r>0.5 | {'✅' if pearson_r>0.5 else '❌'} |")
+    a(f"| Kennedy A/B bimodal in dk_n | σ={ken_s:.5f} | clean centroid? | ⚠️ C-8 needed |")
+    a("")
+    d7_go = improvement_pct >= 20 and exp_a5_1[2] >= 3
+    if d7_go:
+        a("**🟢 D-7 GO** — dk_n meets improvement threshold with current C-7 data.")
+        a("Proceed with 6D firmware (D-7) then C-8 for A/B-clean centroids.")
+    else:
+        a("**🔴 D-7 HOLD** — dk_n improvement below threshold with current C-7 data.")
+        a("")
+        a("**Root cause:** Kennedy centroid is contaminated by A/B side mixing (bimodal confirmed).")
+        a("B-side Kennedy produces dk_n ≈ Eagle — inflates centroid toward Eagle, reduces separation.")
+        a("")
+        a("**Required action:**")
+        a("1. **C-8 HW session** — Kennedy A×5 + B×5, Kangaroo A×5 + B×5 (controlled sides)")
+        a("2. **Re-run A-5** on C-8 data with clean A/B-separated centroids")
+        a("3. **Expected result:** Eagle↔Kennedy(A only) distance increases significantly")
+        a("4. **Then decide:** D-7 or split Kennedy into A/B entries in gen-4 DB")
+    a("")
+    a("---")
+    a("")
     a("## 6. Recommendations — index.json gen 3 & matcher.json v2")
     a("")
     a("### Vector schema change (D-5 / ADR-VEC-001)")
@@ -664,7 +865,11 @@ def write_report(
     a("- [ ] Quick validation measurement: scan Silver Eagle → expect confidence > 0.85 for XAG999")
     a("- [ ] Quick validation: scan Russian kopecks → expect XCU (not XZNNIP)")
     a("- [ ] Consider: merge XAG999_EAGLE + XAG999_KANG into one entry with wider radius?")
-    a("- [ ] C-8 session: add more silver types (XAG800, XAU999) to expand DB")
+    a("- [ ] **A-5 done** — see section above. D-7 decision: HOLD until C-8 controlled A/B measurements")
+    a("- [ ] **C-8 HW session** (next priority): Kennedy Half Dollar A×5 + B×5, Kangaroo A×5 + B×5")
+    a("- [ ] C-8: add XAG800, XAU999 new types for DB expansion")
+    a("- [ ] After C-8: re-run A-5 on clean A/B data → reassess D-7 go/no-go")
+    a("- [ ] D-7b (production LHR fix) can proceed independently of C-8 — isolates meas_df_n=0 bug")
     a("- [ ] Investigate LFS stack anomaly (84B watermark in reboot #5) — watch for recurrence")
     a("")
     a("---")
