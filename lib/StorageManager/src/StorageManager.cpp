@@ -71,7 +71,7 @@ uint8_t StorageManager::queryFingerprint(float    dRp1_n,
                         : static_cast<uint8_t>(FingerprintCache::QUERY_TOP_N);
 
     QueryResult raw[FingerprintCache::QUERY_TOP_N];
-    const uint8_t n = fp_.query(dRp1_n, k1, k2, slope, dL1_n, raw, cap);
+    const uint8_t n = fp_.query(dRp1_n, k1, k2, slope, dL1_n, 0.0f, raw, cap);
 
     for (uint8_t i = 0; i < n; ++i) {
         strlcpy(out[i].id,         raw[i].entry->id,         sizeof(out[i].id));

@@ -26,7 +26,8 @@ static MetalMatcher     matcher;
 
 // Build a CacheEntry from raw vector components (C-5 p3 protocol values).
 static CacheEntry makeEntry(const char* id, const char* metal_code, const char* coin_name,
-                            float dRp1_n, float k1, float k2, float slope, float dL1_n) {
+                            float dRp1_n, float k1, float k2, float df_n, float dL1_n,
+                            float df1_n = 0.0f) {
     CacheEntry e = {};
     strncpy(e.id,          id,         sizeof(e.id)          - 1);
     strncpy(e.metal_code,  metal_code, sizeof(e.metal_code)  - 1);
@@ -35,8 +36,9 @@ static CacheEntry makeEntry(const char* id, const char* metal_code, const char* 
     e.dRp1_n        = dRp1_n;
     e.k1            = k1;
     e.k2            = k2;
-    e.slope         = slope;
+    e.df_n          = df_n;
     e.dL1_n         = dL1_n;
+    e.df1_n         = df1_n;
     e.radius_95pct  = 0.05f;
     e.records_count = 5;
     return e;
@@ -45,8 +47,8 @@ static CacheEntry makeEntry(const char* id, const char* metal_code, const char* 
 // Build a Measurement whose VectorCompute output exactly matches the given components.
 // k1 = rp[1]/rp[0] and dRp1_n = (rp[0]-rp[1])/800 are coupled: rp[0]*(1-k1) = dRp1_n*800.
 // => rp[0] derived from both; rp[1] = rp[0]*k1; rp[2] = rp[0]*k2.
-// slope is NOT a free parameter — VectorCompute computes it as (k2-1)/2.
-// Entries' slope field should always equal (k2-1)/2 for consistent exact-match tests.
+// df_n is passed separately to matchFull() — not derived from Measurement fields.
+// Entries' df_n field should match the value passed to matchFull() for exact-match tests.
 static Measurement makeMeas(float dRp1_n_target, float k1_target,
                              float k2_target, float dL1_n_target) {
     Measurement m = {};
@@ -165,7 +167,7 @@ void test_matchFull_alternatives_sorted_by_distance() {
 // 7. dist_components[] non-zero for active weight axes, zero for w=0 axis
 void test_matchFull_dist_components_respect_weights() {
     MetalMatcher::Config cfg;
-    cfg.full_weights[3] = 0.0f;  // slope weight = 0
+    cfg.full_weights[3] = 0.0f;  // df_n weight = 0
     matcher.init(cache, cfg);
 
     cache.loadTestEntry(makeEntry("ag925/c1", "XAG925", "Silver 925", 0.65f, 0.74f, 0.54f, -0.23f, -0.001f));
@@ -272,6 +274,36 @@ void test_isReady_false_on_empty_cache() {
     TEST_ASSERT_TRUE(matcher.isReady());
 }
 
+// 14. df1_n weight in matchFull() — non-zero w5 separates entries identical in 5D
+void test_matchFull_df1n_weight_separates_identical_5d_entries() {
+    // Two centroids: identical 5D position, differ only in df1_n (Kennedy_B vs USSR_A scenario)
+    const float dRp1 = 0.65f, k1v = 0.74f, k2v = 0.54f, df_nv = 0.80f, dL1 = -0.001f;
+    cache.loadTestEntry(makeEntry("kennedy", "XKENED", "Kennedy Half",
+                                  dRp1, k1v, k2v, df_nv, dL1, /*df1_n=*/0.6f));
+    cache.loadTestEntry(makeEntry("ussr",    "XUSSR",  "USSR 10R",
+                                  dRp1, k1v, k2v, df_nv, dL1, /*df1_n=*/0.7f));
+    cache.beginTest();
+
+    // Config with df1_n weight=2.0 active
+    MetalMatcher::Config cfg;
+    cfg.full_weights[5] = 2.0f;
+    matcher.init(cache, cfg);
+
+    // Query at df1_n=0.6 (kennedy position) — identical 5D, df1_n distinguishes
+    Measurement m = makeMeas(dRp1, k1v, k2v, dL1);
+    MatchResult r = matcher.matchFull(m, df_nv, /*df1_n=*/0.6f);
+
+    TEST_ASSERT_TRUE(r.valid);
+    TEST_ASSERT_EQUAL_STRING("XKENED", r.metal_code);
+    TEST_ASSERT_EQUAL_UINT8(1, r.alt_count);
+    TEST_ASSERT_EQUAL_STRING("XUSSR", r.alternatives[0].metal_code);
+    // Kennedy exact match on all 6 dims → confidence=1.0; USSR separates by df1_n
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, 1.0f, r.confidence);
+    TEST_ASSERT_GREATER_THAN_FLOAT(r.alternatives[0].confidence, r.confidence);
+    // dist_components[5] for KENNEDY = 0 (exact match on df1_n)
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.0f, r.dist_components[5]);
+}
+
 // ── Runner ────────────────────────────────────────────────────────────────────
 
 void setup() {}
@@ -292,5 +324,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_confidence_formula_matches_expected);
     RUN_TEST(test_resetConfig_restores_defaults);
     RUN_TEST(test_isReady_false_on_empty_cache);
+    RUN_TEST(test_matchFull_df1n_weight_separates_identical_5d_entries);
     return UNITY_END();
 }

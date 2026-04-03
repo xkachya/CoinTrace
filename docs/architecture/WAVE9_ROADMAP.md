@@ -1,8 +1,8 @@
 # Wave 9 Roadmap — Measurement Science
 
-**Статус:** 🔄 Active — Wave 8 CLOSED (2026-03-30), Wave 9 D-4/C-6b/D-5/C-7/A-1/A-4/D-6/A-5/C-8 Done; ADR-VEC-002/D-7(revised→df1_n)/D-7b/A-6/C-9 next  
-**Версія:** 1.7.0  
-**Дата:** 2026-03-27 (оновлено: 2026-04-03 — C-8 Done 50 records; A-5 Done dk_n REJECTED z=0.9→df1_n z=7.5; D-7 revised → add df1_n; ADR-VEC-002 drafted; C-9 BLOCKED pending steel coin)  
+**Статус:** 🔄 Active — Wave 8 CLOSED (2026-03-30), Wave 9 D-4/C-6b/D-5/C-7/A-1/A-4/D-6/A-5/C-8/ADR-VEC-002/D-7 Done; D-7b/A-6/C-9 next  
+**Версія:** 1.8.0  
+**Дата:** 2026-03-27 (оновлено: 2026-04-03 — ADR-VEC-002 Done; D-7 Done: 6D vector df1_n plumbing, buildFromSD fix, 137 tests pass, firmware SUCCESS)
 **Попередня хвиля:** Wave 8 — Connectivity + Infrastructure + Sensor Integration (C-7 MetalMatcher + Quick Screen = final milestone)  
 **Тригер:** C-5 Deep Analysis Audit (2026-03-27) — виявлено обмеження 2-dimensional effective vector, rp[2] saturation 80%, dL1_n ferro blindness  
 **Cross-ref:** `WAVE8_COMPLETION_WAVE9_DISCOVERY_PLAN.md`, `DISCOVERY_MODE_SPEC.md`, `C5_DEEP_ANALYSIS_AUDIT.md`, `2026-04-01.D4_SENSOR_CALIBRATION_PLAN.md`
@@ -60,8 +60,8 @@ C-5 аудит встановив три факти які визначають 
 | A-4 index.json gen 3 + matcher.json v2 | A | ⚠️ | A-2, A-3 | ✅ **Done (2026-04-03)** | 9 entries, df_n centroids. Weights [1.5,0,1,3.5,2.5] σ=0.35. Gen-3 DB deployed |
 | **D-6 df_n in real-time matcher** | D | ❌ | A-1, A-4 | ✅ **Done (2026-04-03)** | FingerprintCache/MetalMatcher/main.cpp: slope→df_n pipeline. Firmware reads gen-3 df_n field. Build: SUCCESS |
 | **A-5 dk_n spatial gradient analysis** | A | ❌ | A-1, C-7 data | ✅ **Done (2026-04-03)** | dk_n REJECTED: z=0.9 (Kennedy_B/USSR_A). df1_n=(fs1−f_empty)/f_empty дає z=7.5 тій самій парі. Див. ADR-VEC-002 |
-| **ADR-VEC-002 df1_n як 6-й вимір** | A | ❌ | A-5, C-8 | 📋 Planned | Замінює dk_n: df1_n=(fs1−f_empty)/f_empty. z=7.5 Kennedy_B/USSR_A. FingerprintCache 6th field, matchFull() 6th param, gen-4 schema, matcher.json v3 |
-| **D-7 6D vector: add df1_n** | D | ❌ | ADR-VEC-002 | 📋 Planned | **Revised** (dk_n→df1_n): CacheEntry.df1_n, query() 6th param, matchFull() 6th arg, sDiscoverySteps[1].fSensorHz. Root-cause Eagle↔Kennedy ambiguity |
+| **ADR-VEC-002 df1_n як 6-й вимір** | A | ❌ | A-5, C-8 | ✅ **Done (2026-04-03)** | Замінює dk_n: df1_n=(fs1−f_empty)/f_empty. z=7.5 Kennedy_B/USSR_A. FingerprintCache 6th field, matchFull() 6th param, gen-4 schema, matcher.json v3 |
+| **D-7 6D vector: add df1_n** | D | ❌ | ADR-VEC-002 | ✅ **Done (2026-04-03)** | **Revised** (dk_n→df1_n): CacheEntry.df1_n, query() 6th param, matchFull() 6th arg, sDiscoverySteps[1].fSensorHz. buildFromSD() fix. 137 tests ✅. RAM 63.4% Flash 58.2% |
 | **D-7b LHR в production path** | D | ❌ | D-7 | 📋 Planned | Single LHR read in production STEP_BASE handler. Fixes meas_df_n=0.0 gap in non-DISCOVERY build |
 | **C-8 HW Session (A/B side control)** | C | ✅ | — | ✅ **Done (2026-04-03)** | 50 записів, 5 монет×2 sides×5 вимірів. XAG800_BHS + XUSSR10R нові класи. dk_n REJECTED. XFE centroid bug (bimetal seed) знайдено. Guide: `C8_HW_SESSION.md` |
 | **A-6 index.json gen-4 + matcher.json v3** | A | ⚠️ | C-9, D-7 | 📋 Planned | 6D centroids з df1_n. A/B-aware entries для Kennedy/Kangaroo. XFE centroid re-seed (блоковано до C-9). Updated weights |
@@ -625,8 +625,8 @@ D-6  df_n in real-time matcher  ✅ Done (2026-04-03)
 A-5  dk_n spatial gradient analysis  ✅ Done  (dk_n REJECTED z=0.9 → df1_n z=7.5 Kennedy_B/USSR_A)
 C-8  HW Session A/B control          ✅ Done  (50 records, 5 coins×2 sides, XFE centroid bug знайдено)
 
-ADR-VEC-002  df1_n як 6D вимір        ~0.5 дні  (документ + FingerprintCache + matchFull() + schema)
-D-7   6D vector: add df1_n            ~1 день   (CacheEntry, matchFull() 6th param, gen-4 NDJSON, matcher v3)
+ADR-VEC-002  df1_n як 6D вимір        ✅ Done  (документ + FingerprintCache + matchFull() + schema)
+D-7   6D vector: add df1_n            ✅ Done  (CacheEntry, matchFull() 6th param, NDJSON, matcher v3, buildFromSD fix)
 D-7b  LHR в production path           ~0.5 дні  (STEP_BASE single LHR read, fixup display)
 C-9   XFE re-seed HW Session          ⛔ BLOCKED (потрібна сталева монета)
 A-6   index.json gen-4 + matcher v3   ~0.5 дні  (6D centroids з df1_n; залежить від C-9)
@@ -720,6 +720,7 @@ Discovery Mode — **практично безкоштовний** з точки
 
 ---
 
+*Версія 1.8.0 (2026-04-03) — ADR-VEC-002 Done; D-7 Done: 6D vector df1_n plumbing (FingerprintCache h+cpp, MetalMatcher h+cpp, StorageManager, main.cpp, matcher.json v3, 2 test files); buildFromSD() df1_n parse fix; 137 native tests ✅; firmware RAM 63.4% Flash 58.2% SUCCESS.*  
 *Версія 1.7.0 (2026-04-03) — C-8 Done (50 records); A-5 Done (dk_n REJECTED z=0.9, df1_n z=7.5); D-7 revised (dk_n→df1_n); ADR-VEC-002 added to matrix; C-9 XFE re-seed BLOCKED; Фаза 2 timeline updated. Commit 913f3f7.*  
 *Версія 1.6.0 (2026-04-03) — A-5/D-7/D-7b/C-8/A-6 Planned tasks added; D-6/D-7/D-7b detail sections; C-8 HW session spec; A-5 dk_n analysis; A-6 gen-4 plan; Sprint 4 sequence; roadmap brought current after commit 483b93d.*  
 *Версія 1.5.0 (2026-04-03) — D-5/C-7/A-1/A-4/D-6 Done; gen-3 DB deployed (9 entries, df_n=3.5, σ=0.35).*  

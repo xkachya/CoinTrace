@@ -643,6 +643,8 @@ static void saveDiscoveryDump(const MatchResult& mr) {
     pv["dL1_n"]  = roundf(VectorCompute::dL1_n(sMeas.m)  * 10000.0f) / 10000.0f;
     if (sDiscoverySteps[0].fSensorHz > 0.0f && baseFS > 0.0f)
         pv["df_n"] = roundf((sDiscoverySteps[0].fSensorHz - baseFS) / baseFS * 10000.0f) / 10000.0f;
+    if (sDiscoverySteps[1].fSensorHz > 0.0f && baseFS > 0.0f)  // ADR-VEC-002
+        pv["df1_n"] = roundf((sDiscoverySteps[1].fSensorHz - baseFS) / baseFS * 10000.0f) / 10000.0f;
 
     // Discovery-specific derived parameters
     JsonObject dd = doc["discovery_derived"].to<JsonObject>();
@@ -719,7 +721,10 @@ static void doMeasCompute() {
         const float meas_df_n  = (sDiscoverySteps[0].fSensorHz > 0.0f && baseFS_rt > 0.0f)
                                  ? (sDiscoverySteps[0].fSensorHz - baseFS_rt) / baseFS_rt
                                  : 0.0f;
-        mr = gMatcher.matchFull(sMeas.m, meas_df_n);
+        const float meas_df1_n = (sDiscoverySteps[1].fSensorHz > 0.0f && baseFS_rt > 0.0f)
+                                 ? (sDiscoverySteps[1].fSensorHz - baseFS_rt) / baseFS_rt
+                                 : 0.0f;  // ADR-VEC-002: 0.0 in production build until D-7b
+        mr = gMatcher.matchFull(sMeas.m, meas_df_n, meas_df1_n);
         gMatcher.logTopCandidates(mr);
         if (mr.valid) {
             strlcpy(sMeas.m.metal_code, mr.metal_code, sizeof(sMeas.m.metal_code));

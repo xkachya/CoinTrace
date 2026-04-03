@@ -25,7 +25,7 @@
 #include <freertos/semphr.h>
 
 // ── Algorithm identifiers ─────────────────────────────────────────────────────
-static constexpr uint8_t ALGO_FULL  = 0;  // matchFull() — 5D weighted search
+static constexpr uint8_t ALGO_FULL  = 0;  // matchFull() — 6D weighted search  (ADR-VEC-002)
 static constexpr uint8_t ALGO_QUICK = 1;  // matchQuick() — 2D projection
 
 // ── Alternative ──────────────────────────────────────────────────────────────
@@ -57,13 +57,13 @@ struct MatchResult {
     // Per-axis weighted contribution: √(wi·Δi²) for each component.
     // Zero for axes where wi = 0 (e.g. k1/k2 in Quick mode).
     // Use these for tuning: compare non-zero axes to identify which dimension drives mismatch.
-    float   dist_components[5]; // [dRp1_n, k1, k2, df_n, dL1_n]
+    float   dist_components[6]; // [dRp1_n, k1, k2, df_n, dL1_n, df1_n]  (ADR-VEC-002)
 
     // ── Alternatives ──────────────────────────────────────────────────────
     Alternative alternatives[3];
     uint8_t     alt_count;      // 0..3 valid entries in alternatives[]
 };
-// sizeof(MatchResult) ≈ 8+48+4+4+1+1+1+3(pad)+20+192+1 ≈ 283 B — stack only, no heap
+// sizeof(MatchResult) ≈ 8+48+4+4+1+1+1+3(pad)+24+192+1 ≈ 287 B — stack only, no heap
 
 // ── MetalMatcher ─────────────────────────────────────────────────────────────
 class MetalMatcher {
@@ -71,11 +71,11 @@ public:
 
     // ── Configuration (loaded from SD:/CoinTrace/matcher.json) ───────────────
     struct Config {
-        // Weights for 5D vector: [dRp1_n, k1, k2, df_n, dL1_n]
-        // C-5 defaults (METAL_MATCHER_ARCHITECTURE.md §7):
-        float full_weights[5]    = {1.0f, 1.0f, 1.0f, 0.0f, 1.0f};
-        // Quick Screen: k1/k2/slope=0.0 → only dRp1_n and dL1_n contribute
-        float quick_weights[5]   = {1.5f, 0.0f, 0.0f, 0.0f, 2.5f};
+        // Weights for 6D vector: [dRp1_n, k1, k2, df_n, dL1_n, df1_n]  (ADR-VEC-002)
+        // C-5/C-8 defaults (METAL_MATCHER_ARCHITECTURE.md §7):
+        float full_weights[6]    = {1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 0.0f};
+        // Quick Screen: k1/k2/df_n=0.0 → only dRp1_n and dL1_n contribute; df1_n inactive
+        float quick_weights[6]   = {1.5f, 0.0f, 0.0f, 0.0f, 2.5f, 0.0f};
         // Gaussian confidence: conf = exp(−dist²/σ²). σ=0.35 validated on C-5 dataset.
         float sigma              = 0.35f;
         // Below min_confidence → valid=false
@@ -107,7 +107,7 @@ public:
     // Full 5D match. Normalizes Measurement internally via VectorCompute.
     // Requires complete 4-position cycle (rp[0..2] + l[0..1] valid).
     // Call from doMeasCompute() after STEP_DRIFT capture.
-    MatchResult matchFull(const Measurement& m, float df_n = 0.0f) const;
+    MatchResult matchFull(const Measurement& m, float df_n = 0.0f, float df1_n = 0.0f) const;
 
     // Quick 2D match. Normalizes raw sensor values internally (ADR-M6).
     //   rpLive, lLive  — current live readings  (getLiveRp(), getLiveL())
@@ -138,5 +138,5 @@ private:
     // Calls cache_->query() with the given weights, builds MatchResult with
     // dist_components[], is_ferro, alternatives[], and our cfg_.sigma confidence.
     MatchResult doMatch(float dRp1_n, float k1, float k2, float df_n,
-                        float dL1_n, const float* weights, uint8_t algo) const;
+                        float dL1_n, float df1_n, const float* weights, uint8_t algo) const;
 };

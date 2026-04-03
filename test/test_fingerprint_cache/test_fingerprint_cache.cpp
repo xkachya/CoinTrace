@@ -21,19 +21,20 @@ static FingerprintCache cache;
 
 // Build a CacheEntry from 5D fingerprint components.
 static CacheEntry makeEntry(const char* id, float dRp1_n, float k1, float k2,
-                            float slope, float dL1_n, float radius = 0.05f,
-                            uint16_t records = 10) {
+                            float df_n, float dL1_n, float df1_n = 0.0f,
+                            float radius = 0.05f, uint16_t records = 10) {
     CacheEntry e = {};
     strncpy(e.id,          id,       sizeof(e.id)      - 1);
     strncpy(e.metal_code,  "XAG925", sizeof(e.metal_code) - 1);
     strncpy(e.coin_name,   "Test",   sizeof(e.coin_name) - 1);
     strncpy(e.protocol_id, "p1_v0",  sizeof(e.protocol_id) - 1);
-    e.dRp1_n       = dRp1_n;
-    e.k1           = k1;
-    e.k2           = k2;
-    e.slope        = slope;
-    e.dL1_n        = dL1_n;
-    e.radius_95pct = radius;
+    e.dRp1_n        = dRp1_n;
+    e.k1            = k1;
+    e.k2            = k2;
+    e.df_n          = df_n;
+    e.dL1_n         = dL1_n;
+    e.df1_n         = df1_n;
+    e.radius_95pct  = radius;
     e.records_count = records;
     return e;
 }
@@ -49,7 +50,7 @@ void tearDown() {}
 // 1. query() returns 0 when cache is uninitialised (count_ == 0)
 void test_query_returns_zero_on_empty_cache() {
     QueryResult results[FingerprintCache::QUERY_TOP_N];
-    const uint8_t n = cache.query(0.5f, 0.75f, 0.6f, -0.13f, 0.0f,
+    const uint8_t n = cache.query(0.5f, 0.75f, 0.6f, -0.13f, 0.0f, 0.0f,
                                    results, FingerprintCache::QUERY_TOP_N);
     TEST_ASSERT_EQUAL_UINT8(0, n);
     TEST_ASSERT_FALSE(cache.isReady());
@@ -60,15 +61,15 @@ void test_exact_match_gives_full_confidence() {
     const float dRp1_n = 0.625f;
     const float k1     = 0.75f;
     const float k2     = 0.611f;
-    const float slope  = -0.129f;
+    const float df_n   = -0.129f;
     const float dL1_n  = 0.0002f;
 
-    CacheEntry e = makeEntry("ag/mtt", dRp1_n, k1, k2, slope, dL1_n);
+    CacheEntry e = makeEntry("ag/mtt", dRp1_n, k1, k2, df_n, dL1_n);
     cache.loadTestEntry(e);
     cache.beginTest();
 
     QueryResult results[FingerprintCache::QUERY_TOP_N];
-    const uint8_t n = cache.query(dRp1_n, k1, k2, slope, dL1_n,
+    const uint8_t n = cache.query(dRp1_n, k1, k2, df_n, dL1_n, 0.0f,
                                    results, FingerprintCache::QUERY_TOP_N);
     TEST_ASSERT_EQUAL_UINT8(1, n);
     TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.0f, results[0].distance);
@@ -87,7 +88,7 @@ void test_confidence_at_sigma_distance() {
 
     const float sigma = FingerprintCache::CONFIDENCE_SIGMA;
     QueryResult results[FingerprintCache::QUERY_TOP_N];
-    cache.query(sigma, 0.0f, 0.0f, 0.0f, 0.0f,
+    cache.query(sigma, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                 results, FingerprintCache::QUERY_TOP_N);
 
     // distance == sigma, confidence == exp(-1) ≈ 0.3679
@@ -106,7 +107,7 @@ void test_top_n_ordered_by_distance() {
     cache.beginTest();
 
     QueryResult results[5];
-    const uint8_t n = cache.query(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, results, 5);
+    const uint8_t n = cache.query(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, results, 5);
 
     TEST_ASSERT_EQUAL_UINT8(5, n);
     for (uint8_t i = 1; i < n; ++i) {
@@ -125,7 +126,7 @@ void test_max_results_truncation() {
     cache.beginTest();
 
     QueryResult results[10];
-    const uint8_t n = cache.query(0.0f, 0.5f, 0.4f, -0.1f, 0.0f, results, 3);
+    const uint8_t n = cache.query(0.0f, 0.5f, 0.4f, -0.1f, 0.0f, 0.0f, results, 3);
     TEST_ASSERT_EQUAL_UINT8(3, n);
 }
 
@@ -141,13 +142,34 @@ void test_closer_entry_ranked_first() {
 
     // Query exactly at A's position
     QueryResult results[2];
-    cache.query(0.6f, 0.75f, 0.60f, -0.13f, 0.001f, results, 2);
+    cache.query(0.6f, 0.75f, 0.60f, -0.13f, 0.001f, 0.0f, results, 2);
     TEST_ASSERT_EQUAL_STRING("near", results[0].entry->id);
     TEST_ASSERT_EQUAL_STRING("far",  results[1].entry->id);
     TEST_ASSERT_LESS_OR_EQUAL_FLOAT(results[1].distance, results[0].distance);
 }
 
-// ── Runner ────────────────────────────────────────────────────────────────────
+// 7. df1_n dimension contributes to distance when weight is non-zero
+void test_df1n_contributes_to_distance() {
+    // Two entries identical in 5D but separated in df1_n (Kennedy_B vs USSR_A scenario)
+    CacheEntry a = makeEntry("kennedy", 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, /*df1_n=*/0.6f);
+    CacheEntry b = makeEntry("ussr",    0.0f, 0.0f, 0.0f, 0.0f, 0.0f, /*df1_n=*/0.7f);
+    cache.loadTestEntry(a);
+    cache.loadTestEntry(b);
+    cache.beginTest();
+
+    // Weight w5=2.0 for df1_n; query at df1_n=0.6 (matches "kennedy")
+    const float weights[6] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 2.0f};
+    QueryResult results[2];
+    const uint8_t n = cache.query(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.6f, results, 2, weights);
+
+    TEST_ASSERT_EQUAL_UINT8(2, n);
+    TEST_ASSERT_EQUAL_STRING("kennedy", results[0].entry->id);  // exact match on df1_n
+    TEST_ASSERT_FLOAT_WITHIN(1e-5f, 0.0f, results[0].distance); // distance = 0
+    // "ussr" distance = sqrt(2.0 * (0.7-0.6)^2) = sqrt(0.02) ≈ 0.1414
+    TEST_ASSERT_FLOAT_WITHIN(1e-4f, sqrtf(2.0f * 0.01f), results[1].distance);
+}
+
+// ── Runner ───────────────────────────────────────────────────────────────────────────────
 
 void setup() {}
 void loop()  {}
@@ -160,5 +182,6 @@ int main(int, char**) {
     RUN_TEST(test_top_n_ordered_by_distance);
     RUN_TEST(test_max_results_truncation);
     RUN_TEST(test_closer_entry_ranked_first);
+    RUN_TEST(test_df1n_contributes_to_distance);
     return UNITY_END();
 }
