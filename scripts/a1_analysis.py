@@ -29,7 +29,7 @@ from datetime import datetime
 REPO = Path(__file__).resolve().parent.parent
 NDJSON_IN    = REPO / "docs/external/2026-04-02.4.session_63824c66.ndjson"
 INDEX_OUT    = REPO / "data/sd_seed/CoinTrace/database/index.json"
-MATCHER_OUT  = REPO / "data/sd_seed/CoinTrace/database/matcher.json"
+MATCHER_OUT  = REPO / "data/sd_seed/CoinTrace/matcher.json"
 REPORT_OUT   = REPO / "docs/external/A1_ANALYSIS_session_63824c66.md"
 
 # ---------------------------------------------------------------------------
@@ -397,14 +397,20 @@ def main():
     # -----------------------------------------------------------------------
     # Build matcher.json v2
     # -----------------------------------------------------------------------
+    # NOTE: FEATURES order in this script is [dRp1_n, k1, k2, dL1_n, df_n] (indices 3,4 swapped
+    # vs firmware). Firmware FingerprintCache::query() / doMatch() expects [dRp1_n, k1, k2, df_n, dL1_n].
+    # Reorder [3] and [4] when writing matcher.json so production weights match design intent.
+    fw_full_weights  = [W_FULL[0],  W_FULL[1],  W_FULL[2],  W_FULL[4],  W_FULL[3]]
+    fw_quick_weights = [W_QUICK[0], W_QUICK[1], W_QUICK[2], W_QUICK[4], W_QUICK[3]]
+
     matcher_v2 = {
         "version":       2,
         "generated_at":  datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "full_weights":  W_FULL,
-        "quick_weights": W_QUICK,
+        "full_weights":  fw_full_weights,
+        "quick_weights": fw_quick_weights,
         "sigma":         SIGMA,
         "notes": (
-            "Gen 3 — D-5 vector (dRp1_n, k1, k2, dL1_n, df_n). "
+            "Gen 3 — D-5 vector firmware order (dRp1_n, k1, k2, df_n, dL1_n). "
             "df_n weight boosted: 16σ XCU/XZNNIP separation, 6σ Ag999/Ag900. "
             "k1 zeroed (correlated with dRp1_n); dL1_n boosted for L-based discrimination. "
             "Calibrated on session_63824c66 (C-7, 2026-04-02)."
