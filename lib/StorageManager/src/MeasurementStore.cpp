@@ -81,7 +81,7 @@ bool MeasurementStore::save(const Measurement& m) {
     JsonDocument doc;
     doc["ts"]          = m.ts;
     doc["device_id"]   = deviceId_;
-    doc["protocol_id"] = "p1_MIKROE3240_024mm";  // hw-verified S-4: coil=MIKROE-3240, d=24mm, fSENSOR=909.2kHz
+    doc["protocol_id"] = m.protocol_id;  // D-FIX-001: use actual protocol from Measurement struct
 
     doc["pos_count"]   = m.pos_count;
 

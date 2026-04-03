@@ -1,90 +1,180 @@
 {
-  "version": 3,
-  "generated_at": "2026-04-02T21:26:49Z",
-  "generation": 3,
-  "session_id": "63824c66",
+  "version": 4,
+  "generated_at": "2026-04-03T19:12:02Z",
+  "generation": 4,
+  "session_id": "cf1edfcd",
   "protocols": [
     "p3_MIKROE3240_b06_012mm"
   ],
   "entries": [
     {
-      "id": "xag999_eagle/c7_hw_2026-04-02",
+      "id": "xag800_bhs_a/c8_hw_2026-04-03",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XAG800",
+      "coin_name": "Bahamas $1 Ag800 (Side A)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -16.388,
+        "k1": 1.3253,
+        "k2": 1.42576,
+        "dL1_n": -2.4867,
+        "df_n": 0.79892,
+        "df1_n": 0.47829
+      },
+      "radius_95pct": 0.1364,
+      "records_count": 5
+    },
+    {
+      "id": "xag800_bhs_b/c8_hw_2026-04-03",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XAG800",
+      "coin_name": "Bahamas $1 Ag800 (Side B)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -16.7632,
+        "k1": 1.33628,
+        "k2": 1.43836,
+        "dL1_n": -2.5148,
+        "df_n": 0.80658,
+        "df1_n": 0.48047
+      },
+      "radius_95pct": 0.1107,
+      "records_count": 5
+    },
+    {
+      "id": "xag999_eagle_a/c8_hw_2026-04-03",
       "protocol_id": "p3_MIKROE3240_b06_012mm",
       "metal_code": "XAG999",
-      "coin_name": "American Silver Eagle 1oz",
+      "coin_name": "American Silver Eagle 1oz (Side A)",
       "year": null,
       "centroid": {
-        "dRp1_n": -14.7738,
-        "k1": 1.27934,
-        "k2": 1.3724,
-        "dL1_n": -2.4206,
-        "df_n": 0.8022
+        "dRp1_n": -15.31075,
+        "k1": 1.2931,
+        "k2": 1.3808,
+        "dL1_n": -2.47087,
+        "df_n": 0.7836,
+        "df1_n": 0.46959
       },
-      "radius_95pct": 2.7221,
-      "records_count": 5
+      "radius_95pct": 0.0329,
+      "records_count": 4
     },
     {
-      "id": "xag999_kang/c7_hw_2026-04-02",
+      "id": "xag999_eagle_b/c8_hw_2026-04-03",
       "protocol_id": "p3_MIKROE3240_b06_012mm",
       "metal_code": "XAG999",
-      "coin_name": "Australian Kangaroo 1oz",
+      "coin_name": "American Silver Eagle 1oz (Side B)",
       "year": null,
       "centroid": {
-        "dRp1_n": -13.259,
-        "k1": 1.24136,
-        "k2": 1.319,
-        "dL1_n": -2.289,
-        "df_n": 0.7643
+        "dRp1_n": -14.3042,
+        "k1": 1.26654,
+        "k2": 1.34758,
+        "dL1_n": -2.39536,
+        "df_n": 0.75804,
+        "df1_n": 0.45997
       },
-      "radius_95pct": 3.5794,
+      "radius_95pct": 0.0764,
       "records_count": 5
     },
     {
-      "id": "xag900/c7_hw_2026-04-02",
+      "id": "xag999_kang_a/c8_hw_2026-04-03",
       "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XAG900",
-      "coin_name": "Olympic 1984 Ag900",
+      "metal_code": "XAG999",
+      "coin_name": "Australian Kangaroo 1oz (Side A)",
       "year": null,
       "centroid": {
-        "dRp1_n": -12.8278,
-        "k1": 1.23064,
-        "k2": 1.30598,
-        "dL1_n": -2.2345,
-        "df_n": 0.7394
+        "dRp1_n": -13.8678,
+        "k1": 1.25598,
+        "k2": 1.33588,
+        "dL1_n": -2.3476,
+        "df_n": 0.74998,
+        "df1_n": 0.45932
       },
-      "radius_95pct": 3.7416,
+      "radius_95pct": 0.0639,
       "records_count": 5
     },
     {
-      "id": "xznnip/c7_hw_2026-04-02",
+      "id": "xag999_kang_b/c8_hw_2026-04-03",
       "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XZNNIP",
-      "coin_name": "Ukraine 10 UAH 2022 Territorial Defence Forces",
+      "metal_code": "XAG999",
+      "coin_name": "Australian Kangaroo 1oz (Side B)",
       "year": null,
       "centroid": {
-        "dRp1_n": -19.8208,
-        "k1": 1.44078,
-        "k2": 1.57634,
-        "dL1_n": -2.3553,
-        "df_n": 0.7476
+        "dRp1_n": -12.5728,
+        "k1": 1.22448,
+        "k2": 1.2973,
+        "dL1_n": -2.23424,
+        "df_n": 0.71638,
+        "df1_n": 0.44729
       },
-      "radius_95pct": 3.58,
+      "radius_95pct": 0.1104,
       "records_count": 5
     },
     {
-      "id": "xcu/c7_hw_2026-04-02",
+      "id": "xkennedy_a/c8_hw_2026-04-03",
       "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XCU",
-      "coin_name": "Russian Empire 5 Kopecks 1867–1917",
+      "metal_code": "XKENNEDY",
+      "coin_name": "Kennedy Half Dollar 1967 (Side A)",
       "year": null,
       "centroid": {
-        "dRp1_n": -19.7046,
-        "k1": 1.43022,
-        "k2": 1.55412,
-        "dL1_n": -2.6502,
-        "df_n": 0.8805
+        "dRp1_n": -14.0804,
+        "k1": 1.26308,
+        "k2": 1.3495,
+        "dL1_n": -2.312,
+        "df_n": 0.74546,
+        "df1_n": 0.45981
       },
-      "radius_95pct": 2.017,
+      "radius_95pct": 0.1377,
+      "records_count": 5
+    },
+    {
+      "id": "xkennedy_b/c8_hw_2026-04-03",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XKENNEDY",
+      "coin_name": "Kennedy Half Dollar 1967 (Side B)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -15.6484,
+        "k1": 1.30412,
+        "k2": 1.3957,
+        "dL1_n": -2.4506,
+        "df_n": 0.7823,
+        "df1_n": 0.47082
+      },
+      "radius_95pct": 0.0782,
+      "records_count": 5
+    },
+    {
+      "id": "xussr10r_a/c8_hw_2026-04-03",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XUSSR10R",
+      "coin_name": "USSR 10 Rubles Ag900 (Side A)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -15.7278,
+        "k1": 1.3056,
+        "k2": 1.39802,
+        "dL1_n": -2.455,
+        "df_n": 0.77904,
+        "df1_n": 0.46816
+      },
+      "radius_95pct": 0.0334,
+      "records_count": 5
+    },
+    {
+      "id": "xussr10r_b/c8_hw_2026-04-03",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XUSSR10R",
+      "coin_name": "USSR 10 Rubles Ag900 (Side B)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -17.558,
+        "k1": 1.3586,
+        "k2": 1.46258,
+        "dL1_n": -2.5851,
+        "df_n": 0.81798,
+        "df1_n": 0.48059
+      },
+      "radius_95pct": 0.1482,
       "records_count": 5
     },
     {
@@ -98,7 +188,8 @@
         "k1": 1.30578,
         "k2": 1.40526,
         "dL1_n": -2.4221,
-        "df_n": 0.8078
+        "df_n": 0.8078,
+        "df1_n": 0.0
       },
       "radius_95pct": 1.985,
       "records_count": 5
@@ -107,32 +198,68 @@
       "id": "xal/c7_hw_2026-04-02",
       "protocol_id": "p3_MIKROE3240_b06_012mm",
       "metal_code": "XAL",
-      "coin_name": "Germany 50 Pfennig 1919–1922 Weimar Republic",
+      "coin_name": "Germany 50 Pfennig 1919-1922 Weimar Republic",
       "year": null,
       "centroid": {
         "dRp1_n": -17.0326,
         "k1": 1.34718,
         "k2": 1.45558,
         "dL1_n": -2.3197,
-        "df_n": 0.7369
+        "df_n": 0.7369,
+        "df1_n": 0.0
       },
       "radius_95pct": 1.6015,
       "records_count": 5
     },
     {
-      "id": "xkennedy/c7_hw_2026-04-02",
+      "id": "xcu/c7_hw_2026-04-02",
       "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XKENNEDY",
-      "coin_name": "Kennedy Half Dollar 1967",
+      "metal_code": "XCU",
+      "coin_name": "Russian Empire 5 Kopecks 1867-1917",
       "year": null,
       "centroid": {
-        "dRp1_n": -14.6012,
-        "k1": 1.27672,
-        "k2": 1.36534,
-        "dL1_n": -2.3573,
-        "df_n": 0.789
+        "dRp1_n": -19.7046,
+        "k1": 1.43022,
+        "k2": 1.55412,
+        "dL1_n": -2.6502,
+        "df_n": 0.8805,
+        "df1_n": 0.0
       },
-      "radius_95pct": 4.4596,
+      "radius_95pct": 2.017,
+      "records_count": 5
+    },
+    {
+      "id": "xznnip/c7_hw_2026-04-02",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XZNNIP",
+      "coin_name": "Ukraine 10 UAH 2022 Territorial Defence Forces",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -19.8208,
+        "k1": 1.44078,
+        "k2": 1.57634,
+        "dL1_n": -2.3553,
+        "df_n": 0.7476,
+        "df1_n": 0.0
+      },
+      "radius_95pct": 3.58,
+      "records_count": 5
+    },
+    {
+      "id": "xag900/c7_hw_2026-04-02",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XAG900",
+      "coin_name": "Olympic 1984 Ag900",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -12.8278,
+        "k1": 1.23064,
+        "k2": 1.30598,
+        "dL1_n": -2.2345,
+        "df_n": 0.7394,
+        "df1_n": 0.0
+      },
+      "radius_95pct": 3.7416,
       "records_count": 5
     },
     {
@@ -146,7 +273,8 @@
         "k1": 1.80208,
         "k2": 2.0513,
         "dL1_n": -2.33,
-        "df_n": 0.7738
+        "df_n": 0.7738,
+        "df1_n": 0.0
       },
       "radius_95pct": 0.8256,
       "records_count": 5

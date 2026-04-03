@@ -1,8 +1,8 @@
 {
-  "version": 3,
+  "version": 4,
   "generated_at": "2026-04-03T00:00:00Z",
-  "full_weights": [1.5, 0.0, 1.0, 3.5, 2.5, 0.0],
-  "quick_weights": [2.0, 0.0, 0.0, 4.0, 2.5, 0.0],
+  "full_weights": [1.5, 0.0, 1.0, 3.0, 2.5, 0.40],
+  "quick_weights": [2.0, 0.0, 0.0, 4.0, 2.5, 0.30],
   "sigma": 0.35,
-  "notes": "Gen 3 + df1_n plumbing (D-7, ADR-VEC-002). 6D vector: [dRp1_n, k1, k2, df_n, dL1_n, df1_n]. df1_n weight=0 until gen-4 DB (A-6). Activate df1_n=2.0 after C-9 + A-6. Calibrated on session_63824c66 (C-7, 2026-04-02)."
+  "notes": "Gen-4 DB (P1/A-6). 6D vector: [dRp1_n, k1, k2, df_n, dL1_n, df1_n]. df_n: 3.5->3.0 (balance). df1_n: 0.0->0.40 (P3). w5=0.40 chosen as max safe value: XAG900 carry-forward has df1_n=0.0 placeholder; safe boundary=0.44 (beyond that XAG900 coin false-positives to xag999_kang_b). At w5=0.40: Kennedy->XFE distance 0.103->0.302 (eliminates false positive). Kennedy_B vs USSR_A separation marginal (+0.001); requires C-10 re-seed (more records, smaller radius). Increase w5 to 1.5-2.0 after XAG900+XCUZN re-seeded in C-11. Calibrated on session_cf1edfcd (C-8, 2026-04-03)."
 }
