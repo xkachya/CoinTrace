@@ -332,16 +332,14 @@ public:
     bool  isSignalStable() const { return stab_.stable; }
     float getSignalSigma() const { return stab_.sigma; }
 
-#ifdef DISCOVERY_MODE
-    // ── ADR-D6: Discovery capture API (compile-time guarded) ─────────────────
-    // Exposes private SPI methods for the blocking capture loop in discoveryCaptureStep().
+    // ── Capture API (ADR-D6, unified production + discovery) ─────────────────
+    // Exposes private SPI methods for the blocking captureStep() in main.cpp.
     // NEVER call from update() or ISR — not mutex-protected by design.
     uint8_t  spiReadPublic(uint8_t reg)                             { return spiRead_(reg); }
     bool     readMeasurementBurstPublic(uint16_t& rp, uint16_t& l) { return readBurst_(rp, l); }
     uint32_t readLHRBurstPublic()                                   { return readLHRBurst_(); }
     uint32_t getClkinFreqHz() const                                 { return clkinFreqHz_; }
     uint32_t convTimeMs()     const                                 { return convTimeMs_(); }
-#endif
 
     // ── IPlugin status ────────────────────────────────────────────────────────
     bool isEnabled() const override { return enabled_; }

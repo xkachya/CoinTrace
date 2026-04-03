@@ -1,8 +1,8 @@
 # Wave 9 Roadmap — Measurement Science
 
-**Статус:** 🔄 Active — Wave 8 CLOSED (2026-03-30), Wave 9 D-4/C-6b/D-5/C-7/A-1/A-4/D-6/A-5/C-8/ADR-VEC-002/D-7 Done; D-7b/A-6/C-9 next  
-**Версія:** 1.8.0  
-**Дата:** 2026-03-27 (оновлено: 2026-04-03 — ADR-VEC-002 Done; D-7 Done: 6D vector df1_n plumbing, buildFromSD fix, 137 tests pass, firmware SUCCESS)
+**Статус:** 🔄 Active — Wave 8 CLOSED (2026-03-30), Wave 9 D-4/C-6b/D-5/C-7/A-1/A-4/D-6/A-5/C-8/ADR-VEC-002/D-7/D-8 Done; A-6/C-9 next  
+**Версія:** 1.9.0  
+**Дата:** 2026-03-27 (оновлено: 2026-04-03 — D-8 Done: unified capture pipeline — `captureStep()` always compiled outside `#ifdef`; production uses multi-sample median 1500ms/step; `meas_df_n`/`meas_df1_n` always computed; `slope=` → `df_n=` display; StorageManager param rename)
 **Попередня хвиля:** Wave 8 — Connectivity + Infrastructure + Sensor Integration (C-7 MetalMatcher + Quick Screen = final milestone)  
 **Тригер:** C-5 Deep Analysis Audit (2026-03-27) — виявлено обмеження 2-dimensional effective vector, rp[2] saturation 80%, dL1_n ferro blindness  
 **Cross-ref:** `WAVE8_COMPLETION_WAVE9_DISCOVERY_PLAN.md`, `DISCOVERY_MODE_SPEC.md`, `C5_DEEP_ANALYSIS_AUDIT.md`, `2026-04-01.D4_SENSOR_CALIBRATION_PLAN.md`
@@ -61,8 +61,9 @@ C-5 аудит встановив три факти які визначають 
 | **D-6 df_n in real-time matcher** | D | ❌ | A-1, A-4 | ✅ **Done (2026-04-03)** | FingerprintCache/MetalMatcher/main.cpp: slope→df_n pipeline. Firmware reads gen-3 df_n field. Build: SUCCESS |
 | **A-5 dk_n spatial gradient analysis** | A | ❌ | A-1, C-7 data | ✅ **Done (2026-04-03)** | dk_n REJECTED: z=0.9 (Kennedy_B/USSR_A). df1_n=(fs1−f_empty)/f_empty дає z=7.5 тій самій парі. Див. ADR-VEC-002 |
 | **ADR-VEC-002 df1_n як 6-й вимір** | A | ❌ | A-5, C-8 | ✅ **Done (2026-04-03)** | Замінює dk_n: df1_n=(fs1−f_empty)/f_empty. z=7.5 Kennedy_B/USSR_A. FingerprintCache 6th field, matchFull() 6th param, gen-4 schema, matcher.json v3 |
-| **D-7 6D vector: add df1_n** | D | ❌ | ADR-VEC-002 | ✅ **Done (2026-04-03)** | **Revised** (dk_n→df1_n): CacheEntry.df1_n, query() 6th param, matchFull() 6th arg, sDiscoverySteps[1].fSensorHz. buildFromSD() fix. 137 tests ✅. RAM 63.4% Flash 58.2% |
-| **D-7b LHR в production path** | D | ❌ | D-7 | 📋 Planned | Single LHR read in production STEP_BASE handler. Fixes meas_df_n=0.0 gap in non-DISCOVERY build |
+| **D-7 6D vector: add df1_n** | D | ❌ | ADR-VEC-002 | ✅ **Done (2026-04-03)** | **Revised** (dk_n→df1_n): CacheEntry.df1_n, query() 6th param, matchFull() 6th arg, sSteps[1].fSensorHz. buildFromSD() fix. 137 tests ✅. RAM 63.4% Flash 58.2% |
+| **D-7b LHR в production path** | D | ❌ | D-7 | ✅ **Done (2026-04-03)** | Superseded by D-8: full unified capture pipeline (not single LHR read). See §D-8 |
+| **D-8 Unified capture pipeline** | D | ❌ | D-7b | ✅ **Done (2026-04-03)** | `captureStep()` always compiled (no `#ifdef`). `sCaptureMs=1500ms/step` production, `sSteps[4]` always BSS. `meas_df_n`/`meas_df1_n` always from `sSteps[0/1].fSensorHz`. `df_n=` display. `IStorageManager::queryFingerprint` `slope`→`df_n` param. `ldc1101.json`: `prod_capture_ms=1500`. 137 tests ✅. RAM 63.4% Flash 58.1% |
 | **C-8 HW Session (A/B side control)** | C | ✅ | — | ✅ **Done (2026-04-03)** | 50 записів, 5 монет×2 sides×5 вимірів. XAG800_BHS + XUSSR10R нові класи. dk_n REJECTED. XFE centroid bug (bimetal seed) знайдено. Guide: `C8_HW_SESSION.md` |
 | **A-6 index.json gen-4 + matcher.json v3** | A | ⚠️ | C-9, D-7 | 📋 Planned | 6D centroids з df1_n. A/B-aware entries для Kennedy/Kangaroo. XFE centroid re-seed (блоковано до C-9). Updated weights |
 | **C-9 XFE re-seed HW Session** | C | ✅ | ADR-VEC-002 | ⛔ **Blocked** — сталева монета | Справжня феромагнітна монета (стара копійка/East German Pfennig/євроцент). Kennedy_B false conf=64-97% через Germany 1.5 Euro bimetal centroid. Guide: `C9_HW_SESSION.md` |
@@ -281,21 +282,21 @@ C-5 аудит встановив три факти які визначають 
 
 **Результат:** Build SUCCESS. gen-3 DB deployed. σ=0.35, min_pair_dist=0.672 (Eagle↔Kennedy pair).
 
-**Known limitation (D-7b):** `meas_df_n` визначається тільки в `DISCOVERY_MODE` build. В production build `meas_df_n = 0.0f` → df_n weight=3.5 ефективно вимкнений. Вирішується в D-7b.
+**Known limitation (D-7b):** ✅ **Виправлено в D-8.** `captureStep()` тепер завжди компілюється; `meas_df_n` та `meas_df1_n` обчислюються з `sSteps[0/1].fSensorHz` в кожному build.
 
-**Display/log cosmetic:** `drawMeasResult()` та `doMeasCompute()` log line досі показують `slope=VectorCompute::slope()` — косметичний артефакт, не впливає на matching. Прибереться в D-7 або D-7b.
+**Display/log cosmetic:** ✅ **Виправлено в D-8.** `drawMeasResult()` показує `df_n=%.4f`, `doMeasCompute()` логує `df_n=%.4f`.
 
 ---
 
 ### D-7: 6D vector — add df1_n (frequency shift @ 1.6mm)
 
-**Статус: 📋 Planned — залежить від ADR-VEC-002**
+**Статус: ✅ Done (2026-04-03) — commit 9985bba**
 
 > **⚠️ REVISED:** D-7 оригінально планував `dk_n`. C-8 емпіричні дані (50 записів) показали: `dk_n` z=0.9 для Kennedy_B/USSR_A — неефективний. Замінюється на `df1_n` (ADR-VEC-002). Деталі — `docs/architecture/ADR-VEC-002.md`.
 
 **Що:** Додати `df1_n = (fSensor@1.6mm − f_empty) / f_empty` до embedding вектора:
 - `f_empty` = `fSensor_base − delta_f_base_hz` (порожній сенсор)
-- `df1_n` з `sDiscoverySteps[1].fSensorHz` (вже записується в C-7/C-8 NDJSON)
+- `df1_n` з `sSteps[1].fSensorHz` (вже записується в C-7/C-8 NDJSON)
 - `dk_n = df_n_1 / df_n_0` — **виключено** з вектора (z=0.9 неефективний)
 
 **Чому:** Kennedy_B/USSR_A: df1_n z=7.5 vs dk_n z=0.9. Дані вже є в C-7+C-8 NDJSON (запис steps[1]["fSensor_hz"]) — нових HW вимірювань не потрібно (>крім C-9 XFE re-seed).
@@ -306,7 +307,7 @@ C-5 аудит встановив три факти які визначають 
 |------|-------|
 | `lib/StorageManager/src/FingerprintCache.h` | `CacheEntry.df1_n` field; `query()` 6th param; NDJSON `"df1_n"` load |
 | `lib/StorageManager/src/MetalMatcher.h` | `matchFull()` 6th param `meas_df1_n`; `dd6 = df1_n − meas_df1_n` |
-| `src/main.cpp` | `doMeasCompute()`: compute `meas_df1_n` from `sDiscoverySteps[1].fSensorHz`; pass to `matchFull()` |
+| `src/main.cpp` | `doMeasCompute()`: compute `meas_df1_n` from `sSteps[1].fSensorHz`; pass to `matchFull()` |
 | `src/main.cpp` | `saveDiscoveryDump()`: add `pv["df1_n"]` (steps[1] LHR вже є в JSON, тільки projection vector) |
 | `data/sd_seed/CoinTrace/database/index.json` | gen-4: додати `"df1_n"` field per coin (з C-7/C-8 NDJSON) |
 | `data/sd_seed/CoinTrace/matcher.json` | version 3, `full_weights` — 6 компонентів (estimate: [1.5,0.0,1.0,3.5,2.5,2.0]) |
@@ -315,22 +316,34 @@ C-5 аудит встановив три факти які визначають 
 
 ### D-7b: LHR в production measurement path
 
-**Статус: 📋 Planned — залежить від D-7**
+**Статус: ✅ Superseded by D-8 (2026-04-03)**
 
-**Що:** Виправити production build gap: в non-`DISCOVERY_MODE` build `sDiscoverySteps` array не існує → `meas_df_n = 0.0f` завжди. Додати один LHR read в стандартний measurement cycle.
+Початковий план — одиночний LHR read у STEP_BASE (+40ms). Після аналізу розширено до повноцінного уніфікованого pipeline (D-8): той самий `captureStep()` (~1500ms/step, медіана з N≈88), що усуває не тільки `meas_df_n = 0.0` gap, але й систематичне зміщення між Discovery DB і Production вимірюваннями (single-read vs median). Деталі — §D-8.
 
-**Чому:** В поточній production build df_n weight=3.5 effectivately дорівнює нулю (всі монети scoreable рівно по цій осі). Це inverting matching logic для монет з різними df_n. Один LHR read займає ≈40ms — прийнятно.
+---
+
+### D-8: Unified capture pipeline
+
+**Статус: ✅ Done (2026-04-03)**
+
+**Проблема (root cause):** `sDiscoverySteps[4]` існував тільки під `#ifdef DISCOVERY_MODE` → в production build `sSteps[0/1].fSensorHz == 0.0f` завжди → `meas_df_n = meas_df1_n = 0.0f` → matcher ефективно 3D (df_n weight=3.5 та df1_n weight=2.0 мовчки вимкнені). Крім того, production single-read vs Discovery median (~N=88) — систематичне зміщення між DB centroids та production вимірами.
+
+**Рішення:** Перемістити `CaptureStats` struct, `captureStep()`, `sSteps[4]`, `sCaptureSettleMs`, `sCaptureMs` повністю поза `#ifdef`. DISCOVERY_MODE зберігає тільки `saveDiscoveryDump()` + session file state.
 
 **Зміни:**
 
 | Файл | Зміна |
 |------|-------|
-| `src/main.cpp` | В `MEAS_STATE_STEP1` handler: `plugin.doLHRRead();` → `meas_df_n = (plugin.getFSensor() − baseFS) / baseFS` |
-| `src/main.cpp` | `doMeasCompute()`: видалити `#ifdef DISCOVERY_MODE` guard; консолідувати в одне місце |
-| `src/main.cpp` | `drawMeasResult()`: замінити `slope=%.4f` → `df_n=%.4f` з `meas_df_n` value |
-| `src/main.cpp` | `doMeasCompute()` log: замінити `slope=%.4f` → `df_n=%.4f` |
+| `lib/LDC1101Plugin/src/LDC1101Plugin.h` | Знято `#ifdef DISCOVERY_MODE` з 5 capture API методів (`spiReadPublic`, `readMeasurementBurstPublic`, `readLHRBurstPublic`, `getClkinFreqHz`, `convTimeMs`) |
+| `src/main.cpp` | `CaptureStats` struct + `sSteps[4]` + `sCaptureSettleMs/sCaptureMs` — поза `#ifdef`. `discoveryCaptureStep()` → `captureStep()` (завжди компілюється). `drawCaptureProgress()` — заголовок `"MEASURING"` (не `"DISCOVERY CAPTURE"`). `sDiscoverySteps` → `sSteps` скрізь. STEP_BASE/1/3/DRIFT handlers — unified, без dual-path `#ifdef`. `doMeasCompute()`: `meas_df_n`/`meas_df1_n` завжди обчислюються з `sSteps[0/1].fSensorHz`. `drawMeasResult()`: `slope=` → `df_n=`. Log: `slope=` → `df_n=` |
+| `src/main.cpp` | `setup()`: `sCaptureSettleMs` + `sCaptureMs` завантажуються поза `#ifdef`. Discovery перевизначає `sCaptureMs = sDiscoveryCaptureMs` тільки при активному режимі |
+| `data/plugins/ldc1101.json` | Додано `"prod_capture_ms": 1500` |
+| `lib/StorageManager/src/StorageManager.h/.cpp` | `queryFingerprint()` param `slope` → `df_n` |
+| `include/IStorageManager.h` | `queryFingerprint()` virtual param `slope` → `df_n` |
 
-**Timing:** +40ms до STEP_BASE capture (LHR conversion ≈1×35ms). Непомітно для юзера.
+**Timing:** Production: 300ms settle + 1500ms capture × 4 steps ≈ **7.2s** загальний час. Discovery: 300ms + 2000ms × 4 ≈ 9.2s (без змін).
+
+**RAM:** `sSteps[4]` = 4 × 348B = 1,392B BSS — тепер **завжди** присутній (раніше тільки в DISCOVERY_MODE). Net production BSS increase: +1,392B (бюджет 118KB, 1.2%).
 
 ---
 
@@ -627,7 +640,7 @@ C-8  HW Session A/B control          ✅ Done  (50 records, 5 coins×2 sides, XF
 
 ADR-VEC-002  df1_n як 6D вимір        ✅ Done  (документ + FingerprintCache + matchFull() + schema)
 D-7   6D vector: add df1_n            ✅ Done  (CacheEntry, matchFull() 6th param, NDJSON, matcher v3, buildFromSD fix)
-D-7b  LHR в production path           ~0.5 дні  (STEP_BASE single LHR read, fixup display)
+D-7b/D-8  Unified capture pipeline    ✅ Done  (captureStep() always compiled, 1500ms/step production, meas_df_n/df1_n always-path)
 C-9   XFE re-seed HW Session          ⛔ BLOCKED (потрібна сталева монета)
 A-6   index.json gen-4 + matcher v3   ~0.5 дні  (6D centroids з df1_n; залежить від C-9)
 ```
@@ -649,7 +662,7 @@ A-6   index.json gen-4 + matcher v3   ~0.5 дні  (6D centroids з df1_n; за�
 
 | Компонент | Тип | Розмір | Постійний? | Умова |
 |-----------|-----|--------|------------|-------|
-| `sDiscoverySteps[4]` | BSS | 1,392 B | Так | `#ifdef DISCOVERY_MODE` |
+| `sSteps[4]` | BSS | 1,392 B | Так | Always (D-8 unified — production + discovery) |
 | `diag.lhrErrorLogged` | BSS | 1 B | Так | Always (LHR continuous) |
 | `DynamicJsonDocument(3072)` | Heap | 3,072 B | Ні (~50 ms) | Discovery dump write |
 | `CaptureStats` local | Stack | 348 B | Ні (~2.3 s) | During capture loop |
@@ -720,6 +733,7 @@ Discovery Mode — **практично безкоштовний** з точки
 
 ---
 
+*Версія 1.9.0 (2026-04-03) — D-8 Done: unified capture pipeline — `captureStep()` always compiled, production 1500ms/step, `meas_df_n`/`meas_df1_n` always-path, `df_n=` display, `IStorageManager` slope→df_n param rename, `ldc1101.json` prod_capture_ms; 137 tests ✅; RAM 63.4% Flash 58.1%.*  
 *Версія 1.8.0 (2026-04-03) — ADR-VEC-002 Done; D-7 Done: 6D vector df1_n plumbing (FingerprintCache h+cpp, MetalMatcher h+cpp, StorageManager, main.cpp, matcher.json v3, 2 test files); buildFromSD() df1_n parse fix; 137 native tests ✅; firmware RAM 63.4% Flash 58.2% SUCCESS.*  
 *Версія 1.7.0 (2026-04-03) — C-8 Done (50 records); A-5 Done (dk_n REJECTED z=0.9, df1_n z=7.5); D-7 revised (dk_n→df1_n); ADR-VEC-002 added to matrix; C-9 XFE re-seed BLOCKED; Фаза 2 timeline updated. Commit 913f3f7.*  
 *Версія 1.6.0 (2026-04-03) — A-5/D-7/D-7b/C-8/A-6 Planned tasks added; D-6/D-7/D-7b detail sections; C-8 HW session spec; A-5 dk_n analysis; A-6 gen-4 plan; Sprint 4 sequence; roadmap brought current after commit 483b93d.*  

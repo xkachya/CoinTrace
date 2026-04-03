@@ -19,5 +19,6 @@
   "stab_n_samples": 8,
   "discovery_enabled": true,
   "discovery_capture_ms": 2000,
-  "discovery_settle_ms": 300
+  "discovery_settle_ms": 300,
+  "prod_capture_ms": 1500
 }

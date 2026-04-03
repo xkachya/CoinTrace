@@ -2,10 +2,10 @@
 
 **ID:** ADR-VEC-002  
 **Дата:** 2026-04-03  
-**Статус:** 📋 Proposed — очікує реалізації (D-7 revised, D-7b)  
+**Статус:** ✅ Implemented — D-7 (commit 9985bba) + D-8 unified pipeline  
 **Тригер:** C-8 HW Session (2026-04-03) + незалежний аудит  
 **Передує:** ADR-VEC-001 (2026-04-02) — додав `df_n` до production_vector  
-**Cross-ref:** `WAVE9_ROADMAP.md §D-7 (revised)`, `docs/guides/C8_HW_SESSION.md`,
+**Cross-ref:** `WAVE9_ROADMAP.md §D-7`, `WAVE9_ROADMAP.md §D-8`, `docs/guides/C8_HW_SESSION.md`,
 `METAL_MATCHER_ARCHITECTURE.md §11`, `DISCOVERY_MODE_SPEC.md`
 
 ---
@@ -74,8 +74,8 @@ Kennedy_B: `df_n ≈ 0.782`, USSR_A: `df_n ≈ 0.779` — обидва `df_n_0` 
 - `df_n`  = `(fs0 − f_empty) / f_empty` — частотний зсув @ 0.6mm (вже в production)
 - `df1_n` = `(fs1 − f_empty) / f_empty` — частотний зсув @ 1.6mm (**НОВЕ**)
 - `f_empty` = `fSensor_base − delta_f_base_hz` (конфіг, незмінний)
-- `fs0` = `sDiscoverySteps[0].fSensorHz`
-- `fs1` = `sDiscoverySteps[1].fSensorHz`
+- `fs0` = `sSteps[0].fSensorHz`
+- `fs1` = `sSteps[1].fSensorHz`
 
 ### Порядок у firmware та matcher.json
 
@@ -113,11 +113,11 @@ Weight=2.0 (оцінка). Обґрунтування — z=7.5 для Kennedy_B
 |------|-------|
 | `lib/StorageManager/src/FingerprintCache.h` | `CacheEntry.df1_n` field; `query()` + 6th param `meas_df1_n`; NDJSON `"df1_n"` load |
 | `lib/StorageManager/src/MetalMatcher.h` | `matchFull()` + 6th param `meas_df1_n`; compute `dd6 = (centroid.df1_n − meas_df1_n) * weights[5]` |
-| `src/main.cpp` | `doMeasCompute()`: обчислити `meas_df1_n` з `sDiscoverySteps[1].fSensorHz - baseFS) / baseFS`; передати до `matchFull()` |
+| `src/main.cpp` | `doMeasCompute()`: обчислити `meas_df1_n` з `sSteps[1].fSensorHz - baseFS) / baseFS`; передати до `matchFull()` |
 | `src/main.cpp` | `saveDiscoveryDump()`: додати `pv["df1_n"]` до production_vector у NDJSON |
 | `data/sd_seed/CoinTrace/matcher.json` | `version: 3`; `full_weights` — 6 елементів; оновити `notes` |
 
-> **D-7b залежність:** `meas_df1_n` обчислюється з `sDiscoverySteps[1]` — доступно тільки в `DISCOVERY_MODE`. D-7b має додати LHR read в production STEP_BASE handler для `meas_df_n`, і окремий read в STEP_ADDON_1 для `meas_df1_n`. Деталі специфікуються в D-7b.
+> **✅ D-8 (2026-04-03):** `meas_df1_n` обчислюється з `sSteps[1].fSensorHz` в кожному build (production + discovery). Окремий LHR read в STEP_ADDON_1 не потрібен — unified `captureStep()` вже покриває всі 4 steps. Деталі — `WAVE9_ROADMAP.md §D-8`.
 
 ### 4.2 Offline pipeline changes
 

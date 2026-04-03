@@ -69,7 +69,7 @@ public:
     uint8_t queryFingerprint(float    dRp1_n,
                              float    k1,
                              float    k2,
-                             float    slope,
+                             float    df_n,
                              float    dL1_n,
                              FPMatch* out,
                              uint8_t  maxResults) override;
