@@ -606,6 +606,17 @@ static void saveDiscoveryDump(const MatchResult& mr) {
         return;
     }
 
+    // Heap guard: large JsonDocument allocation (steps×15 fields) requires ~3-4 KB
+    // contiguous block. After many measurements the heap fragments; if we attempt
+    // allocation when too little is free, operator new() panics (no-exceptions build).
+    const uint32_t freeHeap = ESP.getFreeHeap();
+    if (freeHeap < 20000) {
+        gLogger.warning("Discovery", "Heap low (%u B) — dump #%u skipped to prevent OOM",
+                        freeHeap, sDiscoveryMeasIndex);
+        ++sDiscoveryMeasIndex;
+        return;
+    }
+
     // ArduinoJson v7: dynamic allocation, no fixed capacity.
     JsonDocument doc;
     doc["index"]      = sDiscoveryMeasIndex;
@@ -701,6 +712,10 @@ static void saveDiscoveryDump(const MatchResult& mr) {
 #endif // DISCOVERY_MODE
 
 static void doMeasCompute() {
+    // ── 0. Heap diagnostic (helps diagnose OOM panics after many measurements) ──
+    gLogger.debug("Heap", "doMeasCompute: %u B free  max-block: %u B",
+                  (uint32_t)ESP.getFreeHeap(), (uint32_t)ESP.getMaxAllocHeap());
+
     // ── 1. Drift check (rp[3] vs rp[0]) ───────────────────────────────────
     const float drift = VectorCompute::driftRatio(sMeas.m);
     sMeas.driftWarn   = (drift > VectorCompute::DRIFT_THRESHOLD);
@@ -833,6 +848,26 @@ void setup() {
   if (gRtcBootReason[0] != '\0') {
     gLogger.info("System", "BOOT_REASON: %s", gRtcBootReason);
     gRtcBootReason[0] = '\0';  // consume once
+  }
+  // Log hardware reset reason so unexpected reboots (watchdog, brownout, panic)
+  // are visible in Serial and LittleFS log. esp_reset_reason() is valid immediately
+  // after power-on and survives all reset types including watchdog and brownout.
+  {
+    const char* hwReason = "unknown";
+    switch (esp_reset_reason()) {
+      case ESP_RST_POWERON:   hwReason = "power_on";       break;
+      case ESP_RST_EXT:       hwReason = "ext_pin";        break;
+      case ESP_RST_SW:        hwReason = "sw_restart";     break;
+      case ESP_RST_PANIC:     hwReason = "panic";          break;
+      case ESP_RST_INT_WDT:   hwReason = "int_watchdog";   break;
+      case ESP_RST_TASK_WDT:  hwReason = "task_watchdog";  break;
+      case ESP_RST_WDT:       hwReason = "other_watchdog"; break;
+      case ESP_RST_DEEPSLEEP: hwReason = "deep_sleep";     break;
+      case ESP_RST_BROWNOUT:  hwReason = "brownout";       break;
+      case ESP_RST_SDIO:      hwReason = "sdio";           break;
+      default:                hwReason = "unknown";        break;
+    }
+    gLogger.info("System", "HW_RESET: %s", hwReason);
   }
   gLogger.info("System", "CPU: %d MHz | Heap: %u B | PSRAM: %u MB",
                ESP.getCpuFreqMHz(), ESP.getFreeHeap(),
@@ -1025,11 +1060,11 @@ void setup() {
   gMatcher.init(gFPCache);
   if (gSDCard.isAvailable()) {
       if (gMatcher.loadConfig(&gSDCard, gCtx.spiMutex)) {
-          gLogger.info("Matcher", "Config loaded — sigma=%.2f weights=[%.1f,%.1f,%.1f,%.1f,%.1f]",
+          gLogger.info("Matcher", "Config loaded — sigma=%.2f weights=[%.1f,%.1f,%.1f,%.1f,%.1f,%.1f]",
                        gMatcher.config().sigma,
                        gMatcher.config().full_weights[0], gMatcher.config().full_weights[1],
                        gMatcher.config().full_weights[2], gMatcher.config().full_weights[3],
-                       gMatcher.config().full_weights[4]);
+                       gMatcher.config().full_weights[4], gMatcher.config().full_weights[5]);
       } else {
           gLogger.info("Matcher", "Using default config (sigma=%.2f)", gMatcher.config().sigma);
       }
@@ -1487,7 +1522,7 @@ void loop() {
   static bool sDiagLogged = false;
   if (!sDiagLogged && millis() > 10000) {
       sDiagLogged = true;
-      LOG_DEBUG(&gLogger, "Stack", "LFS task watermark: %u B free (of 3584 B stack)",
+      LOG_DEBUG(&gLogger, "Stack", "LFS task watermark: %u B free (of 4608 B stack)",
                 gLfsTransport.stackWatermarkBytes());
   }
 

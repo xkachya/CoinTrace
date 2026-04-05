@@ -171,10 +171,63 @@ bool WiFiManager::promptSTA(NVSManager& nvs) {
     M5Cardputer.Display.setTextColor(WHITE);
     M5Cardputer.Display.setTextSize(1);
     M5Cardputer.Display.setCursor(5, 78);
-    M5Cardputer.Display.print("WiFi provisioning   [ESC=cancel]");
+    M5Cardputer.Display.print("WiFi  [Enter=retry saved  Fn=new]");
 
     char ssid[33] = {};
     char pass[64] = {};
+    uint8_t savedMode = 0;
+
+    // If saved credentials exist, offer one-key retry before asking keyboard input.
+    // Enter → retry saved SSID/pass (no typing required).
+    // Fn    → fall through to manual SSID/pass entry.
+    const bool hasSaved = nvs.isReady() &&
+                          nvs.loadWifi(ssid, sizeof(ssid), pass, sizeof(pass), savedMode) &&
+                          ssid[0] != '\0';
+    if (hasSaved) {
+        M5Cardputer.Display.fillRect(0, 88, 240, 47, BLACK);
+        M5Cardputer.Display.setTextColor(YELLOW);
+        M5Cardputer.Display.setTextSize(1);
+        M5Cardputer.Display.setCursor(5, 93);
+        M5Cardputer.Display.printf("Saved: %.28s", ssid);  // truncate to fit display
+        M5Cardputer.Display.setCursor(5, 107);
+        M5Cardputer.Display.print("Enter=retry  Fn=new creds  Esc=cancel");
+
+        bool useNew = false;
+        bool cancelled = false;
+        while (true) {
+            M5Cardputer.update();
+            if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
+                const auto& ks = M5Cardputer.Keyboard.keysState();
+                if (ks.enter) { break; }           // retry saved
+                if (ks.fn)    { useNew = true; break; }  // enter new
+                // Treat any visible char as "enter new" too (user started typing SSID)
+                if (!ks.word.empty()) { useNew = true; break; }
+                // Fn key alone or Esc = cancel
+                if (ks.del)   { cancelled = true; break; }
+            }
+            delay(kKeyPollMs);
+        }
+        if (cancelled) {
+            M5Cardputer.Display.fillRect(0, 75, 240, 60, BLACK);
+            return false;
+        }
+        if (!useNew) {
+            // Retry saved credentials — skip keyboard prompts below.
+            M5Cardputer.Display.fillRect(0, 88, 240, 47, BLACK);
+            M5Cardputer.Display.setTextColor(CYAN);
+            M5Cardputer.Display.setCursor(5, 93);
+            M5Cardputer.Display.printf("Connecting to: %s", ssid);
+            goto connect;  // jump past keyboard prompts to the connection block
+        }
+        // useNew=true: clear saved fields and fall through to keyboard prompts
+        ssid[0] = '\0';
+        pass[0] = '\0';
+    }
+
+    M5Cardputer.Display.fillRect(0, 75, 240, 13, DARKGREEN);
+    M5Cardputer.Display.setTextColor(WHITE);
+    M5Cardputer.Display.setCursor(5, 78);
+    M5Cardputer.Display.print("WiFi provisioning   [Fn=cancel]");
 
     if (!readLine("SSID:", ssid, sizeof(ssid), /*masked=*/false)) {
         M5Cardputer.Display.fillRect(0, 75, 240, 60, BLACK);
@@ -191,6 +244,8 @@ bool WiFiManager::promptSTA(NVSManager& nvs) {
     M5Cardputer.Display.setTextSize(1);
     M5Cardputer.Display.setCursor(5, 93);
     M5Cardputer.Display.printf("Connecting to: %s", ssid);
+
+    connect:
 
     if (!startSTA(ssid, pass)) {
         // Connection failed — restore AP mode and inform user.
