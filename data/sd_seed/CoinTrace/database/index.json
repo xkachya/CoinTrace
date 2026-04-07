@@ -1,8 +1,8 @@
 {
-  "version": 5,
-  "generated_at": "2026-04-07T10:13:15Z",
-  "generation": 5,
-  "session_id": "c10_c11_unified",
+  "version": 6,
+  "generated_at": "2026-04-07T11:50:35Z",
+  "generation": 6,
+  "session_id": "c10_c11_gen6",
   "protocols": [
     "p3_MIKROE3240_b06_012mm"
   ],
@@ -356,15 +356,15 @@
       "coin_name": "Kennedy Half Dollar Ag400 (Side A)",
       "year": null,
       "centroid": {
-        "dRp1_n": -14.1267,
-        "k1": 1.2641,
-        "k2": 1.35028,
-        "dL1_n": -2.31858,
-        "df_n": 0.77434,
-        "df1_n": 0.48322
+        "dRp1_n": -14.173,
+        "k1": 1.26512,
+        "k2": 1.35106,
+        "dL1_n": -2.32516,
+        "df_n": 0.80322,
+        "df1_n": 0.50664
       },
-      "radius_95pct": 0.1881,
-      "records_count": 10
+      "radius_95pct": 0.0496,
+      "records_count": 5
     },
     {
       "id": "xkenned_c10_b/c10_hw_2026-04-04",
@@ -373,15 +373,15 @@
       "coin_name": "Kennedy Half Dollar Ag400 (Side B)",
       "year": null,
       "centroid": {
-        "dRp1_n": -15.6254,
-        "k1": 1.30357,
-        "k2": 1.39449,
-        "dL1_n": -2.45085,
-        "df_n": 0.7951,
-        "df1_n": 0.48143
+        "dRp1_n": -15.61575,
+        "k1": 1.30353,
+        "k2": 1.39405,
+        "dL1_n": -2.45038,
+        "df_n": 0.8001,
+        "df1_n": 0.48565
       },
-      "radius_95pct": 0.0993,
-      "records_count": 10
+      "radius_95pct": 0.0529,
+      "records_count": 4
     },
     {
       "id": "xnickel_c11_a/c10_hw_2026-04-04",
