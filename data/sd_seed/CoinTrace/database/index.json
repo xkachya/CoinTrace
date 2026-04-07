@@ -1,8 +1,8 @@
 {
-  "version": 4,
-  "generated_at": "2026-04-03T19:12:02Z",
-  "generation": 4,
-  "session_id": "cf1edfcd",
+  "version": 5,
+  "generated_at": "2026-04-07T10:13:15Z",
+  "generation": 5,
+  "session_id": "c10_c11_unified",
   "protocols": [
     "p3_MIKROE3240_b06_012mm"
   ],
@@ -110,173 +110,379 @@
       "records_count": 5
     },
     {
-      "id": "xkennedy_a/c8_hw_2026-04-03",
+      "id": "xag900_c10_a/c10_hw_2026-04-04",
       "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XKENNEDY",
-      "coin_name": "Kennedy Half Dollar 1967 (Side A)",
+      "metal_code": "XAG900",
+      "coin_name": "Olympic 1984 Ag900 (Side A)",
       "year": null,
       "centroid": {
-        "dRp1_n": -14.0804,
-        "k1": 1.26308,
-        "k2": 1.3495,
-        "dL1_n": -2.312,
-        "df_n": 0.74546,
-        "df1_n": 0.45981
+        "dRp1_n": -13.2232,
+        "k1": 1.23978,
+        "k2": 1.31544,
+        "dL1_n": -2.2739,
+        "df_n": 0.75881,
+        "df1_n": 0.47824
       },
-      "radius_95pct": 0.1377,
+      "radius_95pct": 0.0583,
+      "records_count": 10
+    },
+    {
+      "id": "xag900_c10_b/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XAG900",
+      "coin_name": "Olympic 1984 Ag900 (Side B)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -12.9209,
+        "k1": 1.23172,
+        "k2": 1.30456,
+        "dL1_n": -2.26325,
+        "df_n": 0.74812,
+        "df1_n": 0.47177
+      },
+      "radius_95pct": 0.1397,
+      "records_count": 10
+    },
+    {
+      "id": "xal_c10_a/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XAL",
+      "coin_name": "Germany 3 Marks 1922 Al (Side A)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -17.0498,
+        "k1": 1.34654,
+        "k2": 1.45416,
+        "dL1_n": -2.4731,
+        "df_n": 0.82822,
+        "df1_n": 0.50524
+      },
+      "radius_95pct": 0.1045,
       "records_count": 5
     },
     {
-      "id": "xkennedy_b/c8_hw_2026-04-03",
+      "id": "xal_c10_b/c10_hw_2026-04-04",
       "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XKENNEDY",
-      "coin_name": "Kennedy Half Dollar 1967 (Side B)",
+      "metal_code": "XAL",
+      "coin_name": "Germany 3 Marks 1922 Al (Side B)",
       "year": null,
       "centroid": {
-        "dRp1_n": -15.6484,
-        "k1": 1.30412,
-        "k2": 1.3957,
-        "dL1_n": -2.4506,
-        "df_n": 0.7823,
-        "df1_n": 0.47082
+        "dRp1_n": -17.1118,
+        "k1": 1.34894,
+        "k2": 1.45946,
+        "dL1_n": -2.4713,
+        "df_n": 0.83184,
+        "df1_n": 0.50788
       },
-      "radius_95pct": 0.0782,
+      "radius_95pct": 0.1097,
       "records_count": 5
     },
     {
-      "id": "xussr10r_a/c8_hw_2026-04-03",
+      "id": "xcu_c10_a/c10_hw_2026-04-04",
       "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XUSSR10R",
+      "metal_code": "XCU",
+      "coin_name": "Russian Empire 5 Kopecks Cu (Side A)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -20.1168,
+        "k1": 1.44542,
+        "k2": 1.57422,
+        "dL1_n": -2.6667,
+        "df_n": 0.89578,
+        "df1_n": 0.52896
+      },
+      "radius_95pct": 0.0689,
+      "records_count": 5
+    },
+    {
+      "id": "xcu_c10_b/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XCU",
+      "coin_name": "Russian Empire 5 Kopecks Cu (Side B)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -19.5242,
+        "k1": 1.42392,
+        "k2": 1.54886,
+        "dL1_n": -2.64786,
+        "df_n": 0.88614,
+        "df1_n": 0.52478
+      },
+      "radius_95pct": 0.0848,
+      "records_count": 5
+    },
+    {
+      "id": "xcuzn_c10_a/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XCUZN",
+      "coin_name": "Germany GDR 10 Marks 1990 (Side A)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -25.935,
+        "k1": 1.76768,
+        "k2": 2.00686,
+        "dL1_n": -2.296,
+        "df_n": 0.77542,
+        "df1_n": 0.48764
+      },
+      "radius_95pct": 0.1237,
+      "records_count": 5
+    },
+    {
+      "id": "xcuzn_c10_b/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XCUZN",
+      "coin_name": "Germany GDR 10 Marks 1990 (Side B)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -26.7646,
+        "k1": 1.8187,
+        "k2": 2.06912,
+        "dL1_n": -2.3404,
+        "df_n": 0.78552,
+        "df1_n": 0.49
+      },
+      "radius_95pct": 0.1021,
+      "records_count": 5
+    },
+    {
+      "id": "xfe_c10_a/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XFE",
+      "coin_name": "Germany 1.5 Euro CuNi (Side A)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -15.115,
+        "k1": 1.29282,
+        "k2": 1.38916,
+        "dL1_n": -2.3759,
+        "df_n": 0.80444,
+        "df1_n": 0.49936
+      },
+      "radius_95pct": 0.1272,
+      "records_count": 5
+    },
+    {
+      "id": "xfe_c10_b/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XFE",
+      "coin_name": "Germany 1.5 Euro CuNi (Side B)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -15.8772,
+        "k1": 1.31304,
+        "k2": 1.41236,
+        "dL1_n": -2.4593,
+        "df_n": 0.82596,
+        "df1_n": 0.50518
+      },
+      "radius_95pct": 0.0619,
+      "records_count": 5
+    },
+    {
+      "id": "xfecup_c11_a/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XFECUP",
+      "coin_name": "Germany 1 Pfennig Steel-Cu (Side A)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -12.5746,
+        "k1": 1.23264,
+        "k2": 1.31994,
+        "dL1_n": -1.58786,
+        "df_n": 0.4943,
+        "df1_n": 0.34154
+      },
+      "radius_95pct": 0.0685,
+      "records_count": 5
+    },
+    {
+      "id": "xfecup_c11_b/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XFECUP",
+      "coin_name": "Germany 1 Pfennig Steel-Cu (Side B)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -13.3972,
+        "k1": 1.25504,
+        "k2": 1.35162,
+        "dL1_n": -1.62746,
+        "df_n": 0.50584,
+        "df1_n": 0.34736
+      },
+      "radius_95pct": 0.4243,
+      "records_count": 5
+    },
+    {
+      "id": "xfenip_c11_a/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XFENIP",
+      "coin_name": "Slovakia 2 Koruny Steel-Ni (Side A)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -40.771,
+        "k1": 7.37544,
+        "k2": 9.4573,
+        "dL1_n": -2.1069,
+        "df_n": 0.66366,
+        "df1_n": 0.42408
+      },
+      "radius_95pct": 0.9785,
+      "records_count": 5,
+      "needs_reseed": true
+    },
+    {
+      "id": "xfenip_c11_b/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XFENIP",
+      "coin_name": "Slovakia 2 Koruny Steel-Ni (Side B)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -41.829,
+        "k1": 12.10424,
+        "k2": 15.75964,
+        "dL1_n": -1.83452,
+        "df_n": 0.61054,
+        "df1_n": 0.41244
+      },
+      "radius_95pct": 1.3483,
+      "records_count": 5,
+      "needs_reseed": true
+    },
+    {
+      "id": "xkenned_c10_a/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XKENNED",
+      "coin_name": "Kennedy Half Dollar Ag400 (Side A)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -14.1267,
+        "k1": 1.2641,
+        "k2": 1.35028,
+        "dL1_n": -2.31858,
+        "df_n": 0.77434,
+        "df1_n": 0.48322
+      },
+      "radius_95pct": 0.1881,
+      "records_count": 10
+    },
+    {
+      "id": "xkenned_c10_b/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XKENNED",
+      "coin_name": "Kennedy Half Dollar Ag400 (Side B)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -15.6254,
+        "k1": 1.30357,
+        "k2": 1.39449,
+        "dL1_n": -2.45085,
+        "df_n": 0.7951,
+        "df1_n": 0.48143
+      },
+      "radius_95pct": 0.0993,
+      "records_count": 10
+    },
+    {
+      "id": "xnickel_c11_a/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XNICKEL",
+      "coin_name": "South Africa 10 Cents Ni (Side A)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -28.4816,
+        "k1": 2.01924,
+        "k2": 2.34314,
+        "dL1_n": -2.0342,
+        "df_n": 0.6228,
+        "df1_n": 0.40082
+      },
+      "radius_95pct": 0.2247,
+      "records_count": 5
+    },
+    {
+      "id": "xnickel_c11_b/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XNICKEL",
+      "coin_name": "South Africa 10 Cents Ni (Side B)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -27.6926,
+        "k1": 1.93842,
+        "k2": 2.24248,
+        "dL1_n": -2.0589,
+        "df_n": 0.62992,
+        "df1_n": 0.40382
+      },
+      "radius_95pct": 0.1279,
+      "records_count": 5
+    },
+    {
+      "id": "xussr10_c10_a/c10_hw_2026-04-04",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XUSSR10",
       "coin_name": "USSR 10 Rubles Ag900 (Side A)",
       "year": null,
       "centroid": {
-        "dRp1_n": -15.7278,
-        "k1": 1.3056,
-        "k2": 1.39802,
-        "dL1_n": -2.455,
-        "df_n": 0.77904,
-        "df1_n": 0.46816
+        "dRp1_n": -15.6498,
+        "k1": 1.30342,
+        "k2": 1.39542,
+        "dL1_n": -2.44685,
+        "df_n": 0.83642,
+        "df1_n": 0.51653
       },
-      "radius_95pct": 0.0334,
-      "records_count": 5
+      "radius_95pct": 0.0972,
+      "records_count": 10
     },
     {
-      "id": "xussr10r_b/c8_hw_2026-04-03",
+      "id": "xussr10_c10_b/c10_hw_2026-04-04",
       "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XUSSR10R",
+      "metal_code": "XUSSR10",
       "coin_name": "USSR 10 Rubles Ag900 (Side B)",
       "year": null,
       "centroid": {
-        "dRp1_n": -17.558,
-        "k1": 1.3586,
-        "k2": 1.46258,
-        "dL1_n": -2.5851,
-        "df_n": 0.81798,
-        "df1_n": 0.48059
+        "dRp1_n": -17.444,
+        "k1": 1.35416,
+        "k2": 1.45608,
+        "dL1_n": -2.58468,
+        "df_n": 0.87735,
+        "df1_n": 0.52906
       },
-      "radius_95pct": 0.1482,
-      "records_count": 5
+      "radius_95pct": 0.0958,
+      "records_count": 10
     },
     {
-      "id": "xfe/c7_hw_2026-04-02",
-      "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XFE",
-      "coin_name": "Germany 1.5 Euro 1997 European Week Berlin",
-      "year": null,
-      "centroid": {
-        "dRp1_n": -15.5818,
-        "k1": 1.30578,
-        "k2": 1.40526,
-        "dL1_n": -2.4221,
-        "df_n": 0.8078,
-        "df1_n": 0.0
-      },
-      "radius_95pct": 1.985,
-      "records_count": 5
-    },
-    {
-      "id": "xal/c7_hw_2026-04-02",
-      "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XAL",
-      "coin_name": "Germany 50 Pfennig 1919-1922 Weimar Republic",
-      "year": null,
-      "centroid": {
-        "dRp1_n": -17.0326,
-        "k1": 1.34718,
-        "k2": 1.45558,
-        "dL1_n": -2.3197,
-        "df_n": 0.7369,
-        "df1_n": 0.0
-      },
-      "radius_95pct": 1.6015,
-      "records_count": 5
-    },
-    {
-      "id": "xcu/c7_hw_2026-04-02",
-      "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XCU",
-      "coin_name": "Russian Empire 5 Kopecks 1867-1917",
-      "year": null,
-      "centroid": {
-        "dRp1_n": -19.7046,
-        "k1": 1.43022,
-        "k2": 1.55412,
-        "dL1_n": -2.6502,
-        "df_n": 0.8805,
-        "df1_n": 0.0
-      },
-      "radius_95pct": 2.017,
-      "records_count": 5
-    },
-    {
-      "id": "xznnip/c7_hw_2026-04-02",
+      "id": "xznnip_c10_a/c10_hw_2026-04-04",
       "protocol_id": "p3_MIKROE3240_b06_012mm",
       "metal_code": "XZNNIP",
-      "coin_name": "Ukraine 10 UAH 2022 Territorial Defence Forces",
+      "coin_name": "Ukraine 10 UAH 2022 ZnNi (Side A)",
       "year": null,
       "centroid": {
-        "dRp1_n": -19.8208,
-        "k1": 1.44078,
-        "k2": 1.57634,
-        "dL1_n": -2.3553,
-        "df_n": 0.7476,
-        "df1_n": 0.0
+        "dRp1_n": -19.3494,
+        "k1": 1.42396,
+        "k2": 1.55394,
+        "dL1_n": -2.3132,
+        "df_n": 0.7387,
+        "df1_n": 0.45914
       },
-      "radius_95pct": 3.58,
+      "radius_95pct": 0.6609,
       "records_count": 5
     },
     {
-      "id": "xag900/c7_hw_2026-04-02",
+      "id": "xznnip_c10_b/c10_hw_2026-04-04",
       "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XAG900",
-      "coin_name": "Olympic 1984 Ag900",
+      "metal_code": "XZNNIP",
+      "coin_name": "Ukraine 10 UAH 2022 ZnNi (Side B)",
       "year": null,
       "centroid": {
-        "dRp1_n": -12.8278,
-        "k1": 1.23064,
-        "k2": 1.30598,
-        "dL1_n": -2.2345,
-        "df_n": 0.7394,
-        "df1_n": 0.0
+        "dRp1_n": -20.3522,
+        "k1": 1.4601,
+        "k2": 1.5995,
+        "dL1_n": -2.3959,
+        "df_n": 0.75288,
+        "df1_n": 0.4596
       },
-      "radius_95pct": 3.7416,
-      "records_count": 5
-    },
-    {
-      "id": "xcuzn/c7_hw_2026-04-02",
-      "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XCUZN",
-      "coin_name": "Germany GDR 10 Marks 1990",
-      "year": null,
-      "centroid": {
-        "dRp1_n": -26.518,
-        "k1": 1.80208,
-        "k2": 2.0513,
-        "dL1_n": -2.33,
-        "df_n": 0.7738,
-        "df1_n": 0.0
-      },
-      "radius_95pct": 0.8256,
+      "radius_95pct": 0.0704,
       "records_count": 5
     }
   ]
