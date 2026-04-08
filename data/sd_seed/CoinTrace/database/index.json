@@ -1,8 +1,8 @@
 {
-  "version": 6,
-  "generated_at": "2026-04-07T11:50:35Z",
-  "generation": 6,
-  "session_id": "c10_c11_gen6",
+  "version": 7,
+  "generated_at": "2026-04-08T00:47:31Z",
+  "generation": 7,
+  "session_id": "c10_c11_c12",
   "protocols": [
     "p3_MIKROE3240_b06_012mm"
   ],
@@ -252,15 +252,15 @@
       "coin_name": "Germany 1.5 Euro CuNi (Side A)",
       "year": null,
       "centroid": {
-        "dRp1_n": -15.115,
-        "k1": 1.29282,
-        "k2": 1.38916,
-        "dL1_n": -2.3759,
-        "df_n": 0.80444,
-        "df1_n": 0.49936
+        "dRp1_n": -15.0894,
+        "k1": 1.29261,
+        "k2": 1.38948,
+        "dL1_n": -2.3695,
+        "df_n": 0.79916,
+        "df1_n": 0.49584
       },
-      "radius_95pct": 0.1272,
-      "records_count": 5
+      "radius_95pct": 0.124,
+      "records_count": 10
     },
     {
       "id": "xfe_c10_b/c10_hw_2026-04-04",
@@ -269,15 +269,15 @@
       "coin_name": "Germany 1.5 Euro CuNi (Side B)",
       "year": null,
       "centroid": {
-        "dRp1_n": -15.8772,
-        "k1": 1.31304,
-        "k2": 1.41236,
-        "dL1_n": -2.4593,
-        "df_n": 0.82596,
-        "df1_n": 0.50518
+        "dRp1_n": -15.8378,
+        "k1": 1.31281,
+        "k2": 1.41265,
+        "dL1_n": -2.44605,
+        "df_n": 0.81974,
+        "df1_n": 0.50179
       },
-      "radius_95pct": 0.0619,
-      "records_count": 5
+      "radius_95pct": 0.2046,
+      "records_count": 10
     },
     {
       "id": "xfecup_c11_a/c10_hw_2026-04-04",
@@ -312,42 +312,6 @@
       },
       "radius_95pct": 0.4243,
       "records_count": 5
-    },
-    {
-      "id": "xfenip_c11_a/c10_hw_2026-04-04",
-      "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XFENIP",
-      "coin_name": "Slovakia 2 Koruny Steel-Ni (Side A)",
-      "year": null,
-      "centroid": {
-        "dRp1_n": -40.771,
-        "k1": 7.37544,
-        "k2": 9.4573,
-        "dL1_n": -2.1069,
-        "df_n": 0.66366,
-        "df1_n": 0.42408
-      },
-      "radius_95pct": 0.9785,
-      "records_count": 5,
-      "needs_reseed": true
-    },
-    {
-      "id": "xfenip_c11_b/c10_hw_2026-04-04",
-      "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XFENIP",
-      "coin_name": "Slovakia 2 Koruny Steel-Ni (Side B)",
-      "year": null,
-      "centroid": {
-        "dRp1_n": -41.829,
-        "k1": 12.10424,
-        "k2": 15.75964,
-        "dL1_n": -1.83452,
-        "df_n": 0.61054,
-        "df1_n": 0.41244
-      },
-      "radius_95pct": 1.3483,
-      "records_count": 5,
-      "needs_reseed": true
     },
     {
       "id": "xkenned_c10_a/c10_hw_2026-04-04",
@@ -418,40 +382,6 @@
       "records_count": 5
     },
     {
-      "id": "xussr10_c10_a/c10_hw_2026-04-04",
-      "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XUSSR10",
-      "coin_name": "USSR 10 Rubles Ag900 (Side A)",
-      "year": null,
-      "centroid": {
-        "dRp1_n": -15.6498,
-        "k1": 1.30342,
-        "k2": 1.39542,
-        "dL1_n": -2.44685,
-        "df_n": 0.83642,
-        "df1_n": 0.51653
-      },
-      "radius_95pct": 0.0972,
-      "records_count": 10
-    },
-    {
-      "id": "xussr10_c10_b/c10_hw_2026-04-04",
-      "protocol_id": "p3_MIKROE3240_b06_012mm",
-      "metal_code": "XUSSR10",
-      "coin_name": "USSR 10 Rubles Ag900 (Side B)",
-      "year": null,
-      "centroid": {
-        "dRp1_n": -17.444,
-        "k1": 1.35416,
-        "k2": 1.45608,
-        "dL1_n": -2.58468,
-        "df_n": 0.87735,
-        "df1_n": 0.52906
-      },
-      "radius_95pct": 0.0958,
-      "records_count": 10
-    },
-    {
       "id": "xznnip_c10_a/c10_hw_2026-04-04",
       "protocol_id": "p3_MIKROE3240_b06_012mm",
       "metal_code": "XZNNIP",
@@ -483,6 +413,74 @@
         "df1_n": 0.4596
       },
       "radius_95pct": 0.0704,
+      "records_count": 5
+    },
+    {
+      "id": "xfenip_c12_a/c12_hw_2026-04-07",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XFENIP",
+      "coin_name": "Slovakia 2 Koruny Steel-Ni (Side A)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -40.7742,
+        "k1": 7.37788,
+        "k2": 9.45078,
+        "dL1_n": -2.10666,
+        "df_n": 0.6747,
+        "df1_n": 0.4336
+      },
+      "radius_95pct": 0.1453,
+      "records_count": 5
+    },
+    {
+      "id": "xussr10_b/c12_hw_2026-04-07",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XUSSR10",
+      "coin_name": "USSR 10 Rubles Ag900 (Side B)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -17.4379,
+        "k1": 1.35473,
+        "k2": 1.45826,
+        "dL1_n": -2.57845,
+        "df_n": 0.86557,
+        "df1_n": 0.51977
+      },
+      "radius_95pct": 0.1422,
+      "records_count": 20
+    },
+    {
+      "id": "xussr10_m1_a/c12_hw_2026-04-07",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XUSSR10",
+      "coin_name": "USSR 10 Rubles Ag900 moneta-1 (Side A)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -15.6466,
+        "k1": 1.30327,
+        "k2": 1.39499,
+        "dL1_n": -2.448,
+        "df_n": 0.82717,
+        "df1_n": 0.50876
+      },
+      "radius_95pct": 0.1479,
+      "records_count": 15
+    },
+    {
+      "id": "xussr10_m2_a/c12_hw_2026-04-07",
+      "protocol_id": "p3_MIKROE3240_b06_012mm",
+      "metal_code": "XUSSR10",
+      "coin_name": "USSR 10 Rubles Ag900 moneta-2 (Side A)",
+      "year": null,
+      "centroid": {
+        "dRp1_n": -15.902,
+        "k1": 1.31008,
+        "k2": 1.40336,
+        "dL1_n": -2.48156,
+        "df_n": 0.81972,
+        "df1_n": 0.4974
+      },
+      "radius_95pct": 0.1139,
       "records_count": 5
     }
   ]
