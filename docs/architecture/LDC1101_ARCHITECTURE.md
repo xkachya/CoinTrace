@@ -550,23 +550,30 @@ struct PluginContext {
 ## 7. Конфігураційний файл
 
 ```json
-// data/plugins/ldc1101.json
+// data/plugins/ldc1101.json  (production state 2026-04-08, ADR-LDC-002)
 {
   "name": "LDC1101",
   "enabled": true,
   "spi_cs_pin": 5,
   "resp_time_bits": 7,
-  "rp_set": 38,
+  "min_freq_nibble": 4,
+  "rp_set": 54,
+  "tc1_val": 213,
+  "tc2_val": 254,
   "clkin_freq_hz": 16000000,
-  "coin_detect_threshold": 0.85,
-  "coin_release_threshold": 0.92,
+  "clkin_gpio": 4,
+  "coin_detect_threshold": 0.90,
+  "coin_release_threshold": 0.96,
   "detect_debounce_n": 5,
   "release_debounce_m": 3,
   "lhr_rcount": 65535,
-  "lhr_continuous": false,
-  "high_q_sensor": false,
-  "cal_max_age_sec": 120,
-  "cal_age_warning_sec": 1800
+  "lhr_continuous": true,
+  "stab_sigma_thresh_rp": 50.0,
+  "stab_n_samples": 8,
+  "discovery_enabled": true,
+  "discovery_capture_ms": 2000,
+  "discovery_settle_ms": 300,
+  "prod_capture_ms": 1500
 }
 ```
 
@@ -574,14 +581,24 @@ struct PluginContext {
 |---|---|---|---|
 | `spi_cs_pin` | int | 5 | GPIO для CS. Залежить від плати: M5Cardputer і CoreS3 мають різні піни. Обов'язковий. |
 | `resp_time_bits` | uint8 | 7 | RESP_TIME bits[2:0]. Значення 7 = 6144 cycles = мінімальний шум. Допустимо 2–7. |
-| `rp_set` | uint8 | 38 (`0x26`) | RP_SET регістр (0x01). MikroE SDK default для MIKROE-3240: RP_MAX=24 kΩ / RP_MIN=1.5 kΩ. Оптимізувати по процедурі §2 при R-01. Змінювати при `STATUS_NO_OSC`. (ADR-LDC-001) |
+| `rp_set` | uint8 | 54 (`0x36`) | RP_SET регістр (0x01). Hw-verified для MIKROE-3240 (RPMAX=12kΩ/RPMIN=1.5kΩ, ADR-LDC-002). SDK initial 38=0x26; змінювати при `STATUS_NO_OSC`. (ADR-LDC-001) |
+| `min_freq_nibble` | uint8 | 4 | MIN_FREQ nibble[3:0] для watchdog. 4 = поріг ~40 kHz нижче fSENSOR при 785 kHz. (ADR-MINFREQ-001) |
+| `tc1_val` | uint8 | 213 (`0xD5`) | Timing Capacitor channel 1 (TC1). Hw-calibrated (TC1=893 ns, ADR-LDC-002). |
+| `tc2_val` | uint8 | 254 (`0xFE`) | Timing Capacitor channel 2 (TC2). Hw-calibrated (TC2=7.74 µs, ADR-LDC-002). |
 | `clkin_freq_hz` | uint32 | 16000000 | Частота зовнішнього CLKIN. ⚠️ **ADR-CLKIN-002:** використовується для **будь-якого** L вимірювання — як 16-bit L_DATA (Eq.6 RP+L), так і 24-bit LHR_DATA (Eq.11). Без CLKIN L_DATA = 0 або garbage в обох режимах. Значення 16 MHz відповідає рекомендованому LEDC clock ESP32-S3. При RP-only use case (CLKIN не підключений) — RP_DATA коректний, `clkin_freq_hz` не використовується. |
-| `coin_detect_threshold` | float | 0.85 | DETECT factor: `rpRaw < baseline × factor` → COIN_PRESENT. Верифікувати при R5 hardware тесті. (ADR-COIN-001) |
-| `coin_release_threshold` | float | 0.92 | RELEASE factor: `rpRaw > baseline × factor` → COIN_REMOVED. Має бути > detect (hysteresis). (ADR-COIN-001) |
+| `clkin_gpio` | int | -1 | GPIO пін для LEDC CLKIN output. -1 = зовнішній CLKIN. Production: 4. (ADR-CLKIN-002) |
+| `coin_detect_threshold` | float | 0.90 | DETECT factor: `rpRaw < baseline × factor` → COIN_PRESENT. Hw-verified (2026-04-08, MIKROE-3240). (ADR-COIN-001) |
+| `coin_release_threshold` | float | 0.96 | RELEASE factor: `rpRaw > baseline × factor` → COIN_REMOVED. Має бути > detect (hysteresis). (ADR-COIN-001) |
 | `detect_debounce_n` | uint8 | 5 | Кількість consecutive samples нижче detect threshold для підтвердження COIN_PRESENT (~100 мс @ 50 Hz). |
 | `release_debounce_m` | uint8 | 3 | Кількість consecutive samples вище release threshold для підтвердження COIN_REMOVED (~60 мс @ 50 Hz). |
 | `lhr_rcount` | uint32 | 65535 | RCOUNT для LHR підсистеми. 65535 (0xFFFF) = макс. 24-bit точність, конверсія ~65.5 мс. (ADR-LHR-001, рішення I-1) |
-| `lhr_continuous` | bool | false | false: LHR тільки при `calibrate()` (on-demand). true: LHR читається в кожному `update()`. (ADR-LHR-001) |
+| `lhr_continuous` | bool | true | false: LHR тільки при `calibrate()` (on-demand). true: LHR читається в кожному `update()`. Production: `true` (Wave 9, D-9). (ADR-LHR-001) |
+| `stab_sigma_thresh_rp` | float | 50.0 | σ(RP) поріг для `isSignalStable()`. ~0.09% від basRp≈57344. Уточнити після EXP-2. (ADR-STAB-001) |
+| `stab_n_samples` | uint8 | 8 | Кількість consecutive stable samples для `StabilityTracker`. (ADR-STAB-001) |
+| `discovery_enabled` | bool | false | Увімкнути discovery capture mode (2s/step, зберігає NDJSON). Production: `true`. (D-1/D-9) |
+| `discovery_capture_ms` | uint32 | 2000 | Discovery mode: тривалість capture на step (мс). |
+| `discovery_settle_ms` | uint32 | 300 | Discovery mode: затримка settling після зміни стану (мс). |
+| `prod_capture_ms` | uint32 | 1500 | Production mode: тривалість capture на step (мс). 4 steps × 1500 ≈ 7.2 s. (D-8) |
 | `high_q_sensor` | bool | false | HIGH_Q_SENSOR bit7 в RP_SET. Встановити якщо Q котушки > 50. Потребує R-01 вимірювання. (ADR-HQ-001) |
 | `cal_max_age_sec` | uint32 | 120 | Рекомендований максимальний вік калібрування для одного сеансу вимірювань (с). Placeholder для Strat B v1.5. (ADR-TEMP-001) |
 | `cal_age_warning_sec` | uint32 | 1800 | Firmware логує WARNING якщо `calibrate()` не викликався довше цього часу (с). Темп. drift Strat A UX. (ADR-TEMP-001) |
@@ -739,10 +756,10 @@ public:
         if (ctx->config) {
             csPin         = ctx->config->getInt("ldc1101.spi_cs_pin", 5);
             respTimeBits  = ctx->config->getUInt8("ldc1101.resp_time_bits", 0x07);
-            rpSetValue    = ctx->config->getUInt8("ldc1101.rp_set", 0x26);  // ADR-LDC-001
+            rpSetValue    = ctx->config->getUInt8("ldc1101.rp_set", 0x36);  // ADR-LDC-002
             clkinFreqHz          = ctx->config->getUInt32("ldc1101.clkin_freq_hz", 16000000UL);
-            coinDetectThreshold  = ctx->config->getFloat("ldc1101.coin_detect_threshold",  0.85f);
-            coinReleaseThreshold = ctx->config->getFloat("ldc1101.coin_release_threshold", 0.92f);
+            coinDetectThreshold  = ctx->config->getFloat("ldc1101.coin_detect_threshold",  0.90f);
+            coinReleaseThreshold = ctx->config->getFloat("ldc1101.coin_release_threshold", 0.96f);
             detectDebounceN      = ctx->config->getUInt8("ldc1101.detect_debounce_n",      5);
             releaseDebounceM     = ctx->config->getUInt8("ldc1101.release_debounce_m",     3);
             lhrRcount          = ctx->config->getUInt32("ldc1101.lhr_rcount",          65535UL);

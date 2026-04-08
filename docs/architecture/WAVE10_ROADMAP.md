@@ -607,11 +607,12 @@ FingerprintCache::buildFromSD() завантажує тільки записи �
 | `tc1_val` | 213 | TBD (hw-verify S-E1) | PCB compensation |
 | `tc2_val` | 254 | TBD | PCB compensation |
 | `rp_set` | 54 | TBD | RP threshold |
-| `f_empty_hz` | ~785000 | ~TBD (L≈135µH) | Baseline frequency (LHR mode, hw-verified boot 2026-04-08; pre-ADR-LDC-002: 909.2 kHz) |
+| `f_empty_hz` | ~785000 | ~TBD (L≈135µH) | Baseline freq, empty coil, LHR mode (hw-verified 2026-04-08) |
 | `min_freq_nibble` | 4 | TBD | Watchdog |
 | `coin_detect_threshold` | 0.90 | TBD | Coin presence |
 
 > **f_empty_hz** — новий параметр, який варто додати в ldc1101.json замість хардкоду у `delta_f_base_hz` computation. Дозволяє df_n/df1_n бути коректними без перекомпіляції при зміні котушки.
+> History: pre-ADR-LDC-002 (TC1=0x1F) fSENSOR_empty ≈ 909.2 kHz; після ADR-LDC-002 (TC1=0xD5) = **785 kHz** (~13.5% shift).
 
 ### Порівняльний A/B тест (S-E1 methodology)
 
