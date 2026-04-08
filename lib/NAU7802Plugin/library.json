@@ -1,0 +1,21 @@
+{
+  "name": "NAU7802Plugin",
+  "version": "1.0.0",
+  "description": "NAU7802 24-bit Weight Sensor Plugin for CoinTrace (I2C, ISensorPlugin + IDiagnosticPlugin)",
+  "keywords": ["nau7802", "weight", "load-cell", "sensor", "coin", "mass", "i2c"],
+  "authors": [
+    {
+      "name": "CoinTrace Community",
+      "url": "https://github.com/xkachya/CoinTrace"
+    }
+  ],
+  "license": "GPL-3.0",
+  "homepage": "https://github.com/xkachya/CoinTrace",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xkachya/CoinTrace.git"
+  },
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"],
+  "headers": "NAU7802Plugin.h"
+}
