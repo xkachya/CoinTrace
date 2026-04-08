@@ -1,6 +1,6 @@
 {
   "version": 7,
-  "generated_at": "2026-04-08T00:47:31Z",
+  "generated_at": "2026-04-08T14:11:34Z",
   "generation": 7,
   "session_id": "c10_c11_c12",
   "protocols": [
@@ -388,15 +388,15 @@
       "coin_name": "Ukraine 10 UAH 2022 ZnNi (Side A)",
       "year": null,
       "centroid": {
-        "dRp1_n": -19.3494,
-        "k1": 1.42396,
-        "k2": 1.55394,
-        "dL1_n": -2.3132,
-        "df_n": 0.7387,
-        "df1_n": 0.45914
+        "dRp1_n": -19.74933,
+        "k1": 1.43667,
+        "k2": 1.56827,
+        "dL1_n": -2.35383,
+        "df_n": 0.74493,
+        "df1_n": 0.4594
       },
-      "radius_95pct": 0.6609,
-      "records_count": 5
+      "radius_95pct": 0.1351,
+      "records_count": 3
     },
     {
       "id": "xznnip_c10_b/c10_hw_2026-04-04",

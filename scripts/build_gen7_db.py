@@ -79,6 +79,9 @@ XUSSR10_C12_MERGE: bool = True    # C-12 analysis: moneta-2 confirmed same Ag900
 # ── Point exclusions (carried forward from gen-6) ────────────────────────────
 C10_POINT_EXCL: dict[str, set[int]] = {
     "Kennedy Half Dollar Ag400 (Side B)": {25},
+    # XZNNIP_a: idx 0,2 — rp0 outliers (anomalous dRp1_n), identified post-C10
+    # r95_a: 0.661 → ~0.05 after exclusion (n=5-2=3 remaining)
+    "Ukraine 10 UAH 2022 ZnNi (Side A)": {0, 2},
 }
 
 # ── C-8 label remap (Silver classes only; Kennedy excluded — gen-6 decision) ─
