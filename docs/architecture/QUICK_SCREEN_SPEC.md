@@ -260,50 +260,54 @@ QuickClass classifyQuick(float dRpPct, bool isFerro) {
 > ⚠️ Пороги **підлягають калібровці** після першого hw-тесту з реальними монетами (S-4).
 > До S-4 — синтетичні оцінки. Відсоток може суттєво відрізнятись від реального.
 
-### Phase 2: matchQuick() через MetalMatcher (після C-5)
+### Phase 2: matchQuick() через MetalMatcher — ✅ Розблоковано Wave 10 D-12e
 
-Після того як C-5 накопичить реальні hw-виміри, до кожного запису в `index.json` додається:
+> **Статус зміни (2026-04-08):** Phase 2 was деferred з Wave 9 через відсутність `mass_n` як 7-го виміру. Wave 10 D-12e **розблоковує** Phase 2 через STEP_QUICK у production measurement flow.
 
-```json
-"quick_centroid": {
-    "dRpBaseline_n": 0.195,
-    "dL_n": 0.004
-}
+**Нова архітектура Phase 2 (Wave 10):**
+
+Phase 2 реалізується не як "окремий режим" Quick Screen, а як **STEP_QUICK у Measurement Workflow**:
+
+```
+STEP_WEIGHT (ваги) → mass_g  →  STEP_QUICK (котушка без спейсерів)
+                                    ↓
+                          matchQuick(rp_live, rp_base, l_live, l_base, mass_n)
+                                    ↓
+                          confidence ≥ 0.75 → PROPOSE RESULT (Quick Screen display)
+                          confidence < 0.75 → автоматично переходить до Full cycle
 ```
 
-Де:
-- `dRpBaseline_n = (baseline − rp[0]) / baseline_ref` — нормалізовано по власному baseline
-- `dL_n = dL_raw / dL_norm_factor` — та сама нормалізація що й у fingerprint dL1_n
+**matchQuick() — оновлена сигнатура (5 параметрів):**
 
-`MetalMatcher::matchQuick(dRpBaseline_n, dL_n)` отримає ці централи і дасть % confidence.
+```cpp
+// Було (Wave 9, 4 params):
+MatchResult matchQuick(float rpLive, float rpBase, float lLive, float lBase);
 
-**Умова переходу Phase 1 → Phase 2:**
-- Мінімум 3 реальних записи з `quick_centroid` для кожного класу металу в DB
-- hw_test підтверджує, що quick_centroid query дає accuracy > threshold-based
+// Стане (Wave 10 D-12e, 5 params):
+MatchResult matchQuick(float rpLive, float rpBase, float lLive, float lBase,
+                       float mass_n);  // -1.0f = SENTINEL (6D fallback)
+```
 
-**Pipeline генерації `quick_centroid` (C-5 hw-сесія):**
+`quick_weights` в `matcher.json` v6 розширюються до 7 елементів `[2.0, 0.0, 0.0, 4.0, 2.5, 0.30, **5.0**]`. При `mass_n == SENTINEL` → w\[6\] = 0 (6D fallback, backward compatible).
 
-Для кожної монети в DB — 3 кроки:
+**Чому STEP_BASE (без спейсерів) достатній для Phase 2:**
 
-1. **Повне вимірювання** (стандартний C-2 цикл) → отримати `rp[0]` та поточний `getBaseline()`:
-   ```
-   dRpBaseline_n = (baseline - rp[0]) / baseline_ref
-   ```
-   де `baseline_ref` — глобальне значення без монети того ж сеансу (не per-coin!).
+Phase 1 (threshold-based) працює лише на `dRpPct` (один параметр). STEP_QUICK дає:
+- `dRp_base` (RP signal на d=0.6mm)
+- `fSensor_base` → `df_n`
+- `dL_base` → `dL1_n` proxy
+- `mass_n` (з STEP_WEIGHT)
 
-2. **L_DATA** (при CLKIN): `dL_n = dL_raw / dL_norm_factor`
-   де `dL_norm_factor` — визначити після S-5 (типовий max dL_raw для Fe монети).
+Цих 4 + mass_n достатньо для `matchQuick()` який вирішує:
+- ~100% монет з унікальною масою (XAL, XNICKEL, XUSSR10) → висока confidence
+- ~60-70% з неунікальною масою через dRp + df_n + mass_n
+- Тільки ~30-40% (Kennedy/CuZn/Ag800 overlap зона) потребують Full cycle
 
-3. **Запис у index.json** — вручну або через `tools/quick_centroid_gen.py` (новий скрипт):
-   ```python
-   # tools/quick_centroid_gen.py — зчитує measurements/*.json →
-   # для кожного measurement: обчислює dRpBaseline_n, dL_n →
-   # додає "quick_centroid" до відповідного запису в index.json
-   ```
+**Немає `quick_centroid` в index.json:**
 
-> **Примітка:** `baseline_ref` — baseline того ж сеансу вимірювань. Якщо монети вимірюються в різні дні, baseline може дрейфувати (~0.1–0.5% між сесіями). Phase 2 accuracy залежить від стабільності baseline між training та inference. Фіксувати `baseline` при кожному measurement session та зберігати в metadata.
+Phase 2 НЕ потребує окремих `quick_centroid` записів. `matchQuick()` використовує ті самі `centroid` записи з gen-8 DB, але тільки підмножину компонент (dRp1_n proxy, df_n, dL1_n proxy, mass_n) з власними `quick_weights`.
 
-**Нульова зміна для main.cpp при переході:** Phase 2 змінює лише MetalMatcher.matchQuick() internals та index.json — виклик з main.cpp залишається незмінним (`drawQuickScreen` отримує той самий `QuickClass` struct).
+**Нульова зміна display:** `drawQuickScreen()` отримує той самий `QuickClass` struct. Phase 2 змінює лише `MetalMatcher::matchQuick()` internals та `matcher.json` quick_weights.
 
 ---
 
