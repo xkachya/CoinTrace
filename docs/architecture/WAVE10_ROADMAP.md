@@ -24,8 +24,8 @@ Wave 9 довела, що 6D LDC1101-вектор вичерпаний для si
 
 **Рішення:** NAU7802 24-bit ADC + load cell як 7-й вимір `mass_n` з W_mass=5.0. Розрахунок:
 
-| Пара | Δmass_g | Δmass_n | W_mass × |Δmass_n| | Прогноз σ |
-|------|---------|---------|---------|---------|
+| Пара | Δmass_g | Δmass_n | W_mass × \|Δmass_n\| | Прогноз σ |
+|------|---------|---------|----------------------|-----------|
 | XKENNED ↔ XUSSR10 | 20.8g | 0.625 | **3.12σ** | > 2.0 ✅ |
 | XKENNED ↔ XCUZN | ~0.5g | 0.015 | **0.075σ** | WARN (mass alone insufficient) |
 | XKENNED ↔ XAG800 | ~0.5g | 0.015 | **0.075σ** | WARN (mass alone insufficient) |
