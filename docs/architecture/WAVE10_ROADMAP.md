@@ -302,10 +302,10 @@ IDLE
 **Що:** `scripts/a8_pairwise_7d.py` — pairwise distance matrix для всіх 13×13 класів у 7D просторі (matcher v6).
 
 **Acceptance criteria A-8:**
-- **EXIT CRITERION** Wave 10: всі пари > 2.0σ в 7D
-- Мінімальна пара (очікується XCUZN↔XAG800): > 1.5σ з 7D вектором
+- **EXIT CRITERION** Wave 10: всі пари з Δmass > 2g: > 2.0σ в 7D; пари з Δmass ≤ 2g (XCUZN↔XAG800, XKENNED↔XCUZN): > 1.5σ — LDC1101 несе навантаження
 - 5 пар що були < 1.0σ у Wave 9: всі > 2.0σ
-- WARN threshold: will flag будь-яку пару < 2.0σ для Wave 11 planning
+- WARN threshold: flag будь-яку пару < 2.0σ для Wave 11 planning
+- Якщо будь-яка пара < 1.0σ після 7D → Wave 11 з додатковим discriminator (обов'язково)
 
 ---
 

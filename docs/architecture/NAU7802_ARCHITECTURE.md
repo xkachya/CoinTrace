@@ -515,8 +515,9 @@ private:
     uint8_t            _sampleIdx   = 0;
     uint32_t           _acqStartMs  = 0;
     static constexpr uint8_t  N_SAMPLES    = 20;
-    static constexpr uint16_t SETTLE_MS    = 200;
+    static constexpr uint16_t SETTLE_MS    = 500;    // ADR-NAU-006: 500ms (not 200)
     static constexpr uint8_t  SPS_80       = 0x03;  // CTRL2 CRS bits
+    static constexpr uint16_t SPS_DEFAULT  = 80;    // Hz, used in tare()/calibrate() delays
     float              _sampleBuf[N_SAMPLES];        // 80 B, static
 
     // --- Cached result (thread-safe via mutex) ---
@@ -538,7 +539,10 @@ private:
     // --- Private methods ---
     bool     _writeReg(uint8_t reg, uint8_t val);
     uint8_t  _readReg(uint8_t reg);
-    bool     _readAdc24(int32_t& out);  // читає 3 байти ADCO
+    bool     _readAdc24(int32_t& out);  // 3 bytes ADCO, signed 24-bit two's complement
+                                        // MUST sign-extend bit23→bit31:
+                                        //   if (raw & 0x800000) raw |= 0xFF000000;
+                                        // Without this, negative offsets become ~16M counts
     bool     _isReady();                // читає RDY bit
     bool     _startupSequence();        // OTP reload + config
     float    _computeMedian(float* buf, uint8_t n);
@@ -645,7 +649,7 @@ Timeout: pdMS_TO_TICKS(5) -- узгоджено з PLUGIN_CONTRACT §2.2 (ADR-ST
   "nau7802.sample_rate":    80,
   "nau7802.pga_gain":       128,
   "nau7802.n_samples":      20,
-  "nau7802.settle_ms":      200,
+  "nau7802.settle_ms":      500,
   "nau7802.mass_ref_g":     33.3,
   "nau7802.ldo_voltage":    3,
   "nau7802.enable_ldo":     true,
@@ -660,46 +664,54 @@ Timeout: pdMS_TO_TICKS(5) -- узгоджено з PLUGIN_CONTRACT §2.2 (ADR-ST
 
 ### 6.1 Де запускати acquisition
 
-Відповідно до `MEASUREMENT_WORKFLOW.md §2`, вимір проходить через стани:
-`IDLE → STEP_BASE → STEP_1 → STEP_3 → STEP_DRIFT → COMPUTE → IDLE`
-
-NAU7802 вимірює масу **один раз** — на STEP_BASE (монета при 0.6мм, мінімальна відстань, найстабільніша позиція).
+> **⚠️ ADR-NAU-008 — Sequential workflow.** Стара ідея «паралельна NAU7802 acquisition всередині STEP_BASE» фізично неможлива: монета не може одночасно бути на вагах і на котушці. Правильна архітектура — послідовні кроки (детально §4.4). Реалізується в **D-12e**.
 
 ```
-Нова схема станів (p4 protocol):
+Sequential workflow (p4 protocol):
 
 IDLE
   |
   | coin detected + ENTER
-  v
-STEP_BASE:
-  ├── LDC1101 settle (500ms) -- unchanged
-  ├── NAU7802 startAcquisition()  ──┐ запускаємо одночасно з LDC1101 settle
-  │                                  │
-  │   [update() loop running]       │
-  │   NAU7802 state machine:        │
-  │     SETTLING -> SAMPLING        │
-  │     -> COMPLETE (250ms total) ──┘ завершується всередині LDC1101 window
-  │
-  ├── LDC1101 capture (2000ms) -- unchanged
-  ├── [NAU7802 isAcquisitionComplete() == true на цьому етапі]
-  ├── mass_g = gNAU->getLastMassG()  ← зчитуємо результат
-  └── ENTER
+  [NAU7802 present && calibrated?]
+  |
+  ├─ YES:
+  |   v
+  | STEP_WEIGHT:                                          ← NEW (D-12e)
+  |   ├── UI: "Покласти монету на ваги → ENTER"
+  |   ├── gNAU->startAcquisition()
+  |   │     settle(500ms) → 20 samples → COMPLETE
+  |   ├── [user places coin on scale, presses ENTER]
+  |   └── sMassG = gNAU->getLastMassG()
+  |   |
+  |   v
+  | STEP_QUICK  (= STEP_BASE capture, без спейсерів):   ← RENAMED (D-12e)
+  |   ├── UI: "Перекласти монету на котушку → ENTER"
+  |   ├── LDC1101 settle + capture  -- unchanged
+  |   ├── matchQuick(rpLive, rpBase, lLive, lBase, mass_n)  ← 7D
+  |   ├── confidence ≥ 0.75  →  PROPOSE RESULT
+  |   │     [C]onfirm / [F]ull measure / [N]ext coin
+  |   └── confidence < 0.75  →  auto → STEP_1
+  |
+  └─ NO (6D fallback):
+      → skip STEP_WEIGHT, sMassG = -1.0f, mass_n = -1.0f
+      → STEP_QUICK directly (Wave 9 behavior, §6.3)
   |
   v
-STEP_1 (1.6mm):  -- LDC1101 тільки, NAU7802 не активна
+STEP_1 (1.6mm):  -- LDC1101 тільки
   ...
 STEP_3 (2.6mm):  -- LDC1101 тільки
   ...
 STEP_DRIFT:      -- LDC1101 тільки
   ...
 COMPUTE:
-  ├── обчислюємо production_vector (6D LDC1101 компоненти) -- unchanged
-  ├── mass_n = mass_g / MASS_REF_G                          ← НОВЕ
-  ├── додаємо mass_n до production_vector (7D)              ← НОВЕ
-  ├── зберігаємо NDJSON (оновлений формат)                  ← НОВЕ
+  ├── production_vector (6D LDC1101) -- unchanged
+  ├── mass_n = sMassG / NAU7802Plugin::MASS_REF_G          ← НОВЕ (D-12d)
+  ├── matchFull(m, df_n, df1_n, mass_n)                    ← 7D   (D-12d)
+  ├── NDJSON v8 з mass_n field                             ← НОВЕ (D-12d)
   └── → IDLE
 ```
+
+**Ключова деталь:** STEP_QUICK і STEP_BASE — **один і той самий LDC1101 capture** (no spacers, base distance). Якщо user обирає [F]ull після Quick Screen — STEP_QUICK дані вже є, додаються тільки STEP_1 + STEP_3. Дублювання capture немає.
 
 ### 6.2 Інтеграція в main.cpp
 
@@ -708,6 +720,7 @@ COMPUTE:
 // extern LDC1101Plugin* gLDC;
 // Нове:
 NAU7802Plugin* gNAU = nullptr;  // глобальний pointer, аналогічно gLDC
+static float   sMassG = -1.0f;  // поточна маса; -1.0f = sentinel (не виміряно)
 
 // --- setup() ---
 gNAU = new NAU7802Plugin();
@@ -720,37 +733,59 @@ if (gNAU->initialize(pluginCtx)) {
 } else {
     gLog.error("main", "NAU7802 init failed: %s", gNAU->getLastError().message);
     delete gNAU;
-    gNAU = nullptr;  // система продовжує без ваги (degraded mode)
+    gNAU = nullptr;  // 6D fallback mode -- система продовжує без ваги
 }
 
 // --- main loop update() ---
 if (gNAU) gNAU->update();  // завжди викликаємо -- non-blocking
 
-// --- STEP_BASE entry (measurement workflow) ---
-case MeasState::STEP_BASE:
-    gLDC->settle(...);
+// --- Measurement workflow state machine (D-12e) ---
+
+// Entry point: якщо NAU7802 calibrated → STEP_WEIGHT; інакше → STEP_QUICK (6D fallback)
+case MeasState::IDLE:
+    sMassG = -1.0f;  // скидаємо масу при кожному новому вимірі
     if (gNAU && gNAU->isCalibrated()) {
-        gNAU->startAcquisition();  // запускаємо паралельно зі settle
-    }
-    // ... LDC1101 capture як раніше
-    
-    // Зчитуємо масу після LDC1101 capture
-    if (gNAU && gNAU->isAcquisitionComplete()) {
-        sMassG = gNAU->getLastMassG();
+        nextState = MeasState::STEP_WEIGHT;
     } else {
-        sMassG = -1.0f;  // N/A (NAU не готовий або не калібрований)
+        nextState = MeasState::STEP_QUICK;  // 6D fallback
+    }
+    break;
+
+// --- STEP_WEIGHT: NAU7802 blocking acquisition ---
+case MeasState::STEP_WEIGHT:
+    // UI: "Покласти монету на ваги → ENTER"
+    gNAU->startAcquisition();        // запускаємо acquisition; update() збирає семпли
+    // polling loop або event очікує ENTER:
+    //   if (gNAU->isAcquisitionComplete())  sMassG = gNAU->getLastMassG();
+    //   else  sMassG = -1.0f;               // timeout
+    nextState = MeasState::STEP_QUICK;
+    break;
+
+// --- STEP_QUICK (= STEP_BASE capture, без спейсерів): LDC1101 + matchQuick 7D ---
+case MeasState::STEP_QUICK:
+    // UI: "Перекласти монету на котушку → ENTER"
+    gLDC->settle(...);               // LDC1101 settle unchanged
+    // ... LDC1101 capture (rp_base, fSensor_base) ...
+    {
+        float mass_n = (sMassG > 0.0f) ? (sMassG / NAU7802Plugin::MASS_REF_G) : -1.0f;
+        auto qr = gMatcher.matchQuick(rpLive, rpBase, lLive, lBase, mass_n);
+        if (qr.confidence >= QUICK_CONF_THRESHOLD) {
+            // Quick Screen: propose result; [C]onfirm / [F]ull / [N]ext
+        } else {
+            nextState = MeasState::STEP_1;   // auto-proceed to full measurement
+        }
     }
     break;
 
 // --- COMPUTE state ---
 case MeasState::COMPUTE:
-    // ... існуючий обчислення production_vector ...
-    
-    // НОВЕ: додати mass_n
+    // ... існуючий обчислення production_vector (6D components) ...
+
+    // НОВЕ (D-12d): додати mass_n до 7D vector
     float mass_n = (sMassG > 0.0f) ? (sMassG / NAU7802Plugin::MASS_REF_G) : -1.0f;
-    pv.mass_n = mass_n;  // -1.0f = N/A якщо вага недоступна
-    
-    // ... збереження NDJSON ...
+    auto result = gMatcher.matchFull(sMeas.m, meas_df_n, meas_df1_n, mass_n);
+
+    // ... збереження NDJSON v8 з mass_n ...
     break;
 ```
 
@@ -796,7 +831,7 @@ bool NAU7802Plugin::tare(uint16_t samples) {
         int32_t raw;
         if (!_readAdc24(raw)) return false;
         sum += raw;
-        delay(1000 / _sps + 1);  // чекаємо наступний sample
+        delay(1000 / SPS_DEFAULT + 1);  // 13ms @ 80SPS
     }
     _zeroOffset = static_cast<int32_t>(sum / samples);
     // scale_factor поки не змінюємо
@@ -814,7 +849,7 @@ bool NAU7802Plugin::calibrate(float known_mass_g, uint16_t samples) {
         int32_t raw;
         if (!_readAdc24(raw)) return false;
         sum += raw;
-        delay(1000 / _sps + 1);
+        delay(1000 / SPS_DEFAULT + 1);  // 13ms @ 80SPS
     }
     int32_t raw_avg = static_cast<int32_t>(sum / samples);
     int32_t delta = raw_avg - _zeroOffset;
@@ -957,7 +992,7 @@ bool NAU7802Plugin::calibrate(float known_mass_g, uint16_t samples) {
   "version": 6,
   "generated_at": "2026-04-XX",
   "full_weights": [1.5, 0.0, 1.0, 3.0, 2.5, 0.4, 5.0],
-  "quick_weights": [2.0, 0.0, 0.0, 4.0, 2.5, 0.3, 3.0],
+  "quick_weights": [2.0, 0.0, 0.0, 4.0, 2.5, 0.3, 5.0],
   "sigma": 0.35,
   "keys": ["dRp1_n", "k1", "k2", "df_n", "dL1_n", "df1_n", "mass_n"],
   "notes": {
@@ -966,6 +1001,122 @@ bool NAU7802Plugin::calibrate(float known_mass_g, uint16_t samples) {
   }
 }
 ```
+
+---
+
+### 8.4 C++ Interface Specification — D-12d (7D changes)
+
+Explicit interface spec for the multi-file coordinated change in D-12d. All 4 constructs change together; implementor must update them consistently.
+
+#### FingerprintCache::CacheEntry — новий `mass_n` field
+
+```cpp
+// lib/StorageManager/src/FingerprintCache.h
+struct CacheEntry {
+    char     id[32];
+    char     metal_code[8];
+    char     coin_name[48];
+    char     protocol_id[24];
+    float    dRp1_n;
+    float    k1;
+    float    k2;
+    float    df_n;
+    float    dL1_n;
+    float    df1_n;
+    float    mass_n;       // ← NEW (D-12d): centroid mass_n.
+                           //   SENTINEL = -1.0f (gen-7 compat: parsed as missing → -1.0f)
+    float    radius_95pct;
+    uint16_t records_count;
+};
+// RAM delta: +4 bytes/entry. MAX_ENTRIES=64 → max +256 B. [OK, budget §4.1]
+
+// Backward compat (gen-7 DB, no mass_n field):
+//   if (!json["mass_n"].isNull()) entry.mass_n = json["mass_n"]; else entry.mass_n = -1.0f;
+```
+
+#### MetalMatcher::Config — [6] → [7]
+
+```cpp
+// lib/StorageManager/src/MetalMatcher.h
+struct Config {
+    float full_weights[7]    = {1.5f, 0.0f, 1.0f, 3.0f, 2.5f, 0.40f, 5.0f};  // was [6]
+    float quick_weights[7]   = {2.0f, 0.0f, 0.0f, 4.0f, 2.5f, 0.30f, 5.0f};  // was [6]
+    float sigma              = 0.35f;
+    float min_confidence     = 0.3f;
+    float ferro_thresh_dL1_n = 99.0f;
+};
+// Element [6] = mass_n weight (W_mass).
+// Backward compat (matcher.json v5, 6 elements): w[6] = 0.0f (6D mode).
+```
+
+#### MatchResult — dist_components[7]
+
+```cpp
+// lib/StorageManager/src/MetalMatcher.h
+struct MatchResult {
+    // ... existing fields (coin_name, confidence, metal_code, alternatives) ...
+    float dist_components[7];   // was [6]; positional: [0]=dRp1_n [1]=k1 [2]=k2
+                                //   [3]=df_n [4]=dL1_n [5]=df1_n [6]=mass_n
+};
+// If mass_n == SENTINEL (-1.0f) or w[6] == 0.0f: dist_components[6] = 0.0f
+```
+
+#### MetalMatcher public API — нові сигнатури
+
+```cpp
+// lib/StorageManager/src/MetalMatcher.h
+
+// 7D full match. mass_n = -1.0f → sentinel → w[6] forced 0.0f (6D mode)
+MatchResult matchFull(const Measurement& m,
+                      float df_n   = 0.0f,
+                      float df1_n  = 0.0f,
+                      float mass_n = -1.0f) const;   // ← ADDED param (was 3 params)
+
+// 7D quick match. Same sentinel rule.
+MatchResult matchQuick(float rpLive,  float rpBase,
+                       float lLive,   float lBase,
+                       float mass_n = -1.0f) const;  // ← ADDED param (was 4 params)
+```
+
+#### MetalMatcher::doMatch — private, нова сигнатура
+
+```cpp
+// lib/StorageManager/src/MetalMatcher.h (private)
+MatchResult doMatch(float dRp1_n, float k1,    float k2,
+                    float df_n,   float dL1_n,  float df1_n,
+                    float mass_n,               // ← ADDED (7th dimension)
+                    const float* weights, uint8_t algo) const;
+
+// Sentinel rule inside doMatch:
+//   if (mass_n < 0.0f) { effective_w6 = 0.0f; dist_components[6] = 0.0f; }
+//   else               { effective_w6 = weights[6]; compute contribution normally; }
+```
+
+#### MeasState enum — STEP_WEIGHT + STEP_QUICK (D-12e)
+
+```cpp
+// src/main.cpp
+enum class MeasState : uint8_t {
+    IDLE,
+    STEP_WEIGHT,   // ← NEW (D-12e): NAU7802 acquisition (skip if !calibrated)
+    STEP_QUICK,    // ← RENAMED from STEP_BASE (D-12e): same LDC1101 capture + matchQuick 7D
+    STEP_1,
+    STEP_3,
+    STEP_DRIFT,
+    COMPUTE
+};
+// Migration note: all existing references to MeasState::STEP_BASE → MeasState::STEP_QUICK
+// grep target: "case MeasState::STEP_BASE" (1 location in main.cpp)
+```
+
+#### Protocol ID (D-12d/D-12e)
+
+```
+p3_MIKROE3240_b06_012mm       ← Wave 9 production (currently hardcoded in main.cpp ×3)
+p4_MIKROE3240_b06_012mm_mass  ← Wave 10 (STEP_WEIGHT + 7D vector)
+```
+
+Migration: replace the 3 hardcoded strings in `src/main.cpp` (see §9.5 B-05 for locations).
 
 ---
 
@@ -1006,7 +1157,7 @@ bool NAU7802Plugin::calibrate(float known_mass_g, uint16_t samples) {
 
 ### 9.4 B-04: WiFi noise на analog chain
 
-**Ризик:** ESP32 WiFi (2.4GHz) генерує pulse noise на 3.3V rail ~50mV pk-pk, що може індуктуватись в аналоговий ланцюг load cell.
+**Ризик:** ESP32 WiFi (2.4GHz) генерує pulse noise на 3.3V rail ~50mV pk-pk, що може індуктуватись в аналоговий ланцюг load cell. Додаткове обмеження: DVDD=3.3V → VLDO=3.0V, margin = 0.3V = мінімальний за datasheet. При WiFi TX burst DVDD може просідати до ~3.15V → margin 0.15V → LDO regulation degraded (see AI-5 audit 2026-04-08).
 
 **Вирішення:**
 1. NAU7802 AVDDS=1 (internal LDO) ізолює load cell excitation від power rail
@@ -1028,6 +1179,9 @@ bool NAU7802Plugin::calibrate(float known_mass_g, uint16_t samples) {
 | `CTRL2_VAL` | `0x30` | `0x60` | SPS невизначений (CRS bits у reserved zone) |
 | CRS mask у `tare()` | `~0x70` | `~0xE0` | Неповне очищення CRS bits при 10SPS switch |
 | CTRL1/CTRL2 order | перед OTP | після OTP | OTP скидає GAINS/LDO → PGA=1x, LDO wrong |
+
+> **⚠️ Комбінований ефект Bug #1 + Bug #4 — катастрофічний:**  
+> Bug #1 (`CTRL1=0x27`) встановлює PGA=2x замість 128x. Bug #4 (CTRL перед OTP) — OTP reload відбудеться після і скине PGA до 1x (OTP default). Результат: sensitivity = 1x замість 128x = **−42 dB**. Noise floor ~6.4g RMS (замість 5 mg). Калібрація технічно "виконається" (scale_factor буде 128× більшим), але noise >> signal — вимір **повністю даремний**. Ці два bugs мають виправлятись разом і перевірятись разом у D-12a HW test (sigma < 20 counts при порожній платформі = smoke test).
 
 **Вирішення:** Виправити всі 4 перед commit D-12a. Деталі: §2.4 «Derived register constants».
 
