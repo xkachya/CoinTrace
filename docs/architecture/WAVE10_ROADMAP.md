@@ -607,7 +607,7 @@ FingerprintCache::buildFromSD() завантажує тільки записи �
 | `tc1_val` | 213 | TBD (hw-verify S-E1) | PCB compensation |
 | `tc2_val` | 254 | TBD | PCB compensation |
 | `rp_set` | 54 | TBD | RP threshold |
-| `f_empty_hz` | ~909200 | ~TBD (L≈135µH) | Baseline frequency |
+| `f_empty_hz` | ~785000 | ~TBD (L≈135µH) | Baseline frequency (LHR mode, hw-verified boot 2026-04-08; pre-ADR-LDC-002: 909.2 kHz) |
 | `min_freq_nibble` | 4 | TBD | Watchdog |
 | `coin_detect_threshold` | 0.90 | TBD | Coin presence |
 

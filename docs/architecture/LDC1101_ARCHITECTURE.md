@@ -174,7 +174,9 @@ RP вимірюється через кількість енергії для п
 
 **Формула:** `ConversionTime = RESP_TIME_cycles / (3 × fSENSOR)`
 
-Для MIKROE-3240 fSENSOR = **909.2 kHz** (hw-верифіковано S-4, 2026-03-23), L_DATA=36042, C=330pF, L≈92.8μH. При `RESP_TIME = 0x07` (6144 cycles) і fSENSOR=909 kHz: 6144/(3×909 000) ≈ 2.25 мс — значно в межах бюджету 20 мс `update()`. Використовувати `0x07` як стандартне значення.
+Для MIKROE-3240 з поточним config (TC1=0xD5, TC2=0xFE, RP_SET=0x36): fSENSOR_empty = **785 kHz** (LHR: raw=823 258, hw-verified boot log 2026-04-08). Calibration mode: 792.3 kHz (20-sample avg). L_DATA=41358, C=330pF, L≈125μH. При `RESP_TIME = 0x07` (6144 cycles) і fSENSOR=785 kHz: 6144/(3×785 000) ≈ 2.61 мс — значно в межах бюджету 20 мс `update()`.
+
+> **Примітка:** pre-ADR-LDC-002 (S-4, 2026-03-23, TC1=0x1F/TC2=0x3F): fSENSOR = 909.2 kHz, L_DATA=36042, L≈92.8μH. TC1/TC2 компенсаційний ланцюг є частиною ефективного LC-контуру — зміна τ₁ з 15.8ns→893ns збільшила ефективну індуктивність і знизила резонансну частоту на ~13.5%. Використовувати `0x07` як стандартне значення.
 
 > ⚠️ **ADR-RESP-001:** Архітектура використовує `RESP_TIME = 6144 cycles` (bits=`0x07`) як default, замість 768 cycles (bits=`0x04`) MikroE SDK.
 >
@@ -232,7 +234,7 @@ TC1/TC2 компенсують паразитні ємності і опори P
 > | 0xD | 2.67 MHz | MikroE SDK legacy — небезпечно |
 > | 0xF | 8.0 MHz | NO_OSC без монети (hw-підтверджено!) |
 >
-> **ADR-SPACER-001 (hw-verified 2026-03-24):** Мінімальний зазор d_min ≥ 1.5mm між феромагнітною монетою (нікель, сталь) і котушкою. При d=0 нікелева оболонка (μr≈600, δ_skin≈10μm) замикає магнітне коло як кришка pot-core: fSENSOR падає з 909 kHz до ~37-91 kHz, переповнює L_DATA (16-bit) і тригерить watchdog одночасно. Лоток забезпечує природній зазор ~2mm — достатньо. Cross-ref: `docs/audit/FERROMAGNETIC_COIN_INVESTIGATION_2026-03-24.md`.
+> **ADR-SPACER-001 (hw-verified 2026-03-24):** Мінімальний зазор d_min ≥ 1.5mm між феромагнітною монетою (нікель, сталь) і котушкою. При d=0 нікелева оболонка (μr≈600, δ_skin≈10μm) замикає магнітне коло як кришка pot-core: fSENSOR падає з 785 kHz до ~37-91 kHz, переповнює L_DATA (16-bit) і тригерить watchdog одночасно. Лоток забезпечує природній зазор ~2mm — достатньо. Cross-ref: `docs/audit/FERROMAGNETIC_COIN_INVESTIGATION_2026-03-24.md`.
 >
 > **Оновлення 2026-03-26 (p3 протокол):** Емпіричний тест з монетою 10 грн (біметал: сталь + CuZn) показав: при d=0.6mm магнітний контур **не замикається**.
 > Значення 1.5mm отримано для суцільно нікелевої монети; для біметалічних (Fe-кернінг у CuZn-кільці) критичний зазор значно менший.
@@ -253,11 +255,13 @@ L [мкГн] = 1 / (4π² × fSENSOR² × C_SENSOR)
 **LHR (24-bit) — точний fSENSOR через Eq.11** (datasheet §8.4.3, ADR-LHR-001, ADR-FREQ-001):
 
 ```
-fSENSOR = LHR_DATA × 2 × fCLKIN / 2²⁴
-        = LHR_DATA × 1.907 Hz  (при fCLKIN = 16 MHz)
+fSENSOR = LHR_DATA × fCLKIN / 2²⁴
+        = LHR_DATA × 0.9537 Hz  (при fCLKIN = 16 MHz)
 
-Приклад: LHR_DATA = 157 286 → fSENSOR ≈ 300 kHz ✓
+Приклад: LHR_DATA = 823 258 → fSENSOR ≈ 785.1 kHz (hw-verified boot log 2026-04-08 ✓)
 ```
+
+> **ADR-LHR-001 (corrected formula):** формула БЕЗ ×2. Попередня документація мала помилку `× 2 × fCLKIN / 2²⁴`. Правильно: `× fCLKIN / 2²⁴` = відношення fSENSOR/fCLKIN у 24-bit fixed-point. Код `main.cpp:186` реалізує правильну формулу.
 
 256× вища роздільність L (24-bit vs 16-bit Eq.6) — критично для диференціації Ag925/Ag900. `cached.lhrRaw` зберігає raw 24-bit LHR code, оновлюється при `calibrate()` (рішення I-1: on-demand, I-2: LHR як джерело fSENSOR).
 
