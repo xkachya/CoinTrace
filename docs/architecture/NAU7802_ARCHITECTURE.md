@@ -403,8 +403,8 @@ Sample interval at 80 SPS: 12.5 ms
   - If idx == N: compute median, update cache, signal complete
   - TOTAL per update(): <= 250 us  << 10 ms limit  [OK]
 
-Total acquisition time: N * 12.5ms = 250 ms (N=20)
-Number of update() calls: ~25 (at 10Hz base) to ~250 (at 100Hz)
+Total acquisition time: N * 12.5ms = 250 ms (N=20)  ← **тільки при update() ≥ 80 Hz**
+Number of update() calls: ~25 (at 10Hz: 2000ms total) to ~250 (at 100Hz: 250ms total)
 ```
 
 #### Порівняння режимів:
@@ -668,7 +668,9 @@ Timeout: pdMS_TO_TICKS(5) -- узгоджено з PLUGIN_CONTRACT §2.2 (ADR-ST
 
 ### 5.5 Конфігураційний файл
 
-`data/plugins/nau7802.json` (завантажується через ConfigManager):
+`data/plugins/nau7802.json` — **reference-only документація** значень за замовчуванням. Реальне джерело істини — `static constexpr` поля в `NAU7802Plugin.h`.
+
+**Зчитується кодом:** лише `nau7802.i2c_addr` (дозволяє змінити I²C адресу без перекомпіляції). Ще 9 полів пока не зчитуються і не повинні змінюватись у JSON без відповідної зміни `static constexpr` (N-04).
 
 ```json
 {
@@ -1200,19 +1202,21 @@ Migration: replace the 3 hardcoded strings in `src/main.cpp` (see §9.5 B-05 for
 
 **Ризик:** D-12a WIP skeleton має 4 помилки в register constants (знайдено при peer review 2026-04-08). Silent failures: чіп ініціалізується без помилок, але SPS/LDO/PGA налаштовані неправильно.
 
-| Константа | WIP значення | Правильне | Ефект помилки |
+| Константа | WIP (помилкове) | B-05 "виправлено" (**теж помилкове!**) | B-08 фінально правильне |
 |---|---|---|---|
-| `CTRL1_VAL` | `0x27` | `0xBC` | LDO≠3.0V, PGA≠128x — неправильний масштаб |
-| `CTRL2_VAL` | `0x30` | `0x60` | SPS невизначений (CRS bits у reserved zone) |
-| CRS mask у `tare()` | `~0x70` | `~0xE0` | Неповне очищення CRS bits при 10SPS switch |
-| CTRL1/CTRL2 order | перед OTP | після OTP | OTP скидає GAINS/LDO → PGA=1x, LDO wrong |
+| `CTRL1_VAL` | `0x27` | ~~`0xBC`~~ | **`0x2F`** — `(0x05<<3)\|(0x07<<0)` |
+| `CTRL2_VAL` | `0x30` | ~~`0x60`~~ | **`0x30`** — `(0x03<<4)` ← WIP-значення CTRL2 **вже** було правильним! |
+| CRS mask `tare()` | `~0x70` | ~~`~0xE0`~~ | **`~0x70`** ← WIP-значення маски теж було правильним! |
+| CTRL1/CTRL2 order | перед OTP | перед OTP | **після OTP** (ADR-NAU-007) |
+
+> **⚠️ HISTORICAL NOTE (N-01 full analysis 2026-04-09):** Таблиця вище відображає стан B-05 audit. Колонка "B-05 виправлено" містила помилкові значення (B-05 сам помилявся: неправильно визначив бітові позиції). B-08 (commit cd2aa56) виправив остаточно на основі datasheet Rev 2.6 + Adafruit/SparkFun libs. Актуальні значення: §2.4.
 
 > **⚠️ Комбінований ефект Bug #1 + Bug #4 — катастрофічний:**  
 > Bug #1 (`CTRL1=0x27`) встановлює PGA=2x замість 128x. Bug #4 (CTRL перед OTP) — OTP reload відбудеться після і скине PGA до 1x (OTP default). Результат: sensitivity = 1x замість 128x = **−42 dB**. Noise floor ~6.4g RMS (замість 5 mg). Калібрація технічно "виконається" (scale_factor буде 128× більшим), але noise >> signal — вимір **повністю даремний**. Ці два bugs мають виправлятись разом і перевірятись разом у D-12a HW test (sigma < 20 counts при порожній платформі = smoke test).
 
-**Вирішення:** Виправити всі 4 перед commit D-12a. Деталі: §2.4 «Derived register constants».
+**Вирішення:** Виправлено в commit 3601235 (B-05 частково) та commit cd2aa56 (B-08 остаточно). Актуальні значення: §2.4 «Derived register constants».
 
-**Статус:** 🔴 Blocks D-12a commit.
+**Статус:** ✅ Виправлено (B-08, commit cd2aa56).
 
 ---
 
