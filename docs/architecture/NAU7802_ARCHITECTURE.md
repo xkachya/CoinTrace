@@ -1,15 +1,8 @@
 # NAU7802 Weight Sensor — Architecture Specification
 
-**Версія:** 1.1.0  
-**Дата:** 2026-04-08 (оновлено: 2026-04-08 — D-12a WIP peer review)  
-**Статус:** 🔄 Active — D-12a WIP написаний, під архітектурним review перед реалізацією  
-
-> **⚠️ D-12a WIP delta — виправити до commit D-12a:**
-> 1. `CTRL1_VAL = 0x27` — **WRONG** → правильно `0xBC` (VLDO=3.0V at bits[7:5], GAINS=128x at bits[4:2])
-> 2. `CTRL2_VAL = 0x30` — **WRONG** → правильно `0x60` (CRS=80SPS at bits[7:5], shift=5)
-> 3. `_startupSequence()`: CTRL1/CTRL2 написані ДО OTP reload — **порядок неправильний** (ADR-NAU-007)
-> 4. `tare()` SPS mask `~0x70` — **WRONG** → правильно `~0xE0` (CRS at bits[7:5])
-> 5. `SETTLE_MS = 200` → рекомендовано **500ms** (ADR-NAU-006; налаштовується через `nau7802.json`)
+**Версія:** 1.2.0  
+**Дата:** 2026-04-09 (оновлено: 2026-04-09 — §3.1 wiring verified for Adafruit NAU7802 #4538)  
+**Статус:** 🔄 Active — D-12a committed (3601235), §3.1 hw-verified; D-12b pending (NVS calibration)
 **Hardware:** Nuvoton NAU7802 24-bit ADC + 100g load cell  
 **Chip revision:** NAU7802 Rev 2.6 (datasheet EN)  
 **Мотивація:** Wave 10 — 7D production vector (додається `mass_n`) для вирішення 5 критичних пар < 1.0σ у gen-6 DB  
@@ -216,20 +209,38 @@ CRS bits mask (для зміни SPS у tare()):
 ### 3.1 Підключення до Cardputer-Adv
 
 ```
-NAU7802 Pin    ESP32-S3 Pin    Notes
------------    ------------    ------
-SDA            GPIO8           I2C шина -- вже використовується
-SCL            GPIO9           I2C шина -- вже використовується
-VDD            3.3V            Digital power
-AVDD           3.3V            Analog power (або ВНУТРІШНІЙ LDO, тоді AVDDS=1)
-GND            GND
-DRDY           NC*             Polling через RDY bit; DRDY pin опціональний
+Adafruit NAU7802 Breakout #4538 -> Cardputer-Adv (ESP32-S3)
+------------------------------------------------------------
+Модуль Pin     ESP32-S3 Pin    Notes
+-----------    ------------    ----------------------------------------------
+VIN            3.3V            Digital power (на чіпі = VDD)
+GND            GND             Спільна земля
+SDA            GPIO8           I2C data  -- 10kOhm pullup вже є на модулі
+SCL            GPIO9           I2C clock -- 10kOhm pullup вже є на модулі
+DRDY           NC (optional)   ADR-NAU-002: polling RDY bit достатньо
+AV             NC              AVDD output від внутр. LDO -- не підключати!
 
-Load cell wiring:
-  RED   (E+)  -> NAU7802 AVDD (excitation+)
-  BLACK (E-)  -> NAU7802 AGND (excitation-)
-  WHITE (A+)  -> NAU7802 CH1+ (signal+)
-  GREEN (A-)  -> NAU7802 CH1- (signal-)
+AVDD: внутрішній LDO активується через AVDDS=1 у _startupSequence() step 4
+  (PU_CTRL: AVDDS|PUA|PUD). Пін "AV" -- це ВИХІД (2.4-4.0V), не вхід.
+  Не підключати "AV" до 3.3V -- пошкодить LDO!
+
+STEMMA QT (альтернатива без паяння):
+  4-pin JST SH порядок: GND / VIN / SDA / SCL
+
+------------------------------------------------------------
+Load cell (4-wire Wheatstone bridge) -> NAU7802 terminal block
+------------------------------------------------------------
+Load cell wire   Термінал модуля   Функція (чіп-пін)
+--------------   ---------------   -------------------------------------
+RED              E+                Excitation+ (AVDD від внутр. LDO)
+BLACK            E-                Excitation- (AGND)
+GREEN            A+                Signal+ non-inverting (VIN1P / CH1+)
+WHITE            A-                Signal- inverting   (VIN1N / CH1-)
+
+УВАГА: кольори дротів залежать від виробника load cell:
+  Adafruit/більшість: RED=E+, BLACK=E-, GREEN=A+, WHITE=A-
+  Деякі виробники:    RED=E+, BLACK=E-, WHITE=A+, GREEN=A-
+  Якщо маса від'ємна -- swap A+ <-> A- (або інвертуйте offset у коді).
 
 I2C address: 0x2A (ADDR pin -> GND, default)
 ```
@@ -1491,6 +1502,7 @@ SETTLE_MS    Acq total    Timing risk    Рекомендація
 ---
 
 *Документ: `docs/architecture/NAU7802_ARCHITECTURE.md`*  
-*Версія: 1.1.0 | Дата: 2026-04-08 (оновлено: 2026-04-08 — D-12a peer review: 5 bugs found, §2.4 derived constants + ADR-NAU-006/007 added)*  
+*Версія: 1.2.0 | Дата: 2026-04-09 — §3.1 Adafruit #4538: pin name VIN, AV=output (не підключати), A+/A- colors (GREEN=A+, WHITE=A-) + wire-color warning, STEMMA QT note, 10kΩ pullup note; стара ⚠️ WIP-нотатка прибрана (bugs fixed in 3601235)*  
+*Версія: 1.1.0 | Дата: 2026-04-08 — D-12a peer review: 5 bugs found, §2.4 derived constants + ADR-NAU-006/007 added*  
 *Базується на: NAU7802 Datasheet Rev 2.6, PLUGIN_CONTRACT v1.0.0, MEMORY_MAP v1.0.0, Wave 10 Architecture Plan*  
 *Наступне оновлення: після D-12a hw-verify (C-13 session)*
