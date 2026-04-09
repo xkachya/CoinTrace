@@ -1,27 +1,27 @@
 // NAU7802Plugin.h — NAU7802 24-bit Weight Sensor Plugin (I2C)
 // CoinTrace — Open Source Inductive Coin Analyzer
 // License: GPL v3
-// NAU7802_ARCHITECTURE.md v1.2.0 — D-12a
+// NAU7802_ARCHITECTURE.md v1.4.0 — D-12a
 //
 // Hardware: Nuvoton NAU7802 24-bit sigma-delta ADC + 100 g load cell
 //   I2C address: 0x2A (ADDR pin -> GND, default)
 //   I2C speed:   400 kHz Fast Mode
 //
-// Key facts (NAU7802 datasheet Rev 2.6):
+// Key facts (NAU7802 datasheet Rev 2.6, cross-ref Adafruit + SparkFun libs):
 //   - 24-bit sigma-delta ADC, 2 differential channels
 //   - PGA gain 1x/2x/4x/8x/16x/32x/64x/128x
-//   - Sample rates: 10/20/40/80/320 SPS (CTRL2 CRS[2:0] at bits[7:5])
-//   - Internal LDO: 2.4/2.7/3.0/3.3/3.6/3.9/4.2/4.5 V (CTRL1 VLDO[2:0] at bits[7:5])
+//   - Sample rates: 10/20/40/80/320 SPS (CTRL2 CRS[2:0] at bits[6:4], shift <<4)
+//   - Internal LDO: 2.4/2.7/3.0/3.3/3.6/3.9/4.2/4.5 V (CTRL1 VLDO[2:0] at bits[5:3])
 //   - OTP reload MANDATORY on every power-up (see _startupSequence(), ADR-NAU-001)
-//   - DRDY pin not connected in v1 hardware — polling RDY bit in PU_CTRL (ADR-NAU-002)
+//   - DRDY pin not connected in v1 hardware — polling CR bit in PU_CTRL bit 5 (ADR-NAU-002)
 //
 // ADR-NAU-001: OTP reload mandatory — skipping it leaves PGA/LDO at wrong values
-// ADR-NAU-002: DRDY pin not connected in v1; use PU_CTRL.RDY bit (bit7) polling
+// ADR-NAU-002: DRDY pin not connected in v1; use PU_CTRL.CR bit (bit 5 = 0x20) polling
 // ADR-NAU-003: Strategy A (no async FreeRTOS task); all I2C in update(), <= 250 us/call
 // ADR-NAU-004: mass_n = -1.0f sentinel when NAU unavailable (6D fallback in FingerprintCache)
 // ADR-NAU-005: MASS_REF_G = 33.3 (XUSSR10 reference coin, heaviest class)
 // ADR-NAU-006: SETTLE_MS = 500 ms (mechanical settling verified; 200 ms insufficient)
-// ADR-NAU-007: CTRL1/CTRL2 must be written AFTER OTP reload; CRS at bits[7:5] (not [6:4])
+// ADR-NAU-007: CTRL1/CTRL2 must be written AFTER OTP reload; CRS at bits[6:4] (not [7:5]) B-08
 
 #pragma once
 
@@ -71,18 +71,20 @@ private:
     static constexpr uint8_t PU_CTRL_OSCS  = 0x40;  // System clock source (0=internal)
     static constexpr uint8_t PU_CTRL_AVDDS = 0x80;  // AVDD source (1=internal LDO)
 
-    // CTRL1 bits — LDO voltage [7:5] and PGA gain [4:2] (datasheet Rev 2.6, Table 1)
-    static constexpr uint8_t CTRL1_GAINS_128 = 0x07;  // PGA = 128x (GAINS[2:0] at bits[4:2])
-    static constexpr uint8_t CTRL1_LDO_30V   = 0x05;  // LDO = 3.0 V (VLDO[2:0] at bits[7:5] = 101b)
-    // Full CTRL1 value: VLDO=3.0V (bits[7:5]=101b=0xA0) | GAINS=128x (bits[4:2]=111b=0x1C)
-    static constexpr uint8_t CTRL1_VAL       = (0x05 << 5) | (0x07 << 2);  // 0xBC (ADR-NAU-007, B-05)
+    // CTRL1 bits — LDO voltage [5:3] and PGA gain [2:0] (cross-ref Adafruit_NAU7802 + SparkFun libs)
+    static constexpr uint8_t CTRL1_GAINS_128 = 0x07;  // PGA = 128x (GAINS[2:0] at bits[2:0])
+    static constexpr uint8_t CTRL1_LDO_30V   = 0x05;  // LDO = 3.0 V (VLDO[2:0] at bits[5:3] = 101b)
+    // Full CTRL1 value: VLDO=3.0V (bits[5:3]=101b=0x28) | GAINS=128x (bits[2:0]=111b=0x07)
+    // B-08: B-05 had wrong shift (<<5 and <<2); correct is <<3 and <<0 per datasheet
+    static constexpr uint8_t CTRL1_VAL       = (0x05 << 3) | (0x07 << 0);  // 0x2F (B-08 fix)
 
     // CTRL2 bits — conversion rate and channel
     static constexpr uint8_t CTRL2_CRS_80SPS = 0x03;  // 80 SPS: CRS[2:0] = 011
     static constexpr uint8_t CTRL2_CRS_320SPS= 0x07;  // 320 SPS: CRS[2:0] = 111 (fast/debug mode)
     static constexpr uint8_t CTRL2_CH1       = 0x00;  // Channel 1 (CHS bit = 0)
-    // Full CTRL2 value: CH1, 80SPS, no calibration — CRS[2:0] at bits[7:5] (ADR-NAU-007, B-05)
-    static constexpr uint8_t CTRL2_VAL       = (CTRL2_CRS_80SPS << 5);  // 0x60
+    // Full CTRL2 value: CH1, 80SPS, no calibration — CRS[2:0] at bits[6:4], CHS at bit[7]
+    // B-08: B-05 had wrong shift (<<5); correct is <<4 per Adafruit/SparkFun reference libs
+    static constexpr uint8_t CTRL2_VAL       = (CTRL2_CRS_80SPS << 4);  // 0x30 (B-08 fix)
 
     // CTRL2 CAL bits (§7.4.2)
     static constexpr uint8_t CTRL2_CALS      = 0x04;  // Calibration start bit

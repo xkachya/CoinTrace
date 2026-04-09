@@ -1,12 +1,12 @@
 // NAU7802Plugin.cpp — NAU7802 24-bit Weight Sensor Plugin (I2C)
 // CoinTrace — Open Source Inductive Coin Analyzer
 // License: GPL v3
-// NAU7802_ARCHITECTURE.md v1.2.0 — D-12a
+// NAU7802_ARCHITECTURE.md v1.4.0 — D-12a
 //
 // Critical implementation notes:
 //   - OTP reload MUST be executed on every power-up (ADR-NAU-001, §2.3)
 //   - CTRL1/CTRL2 written AFTER OTP reload in _startupSequence() (ADR-NAU-007)
-//   - CRS bits at [7:5] in CTRL2 — mask 0xE0, not 0x70 (ADR-NAU-007, B-05)
+//   - CRS bits at [6:4] in CTRL2 — mask 0x70 (B-08 fix; pre-B-08 erroneously used [7:5]/0xE0)
 //   - All I2C in update() — Strategy A, no async FreeRTOS task (ADR-NAU-003)
 //   - _mutex protects only _cachedMassG/_cachedMassN/_cachedTs/_cachedValid
 //     (written from update()/Core0, read from read()/any task)
@@ -116,7 +116,7 @@ bool NAU7802Plugin::_waitPowerUpReady(uint16_t timeout_ms) {
 bool NAU7802Plugin::_startupSequence() {
     // Step 1: Register Reset (RR bit)
     if (!_writeReg(REG_PU_CTRL, PU_CTRL_RR)) return false;
-    delay(1);
+    delay(10);  // NAU7802_ARCHITECTURE §2.3 step 2: 10 ms reset pulse (was 1 ms — insufficient)
 
     // Step 2: Power-up digital (PUD bit, clear RR)
     if (!_writeReg(REG_PU_CTRL, PU_CTRL_PUD)) return false;
@@ -476,14 +476,23 @@ bool NAU7802Plugin::_blockingCaptureSamples(uint16_t n, float* out_mean, float* 
 // ============================================================================
 
 bool NAU7802Plugin::calibrate() {
-    return tare(32);
+    // ISensorPlugin::calibrate() override — tare only, NOT full 2-point calibration.
+    // Returns false always: _calibrated stays false, _scaleFactor stays 1.0f.
+    // Caller using ISensorPlugin* must use tare() + calibrate(float, uint16_t) explicitly. (A-03)
+    if (_ctx && _ctx->log) {
+        _ctx->log->warn("NAU7802",
+            "calibrate() via ISensorPlugin performs tare only — use calibrate(float, uint16_t) for full calibration");
+    }
+    tare(32);
+    return false;
 }
 
 bool NAU7802Plugin::tare(uint16_t samples) {
     if (!_initialized) return false;
+    _acqState = AcqState::IDLE;  // Abort any in-progress acquisition before blocking I2C (A-07)
 
-    // Switch to 10 SPS for low-noise tare measurement (CRS[2:0] at bits[7:5], mask ~0xE0, B-05)
-    _writeReg(REG_CTRL2, (CTRL2_VAL & ~0xE0) | (0x00 << 5));  // CRS = 000 = 10 SPS
+    // Switch to 10 SPS for low-noise tare measurement (CRS[2:0] at bits[6:4], mask ~0x70, B-08)
+    _writeReg(REG_CTRL2, (CTRL2_VAL & ~0x70) | (0x00 << 4));  // CRS = 000 = 10 SPS
     delay(120);  // Filter settling at 10 SPS (~100 ms)
 
     float mean, sigma;
@@ -499,6 +508,16 @@ bool NAU7802Plugin::tare(uint16_t samples) {
 
     _zeroOffset = static_cast<int32_t>(mean);
 
+    // Persist zero offset to NVS immediately — survives reboot between tare() and calibrate() (A-04)
+    // Does NOT set cal_ok; loadCalibration() restores this even without full calibration.
+    {
+        Preferences prefs;
+        if (prefs.begin("nau7802", false)) {
+            prefs.putInt("zero", _zeroOffset);
+            prefs.end();
+        }
+    }
+
     if (_ctx && _ctx->log) {
         _ctx->log->info("NAU7802", "Tare OK: zero_offset=%ld (sigma=%.1f raw_counts, n=%d)",
                         (long)_zeroOffset, sigma, samples);
@@ -508,13 +527,14 @@ bool NAU7802Plugin::tare(uint16_t samples) {
 
 bool NAU7802Plugin::calibrate(float known_mass_g, uint16_t samples) {
     if (!_initialized) return false;
+    _acqState = AcqState::IDLE;  // Abort any in-progress acquisition before blocking I2C (A-07)
     if (known_mass_g <= 0.0f || known_mass_g > 200.0f) {
         _setError(10, "NAU7802: invalid known_mass_g=%.2f (expected 0..200)", known_mass_g);
         return false;
     }
 
-    // Switch to 10 SPS for low-noise calibration (CRS[2:0] at bits[7:5], mask ~0xE0, B-05)
-    _writeReg(REG_CTRL2, (CTRL2_VAL & ~0xE0) | (0x00 << 5));  // CRS = 10 SPS
+    // Switch to 10 SPS for low-noise calibration (CRS[2:0] at bits[6:4], mask ~0x70, B-08)
+    _writeReg(REG_CTRL2, (CTRL2_VAL & ~0x70) | (0x00 << 4));  // CRS = 10 SPS
     delay(120);
 
     float mean, sigma;
@@ -561,7 +581,7 @@ bool NAU7802Plugin::saveCalibration() {
     prefs.putFloat("scale",    _scaleFactor);
     prefs.putBool("cal_ok",    _calibrated);
     prefs.putUInt("cal_ts",    _calTimestamp);
-    prefs.putFloat("cal_mass", _calMassG);
+    prefs.putFloat("cal_mass_g", _calMassG);  // NVS key per arch §7.1
     prefs.end();
 
     if (_ctx && _ctx->log) {
@@ -575,16 +595,20 @@ bool NAU7802Plugin::loadCalibration() {
     if (!prefs.begin("nau7802", true)) {  // read-only
         return false;
     }
+
+    // Always restore zero offset if available — tare() persists it independently of cal_ok (A-04)
+    _zeroOffset = prefs.getInt("zero", 0);
+
     bool cal_ok = prefs.getBool("cal_ok", false);
     if (!cal_ok) {
         prefs.end();
-        return false;
+        return false;  // scale not calibrated; zero_offset still restored above
     }
 
-    _zeroOffset   = prefs.getInt("zero",       0);
+    _zeroOffset   = prefs.getInt("zero",       0);  // re-read after confirming cal_ok
     _scaleFactor  = prefs.getFloat("scale",    1.0f);
     _calTimestamp = prefs.getUInt("cal_ts",    0);
-    _calMassG     = prefs.getFloat("cal_mass", 0.0f);
+    _calMassG     = prefs.getFloat("cal_mass_g", 0.0f);  // NVS key per arch §7.1
     _calibrated   = true;
     prefs.end();
     return true;

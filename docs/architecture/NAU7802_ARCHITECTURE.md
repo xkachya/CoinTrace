@@ -1,6 +1,6 @@
 # NAU7802 Weight Sensor — Architecture Specification
 
-**Версія:** 1.2.0  
+**Версія:** 1.4.0  
 **Дата:** 2026-04-09 (оновлено: 2026-04-09 — §3.1 wiring verified for Adafruit NAU7802 #4538)  
 **Статус:** 🔄 Active — D-12a committed (3601235), §3.1 hw-verified; D-12b pending (NVS calibration)
 **Hardware:** Nuvoton NAU7802 24-bit ADC + 100g load cell  
@@ -100,24 +100,36 @@ LDO:          Вбудований для load cell excitation (4.5V або 3.0V
 
 ```
 Addr  Name        Bits  Description
-0x00  PU_CTRL     8     [7:4] reserved | [3] AVDDS | [2] CYCLE_START | [1] CYCLE_READY | [0] RR
-                        RR=1 -> reset | CYCLE_READY -> conversion done | AVDDS -> internal LDO
-0x01  CTRL1       8     [7:5] VLDO[2:0] | [4:2] GAINS[2:0] | [1:0] reserved
-                        GAINS: 000=1x, 001=2x, ..., 111=128x
-                        VLDO:  000=4.5V LDO, 001=4.2V, 010=3.9V, 011=3.6V, 100=3.3V, 101=3.0V
+0x00  PU_CTRL     8     [7] AVDDS | [6] OSCS | [5] CR | [4] CS | [3] PUR | [2] PUA | [1] PUD | [0] RR
+                        RR=1  -> register reset
+                        PUD=1 -> power up digital
+                        PUA=1 -> power up analog
+                        PUR   -> power-up ready (read-only, set by chip ~200us after PUD)
+                        CS=1  -> start ADC conversions
+                        CR=1  -> conversion result ready (read-only)
+                        AVDDS=1 -> use internal LDO for load cell excitation (AVDD source)
+                        ⚠️  Попередні версії доку мали хибне розміщення бітів (стара таблиця говорила AVDDS=bit3) — юзерська версія цієї таблиці виправлена
+0x01  CTRL1       8     [7] CRP (CRDY polarity) | [6] DRDY_SEL | [5:3] VLDO[2:0] | [2:0] GAINS[2:0]
+                        GAINS: 000=1x, 001=2x, 010=4x, 011=8x, 100=16x, 101=32x, 110=64x, 111=128x
+                        VLDO:  000=4.5V LDO, 001=4.2V, 010=3.9V, 011=3.6V, 100=3.3V, 101=3.0V, 110=2.7V, 111=2.4V
+                               ⚠️  B-08: стара версія доку мала [7:5] VLDO | [4:2] GAINS (CTRL1_VAL=0xBC) — неправильно!
+                               Правильно: VLDO при [5:3], GAINS при [2:0] (CTRL1_VAL=0x2F пер Adafruit/SparkFun)
                                ЯКЩО AVDDS=0 (ext AVDD) -> VLDO ignored
-0x02  CTRL2       8     [7:5] CRS[2:0] | [4] CAL_ERR (r/o) | [3] CALS (cal start) | [2] CALMOD | [1:0] CHS[1:0]
+0x02  CTRL2       8     [7] CHS | [6:4] CRS[2:0] | [3] CAL_ERR (r/o) | [2] CALS (cal start) | [1:0] CALMOD
                         CRS: 000=10SPS, 001=20SPS, 010=40SPS, 011=80SPS, 111=320SPS
-                        CHS: 00=CH1, 01=CH2
-                        ⚠️  CRS at bits [7:5] → CTRL2_VAL = (CRS<<5), NOT (CRS<<4)
+                        CHS: bit 7 (0=CH1, 1=CH2)
+                        CALMOD: 00=internal offset cal (nаш використовуємо), 10=system offset, 11=system gain
+                        ⚠️  B-08: стара версія доку мала [7:5] CRS (CTRL2_VAL=0x60) — неправильно!
+                        Правильно: CRS при [6:4] → CTRL2_VAL = (CRS<<4), CHS при bit[7] (Adafruit/SparkFun)
+0x11  I2C_CTRL    8     [6] BGPCP | [4] TS | [3] BOPGA | [2] SI | [1] WPD | [0] SPE
+                        SPE=1 -> strong pull-up on SDA (300mA max!) -- НЕ використовувати
 0x12  ADCO_B2     8     ADC output MSB (bits 23:16)
 0x13  ADCO_B1     8     ADC output byte 2 (bits 15:8)
 0x14  ADCO_B0     8     ADC output LSB (bits 7:0)
-0x1F  I2C_CTRL    8     [6] BGPCP | [4] TS | [3] BOPGA | [2] SI | [1] WPD | [0] SPE
-                        SPE=1 -> strong pull-up on SDA (300mA max!) -- НЕ використовувати
 0x15  OTP_B1      8     Factory trim -- read-only, частина startup sequence
-0x1B  OTP_B0      8     Factory trim -- read-only, частина startup sequence
-```
+0x1B  PGA / OTP_B0 8   PGA config register (also used for OTP reload); OTP_B0 = same address
+0x1C  PGA_PWR     8     PGA power control (PGA_CAP_EN and related bits)
+0x1F  REVISION_ID 8    Chip revision (not I2C_CTRL -- попередня версія doc мала помилку)```
 
 ### 2.3 Startup sequence (critical)
 
@@ -125,24 +137,29 @@ NAU7802 потребує специфічної послідовності ін�
 
 ```
 1.  Write 0x01 to PU_CTRL (0x00)  -- Reset (RR=1)
-2.  Delay 10 ms
-3.  Write 0x00 to PU_CTRL         -- Clear reset
-4.  Write 0x06 to PU_CTRL         -- PUD=1 (power up digital) + PUA=1 (power up analog)
-5.  Wait for PWRUP bit (PU_CTRL[3]) = 1, timeout 200 ms
+2.  Delay 10 ms                   -- Чекати завершення ресету (імпл. 1мс мінімум, 10 мс recommendation)
+3.  Write PUD (0x02) to PU_CTRL   -- Power up digital, implicitly clears RR
+4.  Wait for PUR bit (PU_CTRL[3]) = 1, timeout 200 ms
+5.  Write AVDDS|PUA|PUD (0x86)    -- Power up analog + enable internal LDO
+    (імплементація встановлює AVDDS раніше за app note, але це коректно — LDO рекомендовано ініціалізувати до OTP reload)
 6.  Read OTP_B1 (0x15), preserve bits
-7.  Write OTP_B1 | 0x30 to reg 0x15  -- OTP reload step 1
-8.  Write 0x00 to reg 0x00            -- OTP reload step 2 (clear RR)
-9.  Write OTP_B1 | 0x30 to reg 0x15  -- OTP reload step 3
-10. Read OTP_B0 (0x1B), write back unchanged
-11. Write to CTRL1: gain + LDO config
-12. Write to CTRL2: sample rate + channel
-13. Write 0x30 to PU_CTRL: CYCLE_START=1 + AVDDS=1 (enable LDO for load cell)
-14. Wait 600 ms for offset stabilization  -- CRITICAL: без цього перший результат невалідний
+7.  Write (OTP_B1 & 0x38) | 0x30 to REG_PGA (0x1B)  -- OTP reload: перенести trim bits до PGA
+8.  Write PGA_PWR_VAL (0x30) to REG_PGA_PWR (0x1C)  -- PGA power config
+9.  Write CTRL1 (0x2F): VLDO=3.0V + GAINS=128x -- ПІСЛЯ OTP reload (ADR-NAU-007)
+10. Write CTRL2 (0x30): CRS=80SPS + CH1          -- ПІСЛЯ OTP reload (ADR-NAU-007)
+11. Enable conversions: read PU_CTRL, write PU_CTRL | CS (0x10)
+12. Delay 15 ms, read and discard one sample (filter settling)
+13. Trigger internal ADC zero-scale calibration: write CTRL2 | CALS (0x04)
+    Wait CALS bit cleared (up to 400 ms), verify CAL_ERR == 0
+14. Restore CTRL2 = 0x30 (80 SPS, no cal trigger)
+    At this point ~400-500 ms have elapsed since power-up -- ADC settled
 ```
+
+> **Імплементація vs app note:** Код відрізняється від Nuvoton Application Note в кількох деталях: (1) AVDDS встановлюється на кроці 5 (а не з CS на кроці 13); (2) OTP reload записує у REG_PGA (0x1B), а не знову у 0x15; (3) додано internal ADC calibration (CALS) замість експліцитного 600 мс wait.
 
 > **ADR-NAU-001:** Кроки 6-10 (OTP reload) — обов'язкові. Без них NAU7802 дає некоректні значення навіть якщо конверсія запускається. Це документовано в офіційному Application Note Nuvoton. Типова помилка при реалізації — пропускати OTP reload і отримувати drift 2-5% без видимої причини.
 
-> **ADR-NAU-007 (порядок startup):** Кроки 11-12 (CTRL1/CTRL2) ПОВИННІ йти ПІСЛЯ завершення OTP reload (крок 10). Якщо CTRL1/CTRL2 написані ДО OTP reload — reload перезаписує trim bits (включно з PGA config), повертаючи PGA/LDO до factory defaults замість сконфігурованих значень → silent miscalibration. D-12a WIP має цей баг.
+> **ADR-NAU-007 (порядок startup):** CTRL1/CTRL2 ПОВИННІ йти ПІСЛЯ завершення OTP reload (PGA write + PGA_PWR). Якщо CTRL1/CTRL2 написані ДО OTP reload — reload перезаписує trim bits (включно з PGA config), повертаючи PGA/LDO до factory defaults замість сконфігурованих значень → silent miscalibration.
 
 ### 2.4 Вибір параметрів для CoinTrace
 
@@ -185,21 +202,20 @@ NAU7802 built-in LDO ізолює load cell від WiFi noise
 ВИБІР: AVDDS = 1 (internal LDO)
 ```
 
-**Derived register constant values (правильне розміщення бітів):**
+**Derived register constant values (B-08: виправлені бітові позиції пер Adafruit/SparkFun):**
 ```
-CTRL1 = [7:5] VLDO | [4:2] GAINS | [1:0] reserved
-  VLDO=3.0V  : code=101b=5, bits[7:5] → 5 << 5 = 0xA0
-  GAINS=128x : code=111b=7, bits[4:2] → 7 << 2 = 0x1C
-  CTRL1_VAL  = 0xA0 | 0x1C = 0xBC         ← ПРАВИЛЬНО
+CTRL1 = [7] CRP | [6] DRDY_SEL | [5:3] VLDO | [2:0] GAINS
+  VLDO=3.0V  : code=101b=5, bits[5:3] → 5 << 3 = 0x28
+  GAINS=128x : code=111b=7, bits[2:0] → 7 << 0 = 0x07
+  CTRL1_VAL  = 0x28 | 0x07 = 0x2F         ← ПРАВИЛЬНО (B-08 fix, старе 0xBC = WRONG)
 
-CTRL2 = [7:5] CRS | [4] CAL_ERR | [3] CALS | [2] CALMOD | [1:0] CHS
-  CRS=80SPS  : code=011b=3, bits[7:5] → 3 << 5 = 0x60
-  CHS=CH1    : code=00 → 0
-  CTRL2_VAL  = 0x60                        ← ПРАВИЛЬНО
+CTRL2 = [7] CHS | [6:4] CRS | [3] CAL_ERR | [2] CALS | [1:0] CALMOD
+  CRS=80SPS  : code=011b=3, bits[6:4] → 3 << 4 = 0x30
+  CHS=CH1    : bit 7 = 0
+  CTRL2_VAL  = 0x30                        ← ПРАВИЛЬНО (B-08 fix, старе 0x60 = WRONG)
 
 CRS bits mask (для зміни SPS у tare()):
-  CRS_CLEAR_MASK = ~0xE0   (очищення bits[7:5])   ← ПРАВИЛЬНО
-  НЕ ~0x70 — це очищає тільки bits[6:4], залишаючи bit7 незмінним
+  CRS_CLEAR_MASK = ~0x70   (очищення bits[6:4])   ← ПРАВИЛЬНО (B-08 fix, старе ~0xE0 = WRONG)
 ```
 
 ---
@@ -1428,18 +1444,23 @@ SETTLE_MS    Acq total    Timing risk    Рекомендація
 
 **Контекст:** NAU7802 datasheet (Rev 2.6) вимагає OTP reload ПЕРЕД конфігурацією CTRL registers. OTP reload відновлює factory trim values для PGA і LDO. Якщо GAINS/VLDO записані до OTP reload — OTP перезапише trim bits, і ефективний PGA gain може стати 1x замість 128x (silent failure).
 
-**Рішення:** Startup sequence (§2.3) чітко визначена: OTP reload = кроки 6-10, CTRL1/CTRL2 = кроки 11-12. D-12a WIP має неправильний порядок — виправити перед commit.
+**Рішення:** Startup sequence (§2.3) чітко визначена: OTP reload = кроки 6-8, CTRL1/CTRL2 = кроки 9-10. Реалізовано в D-12a (commit 3601235). Правильні значення CTRL1=0x2F, CTRL2=0x30 (B-08 fix в post-commit audit).
 
 **Правильна послідовність для `_startupSequence()`:**
 ```
-1-4: Reset + power-up digital + wait PUR + power-up analog+LDO
-5:   OTP_B1 read
-6-7: OTP reload (write OTP_B1|0x30 до PGA_CAP reg)
-8:   PGA_PWR config
-9:   CTRL1 (GAINS=128x, VLDO=3.0V)   ← тільки ПІСЛЯ OTP
-10:  CTRL2 (80SPS, CH1)               ← тільки ПІСЛЯ OTP
-11:  Enable conversions (CS bit)
-12:  Discard first N samples (filter settling)
+1:     Write RR=1 (ресет реєстрів)
+2:     Delay 10ms
+3:     Write PUD (підняття цифрової части)
+4:     Wait PUR bit (timeout 200ms)
+5:     Write AVDDS|PUA|PUD (підняття аналогової + internal LDO)
+6:     Read OTP_B1
+7-8:   OTP reload (write (OTP_B1 & 0x38)|0x30 → REG_PGA; write PGA_PWR_VAL → REG_PGA_PWR)
+9:     CTRL1 = 0x2F (GAINS=128x при [2:0], VLDO=3.0V при [5:3])   ← тільки ПІСЛЯ OTP
+10:    CTRL2 = 0x30 (CRS=80SPS при [6:4], CHS=0=CH1)              ← тільки ПІСЛЯ OTP
+11:    Enable conversions (CS bit in PU_CTRL)
+12:    Delay 15ms, discard first sample
+13:    CALS internal ADC calibration (wait up to 400ms)
+14:    Restore CTRL2 = 0x30
 ```
 
 **Наслідки:** Жодних змін у публічному API. +0ms overhead (просто правильний порядок рядків).
@@ -1448,36 +1469,44 @@ SETTLE_MS    Acq total    Timing risk    Рекомендація
 
 ## 12. Implementation Checklist
 
-### D-12a: Базовий драйвер (WIP існує — виправити баги, потім commit)
-- [x] Створити `lib/NAU7802Plugin/src/NAU7802Plugin.h/.cpp` ← WIP готовий
-- [ ] **FIX: CTRL1_VAL = 0xBC** (замість 0x27): `(0x05 << 5) | (0x07 << 2)` — ADR-NAU-007, B-05
-- [ ] **FIX: CTRL2_VAL = 0x60** (замість 0x30): `(0x03 << 5)` — ADR-NAU-007, B-05
-- [ ] **FIX: startup sequence** — перенести CTRL1/CTRL2 ПІСЛЯ OTP reload кроків — ADR-NAU-007
-- [ ] **FIX: tare() SPS mask** — `~0xE0` замість `~0x70` — B-05
-- [ ] **FIX: SETTLE_MS = 500** (замість 200) — ADR-NAU-006
-- [x] Реалізувати `_startupSequence()` з OTP reload (14 кроків ADR-NAU-001) ← WIP є
-- [x] Реалізувати `_writeReg()`, `_readReg()`, `_readAdc24()` ← WIP є
-- [x] Реалізувати `_isReady()` (polling RDY bit) ← WIP є
-- [x] Реалізувати `_computeMedian()` для float buf ← WIP є
-- [x] canInitialize() / initialize() / shutdown() per PLUGIN_CONTRACT ← WIP є
-- [ ] Self-test в initialize(): sigma < 20 counts при порожній платформі — після HW
+### D-12a: Базовий драйвер ✅ DONE (commit 3601235 + post-review + B-08 audit fixes)
+- [x] Створити `lib/NAU7802Plugin/src/NAU7802Plugin.h/.cpp`
+- [x] **FIX: startup sequence** — CTRL1/CTRL2 ПІСЛЯ OTP reload — ADR-NAU-007 (commit 3601235)
+- [x] **FIX: SETTLE_MS = 500** (замість 200) — ADR-NAU-006 (commit 3601235)
+- [x] **FIX: delay(10)** після RR=1 (замість 1ms) — §2.3 step 2 (post-review)
+- [x] **FIX: NVS key "cal_mass_g"** (замість "cal_mass") — §7.1 (post-review)
+- [x] **FIX B-08: CTRL1_VAL = 0x2F** `(0x05 << 3) | 0x07` — бітові позиції VLDO[5:3]+GAINS[2:0] (audit, старе 0xBC=WRONG)
+- [x] **FIX B-08: CTRL2_VAL = 0x30** `(0x03 << 4)` — CRS[6:4] (audit, старе 0x60=WRONG — undefined rate)
+- [x] **FIX B-08: tare() SPS mask** — `~0x70` (bits[6:4]) замість `~0xE0` (audit)
+- [x] Реалізувати `_startupSequence()` з OTP reload (ADR-NAU-001)
+- [x] Реалізувати `_writeReg()`, `_readReg()`, `_readAdc24()` + sign-extend
+- [x] Реалізувати `_isReady()` (polling CR bit 5 = 0x20, ADR-NAU-002)
+- [x] Реалізувати `_computeMedian()` для float buf
+- [x] Реалізувати `tare()` / `calibrate(known_g)` (blocking, 10 SPS)
+- [x] Реалізувати `saveCalibration()` / `loadCalibration()` (NVS "nau7802")
+- [x] Реалізувати non-blocking acquisition state machine
+- [x] canInitialize() / initialize() / shutdown() per PLUGIN_CONTRACT
+- [x] IDiagnosticPlugin: runDiagnostics(), runSelfTest(), checkHardwarePresence()
+- [ ] Self-test sigma < 20 counts при порожній платформі (B-07) — після HW verify (C-13)
+- [x] Створити `data/plugins/nau7802.json` ✅
 
-### D-12b: NVS калібрування
-- [ ] `saveCalibration()` -> NVS namespace "nau7802" (zero, scale, cal_ok, cal_ts, cal_mass_g)
-- [ ] `loadCalibration()` -> відновлення _zeroOffset, _scaleFactor
-- [ ] Перевірка "cal_ok" при initialize()
+### D-12b: NVS калібрування ✅ DONE (реалізовано разом з D-12a)
+- [x] `saveCalibration()` → NVS namespace "nau7802" (zero, scale, cal_ok, cal_ts, cal_mass_g)
+- [x] `loadCalibration()` → відновлення _zeroOffset, _scaleFactor
+- [x] Перевірка "cal_ok" при initialize()
+- [x] `clearCalibration()` для скидання
 
 ### D-12c: Calibration UX
-- [ ] `tare(N)` -- blocking, для виклику з UI
-- [ ] `calibrate(known_g, N)` -- blocking, для виклику з UI
+- [x] `tare(N)` -- blocking (реалізовано, 10 SPS, розраховує mean/sigma)
+- [x] `calibrate(known_g, N)` -- blocking (реалізовано, 10 SPS, валідація net_raw)
 - [ ] Клавіша 'K' в main.cpp -> запуск calibration wizard
 - [ ] Екрани Step 1/2/3 на Cardputer display
 
-### D-12d: Integration
-- [ ] `startAcquisition()` / `isAcquisitionComplete()` / `getLastMassG()`
-- [ ] Non-blocking state machine в `_updateAcqStateMachine()`
+### D-12d: Acquisition integration
+- [x] `startAcquisition()` / `isAcquisitionComplete()` / `getLastMassG()` / `getLastMassN()`
+- [x] Non-blocking state machine в `_updateAcqStateMachine()`
 - [ ] Виклик `gNAU->update()` в main loop
-- [ ] Виклик `gNAU->startAcquisition()` в STEP_BASE entry
+- [ ] Виклик `gNAU->startAcquisition()` в STEP_WEIGHT entry (ADR-NAU-008)
 - [ ] Зчитування `mass_g` в COMPUTE state
 - [ ] mass_n = mass_g / MASS_REF_G в production_vector (7D)
 
@@ -1502,7 +1531,9 @@ SETTLE_MS    Acq total    Timing risk    Рекомендація
 ---
 
 *Документ: `docs/architecture/NAU7802_ARCHITECTURE.md`*  
-*Версія: 1.2.0 | Дата: 2026-04-09 — §3.1 Adafruit #4538: pin name VIN, AV=output (не підключати), A+/A- colors (GREEN=A+, WHITE=A-) + wire-color warning, STEMMA QT note, 10kΩ pullup note; стара ⚠️ WIP-нотатка прибрана (bugs fixed in 3601235)*  
+*Версія: 1.4.0 | Дата: 2026-04-09 — B-08 post-commit audit: CTRL1/CTRL2 бітові позиції виправлені; CTRL1_VAL 0xBC→0x2F (VLDO[5:3]+GAINS[2:0]); CTRL2_VAL 0x60→0x30 (CRS[6:4]); mask ~0xE0→~0x70; §2.2/§2.3/§2.4 arch doc синхронізовано*  
+*Версія: 1.3.0 | Дата: 2026-04-09 — post-review fixes: (1) §2.2 PU_CTRL bit table виправлена (AVDDS=bit7, не bit3); (2) I2C_CTRL 0x1F→0x11; REVISION_ID додано; (3) §2.3 startup sequence оновлена (імпл. AVDDS step 4, CALS steps 13-14 документовано); (4) §12 D-12a/b/c чекліст оновлено [x]; code: delay(1)→10ms, NVS key виправлено*  
+*Версія: 1.2.0 | Дата: 2026-04-09 — §3.1 Adafruit #4538: pin name VIN, AV=output, A+/A- colors, STEMMA QT, 10kΩ pullup; WIP-нотатка прибрана*  
 *Версія: 1.1.0 | Дата: 2026-04-08 — D-12a peer review: 5 bugs found, §2.4 derived constants + ADR-NAU-006/007 added*  
 *Базується на: NAU7802 Datasheet Rev 2.6, PLUGIN_CONTRACT v1.0.0, MEMORY_MAP v1.0.0, Wave 10 Architecture Plan*  
 *Наступне оновлення: після D-12a hw-verify (C-13 session)*

@@ -1,0 +1,14 @@
+{
+  "name": "NAU7802",
+  "enabled": true,
+  "nau7802.i2c_addr":       42,
+  "nau7802.sample_rate":    80,
+  "nau7802.pga_gain":       128,
+  "nau7802.n_samples":      20,
+  "nau7802.settle_ms":      500,
+  "nau7802.mass_ref_g":     33.3,
+  "nau7802.ldo_voltage":    3,
+  "nau7802.enable_ldo":     true,
+  "nau7802.fast_mode_sps":  320,
+  "nau7802.fast_mode_n":    10
+}
