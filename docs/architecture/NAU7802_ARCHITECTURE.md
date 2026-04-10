@@ -9,7 +9,7 @@
 **Cross-ref:**
 - `PLUGIN_CONTRACT.md v1.0.0` — обов'язковий контракт
 - `PLUGIN_INTERFACES_EXTENDED.md v1.2.0` — `ISensorPlugin`, `SensorType::WEIGHT`
-- `LDC1101_ARCHITECTURE.md v1.6.0` — паралельний сенсор, спільна I2C шина
+- `LDC1101_ARCHITECTURE.md v1.6.0` — паралельний SPI-сенсор (окрема SPI шина, адреса 0x00)
 - `MEMORY_MAP.md v1.0.0` — heap бюджет
 - `MEASUREMENT_WORKFLOW.md v1.0.0` — state machine для інтеграції
 - `DISCOVERY_MODE_SPEC.md v1.0.0` — NDJSON формат
@@ -284,7 +284,7 @@ SCL            GPIO9           I2C clock -- 10kOhm pullup вже є на мод�
 DRDY           NC (optional)   ADR-NAU-002: polling RDY bit достатньо
 AV             NC              AVDD output від внутр. LDO -- не підключати!
 
-AVDD: внутрішній LDO активується через AVDDS=1 у _startupSequence() step 4
+AVDD: внутрішній LDO активується через AVDDS=1 у _startupSequence() step 5
   (PU_CTRL: AVDDS|PUA|PUD). Пін "AV" -- це ВИХІД (2.4-4.0V), не вхід.
   Не підключати "AV" до 3.3V -- пошкодить LDO!
 
@@ -635,8 +635,12 @@ public:
     void         startAcquisition();
     // true якщо acquisition завершена і результат готовий
     bool         isAcquisitionComplete() const;
-    // Поточний результат (mass_g) -- valid тільки якщо isAcquisitionComplete()
+    // Поточний результат (mass_g / mass_n) -- valid тільки якщо isAcquisitionComplete()
     float        getLastMassG() const;
+    float        getLastMassN() const;  // mass_g / MASS_REF_G; -1.0f якщо !isAcquisitionComplete()
+
+    // === Constants (public для доступу з main.cpp) ===
+    static constexpr float MASS_REF_G = 33.3f;  // XUSSR10, нормалізатор (найважча монета в DB)
 
     // === NVS persistence ===
     bool         saveCalibration();
@@ -682,7 +686,6 @@ private:
     ErrorCode          _lastError   = {0, ""};
 
     // --- Constants ---
-    static constexpr float    MASS_REF_G = 33.3f;  // XUSSR10, нормалізатор
     static constexpr uint16_t INIT_TIMEOUT_MS = 200;
 
     // --- Private methods ---
@@ -949,7 +952,7 @@ case MeasState::COMPUTE:
   - Система продовжує як 6D матчинг (поведінка gen-6)
   - UI: іконка "W?" на Quick Screen
 
-Это важливо для backward compatibility: старі пристрої без NAU7802
+Це важливо для backward compatibility: старі пристрої без NAU7802
 автоматично ігнорують вагову вісь.
 ```
 
@@ -1288,9 +1291,9 @@ Migration: replace the 3 hardcoded strings in `src/main.cpp` (see §9.5 B-05 for
 **Ризик:** Вібрації при натисканні кнопок Cardputer або при кладанні спейсерів можуть давати spike у масі.
 
 **Вирішення:**
-1. Settle 200ms — достатньо для механічного демпфування (f_natural для 50г платформи + 33г монети ~ 20-30 Hz, затухання < 100ms)
+1. Settle 500ms (SETTLE_MS) — достатньо для механічного демпфування (f_natural для 50г платформи + 33г монети ~ 20-30 Hz, затухання < 100ms; ADR-NAU-006)
 2. Медіана N=20 семплів — відкидає outlier spikes
-3. Acquisition тільки на STEP_BASE — до кладання addon spacers
+3. Acquisition тільки на STEP_WEIGHT — до addon spacers (монета ще не переміщена на котушку)
 
 **Статус:** вирішено архітектурно.
 
@@ -1365,7 +1368,7 @@ if (q_mass_n >= 0.0f && entry.centroid.hasMassN()) {
 
 ---
 
-### 9.7 B-07: OTP reload sequence критичність
+### 9.7 B-07: Analog init sequence — silent failure ризик
 
 **Ризик:** Якщо startup sequence (§2.3) реалізована некоректно — NAU7802 буде давати drift або некоректні значення без явного error. Це silent failure.
 
@@ -1383,7 +1386,7 @@ if (q_mass_n >= 0.0f && entry.centroid.hasMassN()) {
 **Ризик:** При кладанні addon spacers (+1mm, +2mm) оператор тисне на монету -> платформа навантажується > FS load cell. Але load cell 100g при натисканні 200-500g може дати пластичну деформацію.
 
 **Вирішення:**
-1. Маса вимірюється ТІЛЬКИ на STEP_BASE — до addon spacers
+1. Маса вимірюється ТІЛЬКИ на STEP_WEIGHT — до addon spacers (до перекладання монети на котушку)
 2. Механічний стопер: addon spacers не передають силу на платформу load cell (вони впираються в нерухому раму)
 3. Load cell 100g: overload capacity typ 150-200% = 150-200g. Нормальна монета 1-33г -> безпечно. Тиск рукою max 500g при кладанні спейсера -> потрібно routing spacer force в нерухому раму
 
@@ -1528,7 +1531,7 @@ HW-NAU-04: Repeatability
   Pass:    max - min < 0.2г
 
 HW-NAU-05: Integration з LDC1101
-  Command: 3 повних vимірів (STEP_BASE..COMPUTE) з XUSSR10
+  Command: 3 повних виміри (STEP_WEIGHT..СОМПУТЕ) з XUSSR10
   Pass:    mass_g = 33.0-33.6г у NDJSON; 7D wdist до xussr10 centroid < 0.3
 
 HW-NAU-06: Degraded mode (NAU відключений)
@@ -1553,7 +1556,7 @@ HW-NAU-06: Degraded mode (NAU відключений)
 
 **Апаратна верифікація (2026-04-10):** raw ADC ~+113K (vs ~-21K до виправлення), REG_PGA=0x00 в boot log, чутливість ~21,480 counts/g (128x підтверджено).
 
-**Наслідки:** Жодних змін в наслідках (startup time аналогічний). CTRL1/CTRL2 записуються після кроків 5-7.
+**Наслідки:** Жодних змін в наслідках (startup time аналогічний). CTRL1/CTRL2 записуються після кроків 6-8 (analog init).
 
 ---
 
@@ -1611,7 +1614,7 @@ SETTLE_MS    Acq total    Timing risk    Рекомендація
 500 ms        750 ms       LOW            DEFAULT для C-13 (перша сесія)
 ```
 
-**Наслідки:** +300ms до STEP_BASE (21.4% overhead), від якого NAU7802 залишається ≫ швидшим ніж LDC1101 capture window (2000ms). Нульовий вплив на загальний час виміру.
+**Наслідки:** +300ms до STEP_WEIGHT (загальний час ~750ms), NAU7802 залишається ≫ швидшим ніж LDC1101 capture window (2000ms). Нульовий вплив на загальний час виміру.
 
 ---
 
