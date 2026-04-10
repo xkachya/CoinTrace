@@ -2,7 +2,7 @@
 
 **Версія:** 1.5.0  
 **Дата:** 2026-04-09 (оновлено: 2026-04-10 — C-13 hardware session completed; audit X-01/X-02/X-03 fixed)  
-**Статус:** 🔄 Active — C-13 hw-verified (sigma=96 counts @ gain=128x), D-12c pending (calibration UX)
+**Статус:** 🔄 Active — C-13 hw-verified (sigma=96 counts @ gain=128x), D-12c pending (calibration UX)  
 **Hardware:** Nuvoton NAU7802 24-bit ADC + 100g load cell  
 **Chip revision:** NAU7802 Rev 2.6 (datasheet EN)  
 **Мотивація:** Wave 10 — 7D production vector (додається `mass_n`) для вирішення 5 критичних пар < 1.0σ у gen-6 DB  
@@ -151,7 +151,8 @@ Addr  Name        Bits  Description
                         ⚠️  audit 2026-04-10 X-03: PGA_PWR_VAL=0x30 помилково встановлював
                         MSTR_BIAS_CURR=011 замість PGA_CAP_EN. SparkFun: setBit(bit7).
                         Виправлено: PGA_PWR_VAL=0x80 (тільки bit7=PGA_CAP_EN).
-0x1F  REVISION_ID 8    Chip revision (not I2C_CTRL -- попередня версія doc мала помилку)```
+0x1F  REVISION_ID 8    Chip revision (not I2C_CTRL -- попередня версія doc мала помилку)
+```
 
 ### 2.3 Startup sequence (виправлена — audit 2026-04-10)
 
@@ -166,34 +167,34 @@ NAU7802 потребує специфічної послідовності ін�
 4.  Wait for PUR bit (PU_CTRL[3]) = 1, timeout 200 ms
 5.  Write AVDDS|PUA|PUD (0x86)     -- Power up analog + enable internal LDO
 
---- Analog init (кроки 5-7 — замінили стару "OTP reload" sequence) ---
+--- Analog init (кроки 6-8 — замінили стару "OTP reload" sequence) ---
 
-5.  Read REG_ADC_CTRL (0x15); write back with bits[5:4]=11 (|=0x30)
+6.  Read REG_ADC_CTRL (0x15); write back with bits[5:4]=11 (|=0x30)
     Мета: вимкнути CLK_CHP (ADC chopper clock) — datasheet §9.1 "power on sequencing"
     Назва "OTP_B1" для 0x15 у v1.4.0 — ПОМИЛКА. Це ADC Control Register.
     Adafruit comment: "Disable ADC chopper clock"
     SparkFun comment: "Turn off CLK_CHP from 9.1 power on sequencing"
 
-6.  Read REG_PGA (0x1B); write back with bit6 cleared (&= ~0x40)
+7.  Read REG_PGA (0x1B); write back with bit6 cleared (&= ~0x40)
     Мета: LDOMODE=0 (low-ESR caps = low-noise mode)
     ТІЛЬКИ bit6 очищається. Інші біти (особливо bit4=BYPASS_EN) НЕ торкати!
     BYPASS_EN=1 обходить PGA: effective gain=1x замість 128x (silent failure).
     Adafruit + SparkFun: тільки clearBit(6, 0x1B) — нічого більше.
 
-7.  Write 0x80 to REG_PGA_PWR (0x1C)
+8.  Write 0x80 to REG_PGA_PWR (0x1C)
     Мета: PGA_CAP_EN=1 (bit7) — активувати 330pF decoupling cap (datasheet §9.14)
     ТІЛЬКИ bit7. Не писати 0x30 (встановлює MSTR_BIAS_CURR=011 — нестандартне).
     SparkFun: setBit(NAU7802_PGA_PWR_PGA_CAP_EN, NAU7802_PGA_PWR) = setBit(7, 0x1C)
 
 ----------------------------------------------------------------------
 
-8.  Write CTRL1 (0x2F): VLDO=3.0V + GAINS=128x -- ПІСЛЯ analog init (ADR-NAU-007)
-9.  Write CTRL2 (0x30): CRS=80SPS + CH1          -- ПІСЛЯ analog init (ADR-NAU-007)
-10. Enable conversions: read PU_CTRL, write PU_CTRL | CS (0x10)
-11. Delay 15 ms, read and discard one sample (filter settling)
-12. Trigger internal ADC zero-scale calibration: write CTRL2 | CALS (0x04)
+9.  Write CTRL1 (0x2F): VLDO=3.0V + GAINS=128x -- ПІСЛЯ analog init (ADR-NAU-007)
+10. Write CTRL2 (0x30): CRS=80SPS + CH1          -- ПІСЛЯ analog init (ADR-NAU-007)
+11. Enable conversions: read PU_CTRL, write PU_CTRL | CS (0x10)
+12. Delay 15 ms, read and discard one sample (filter settling)
+13. Trigger internal ADC zero-scale calibration: write CTRL2 | CALS (0x04)
     Wait CALS bit cleared (up to 400 ms), verify CAL_ERR == 0
-13. Restore CTRL2 = 0x30 (80 SPS, no cal trigger)
+14. Restore CTRL2 = 0x30 (80 SPS, no cal trigger)
     At this point ~400-500 ms have elapsed since power-up -- ADC settled
 ```
 
@@ -206,7 +207,7 @@ REG_PGA=0x00 → BYPASS_EN=0, LDOMODE=0 → PGA active 128x ✅
 Якщо з'явиться ERROR "BYPASS_EN=1" → перевірити step 6 (не писати 0x30 у REG_PGA!)
 ```
 
-> **ADR-NAU-001 (оновлений):** "OTP Auto-load" — NAU7802 автоматично завантажує OTP при power-on. Явний OTP reload (стара логіка v1.4.0) не потрібний. Натомість потрібна analog init sequence (кроки 5-7 вище). Детальніше: ADR-NAU-001 у §11.
+> **ADR-NAU-001 (оновлений):** "OTP Auto-load" — NAU7802 автоматично завантажує OTP при power-on. Явний OTP reload (стара логіка v1.4.0) не потрібний. Натомість потрібна analog init sequence (кроки 6-8 вище). Детальніше: ADR-NAU-001 у §11.
 
 ### 2.4 Вибір параметрів для CoinTrace
 
@@ -692,7 +693,7 @@ private:
                                         //   if (raw & 0x800000) raw |= 0xFF000000;
                                         // Without this, negative offsets become ~16M counts
     bool     _isReady();                // читає RDY bit
-    bool     _startupSequence();        // OTP reload + config
+    bool     _startupSequence();        // analog init (CLK_CHP + LDOMODE + PGA_CAP_EN) + CTRL config
     float    _computeMedian(float* buf, uint8_t n);
     void     _updateAcqStateMachine();  // викликається з update()
 };
@@ -1379,7 +1380,14 @@ if (q_mass_n >= 0.0f && entry.centroid.hasMassN()) {
 
 ### 9.8 B-08: Механічне зміщення платформи при спейсерах
 
-*(без змін — дивись попередня версія §9.7)*
+**Ризик:** При кладанні addon spacers (+1mm, +2mm) оператор тисне на монету -> платформа навантажується > FS load cell. Але load cell 100g при натисканні 200-500g може дати пластичну деформацію.
+
+**Вирішення:**
+1. Маса вимірюється ТІЛЬКИ на STEP_BASE — до addon spacers
+2. Механічний стопер: addon spacers не передають силу на платформу load cell (вони впираються в нерухому раму)
+3. Load cell 100g: overload capacity typ 150-200% = 150-200g. Нормальна монета 1-33г -> безпечно. Тиск рукою max 500g при кладанні спейсера -> потрібно routing spacer force в нерухому раму
+
+**Статус:** вирішується механічним дизайном.
 
 ---
 
@@ -1414,7 +1422,7 @@ _writeReg(REG_PGA, pga & ~PGA_LDOMODE_BIT);  // clear bit6 only
 
 **Симптом:** Регістр 0x15 — ADC Control Register (не OTP!). Bits[5:4]=CLK_CHP після reset = 00 (max chopper noise). Reference libs: `reg[0x15] |= 0x30` як один з перших кроків.
 
-**Виправлення:** Додано step 5 у startup sequence: `_writeReg(REG_ADC_CTRL, adc_ctrl | ADC_CHP_DIS)` де `ADC_CHP_DIS = 0x30`.
+**Виправлення:** Додано step 6 у startup sequence: `_writeReg(REG_ADC_CTRL, adc_ctrl | ADC_CHP_DIS)` де `ADC_CHP_DIS = 0x30`.
 
 #### X-03 [HIGH]: PGA_PWR_VAL = 0x30 — PGA_CAP_EN не активований
 
@@ -1441,17 +1449,6 @@ clearCalibration() → обов'язково перед повторним tare(
 ```
 
 Нові tare/calibrate відбуватимуться при gain=128x → scale_factor буде правильним.
-
----
-
-**Ризик:** При кладанні addon spacers (+1mm, +2mm) оператор тисне на монету -> платформа навантажується > FS load cell. Але load cell 100g при натисканні 200-500g може дати пластичну деформацію.
-
-**Вирішення:**
-1. Маса вимірюється ТІЛЬКИ на STEP_BASE — до addon spacers
-2. Механічний стопер: addon spacers не передають силу на платформу load cell (вони впираються в нерухому раму)
-3. Load cell 100g: overload capacity typ 150-200% = 150-200g. Нормальна монета 1-33г -> безпечно. Тиск рукою max 500g при кладанні спейсера -> потрібно routing spacer force в нерухому раму
-
-**Статус:** вирішується механічним дизайном.
 
 ---
 
@@ -1549,10 +1546,10 @@ HW-NAU-06: Degraded mode (NAU відключений)
 
 **Поточне рішення (v1.5.0 — ЗАМІНЮЄ попереднє):** NAU7802 **автоматично завантажує OTP** при power-on. Явний OTP reload (запис (OTP_B1 & 0x38)|0x30 → REG_PGA) є некоректним і призводить до X-01: `BYPASS_EN=1` → PGA bypassed → gain=1x замість 128x.
 
-Натомість analog init sequence (§2.3 кроки 5-7) відповідає reference implementations (Adafruit, SparkFun):
-- Крок 5: `REG_ADC_CTRL |= 0x30` — вимкнути CLK_CHP (X-02 fix)
-- Крок 6: `REG_PGA &= ~0x40` — clear LDOMODE bit6 ONLY (не писати 0x30!)
-- Крок 7: `REG_PGA_PWR = 0x80` — PGA_CAP_EN bit7 (X-03 fix)
+Натомість analog init sequence (§2.3 кроки 6-8) відповідає reference implementations (Adafruit, SparkFun):
+- Крок 6: `REG_ADC_CTRL |= 0x30` — вимкнути CLK_CHP (X-02 fix)
+- Крок 7: `REG_PGA &= ~0x40` — clear LDOMODE bit6 ONLY (не писати 0x30!)
+- Крок 8: `REG_PGA_PWR = 0x80` — PGA_CAP_EN bit7 (X-03 fix)
 
 **Апаратна верифікація (2026-04-10):** raw ADC ~+113K (vs ~-21K до виправлення), REG_PGA=0x00 в boot log, чутливість ~21,480 counts/g (128x підтверджено).
 
@@ -1641,7 +1638,7 @@ SETTLE_MS    Acq total    Timing risk    Рекомендація
 
 **Контекст (v1.4.0):** Попереднє рішення вимагало порядку: OTP reload → CTRL1/CTRL2. Логіка: OTP може перезаписати PGA trim bits якщо CTRL записані раніше.
 
-**Поточне рішення (v1.5.0 — ЗАМІНЮЄ попереднє):** OTP auto-loads при power-on (ADR-NAU-001 оновлено). Явного OTP reload немає. Замість цього — analog init sequence (кроки 5-7, §2.3). Порядок: analog init (5-7) → CTRL1/CTRL2 (8-9).
+**Поточне рішення (v1.5.0 — ЗАМІНЮЄ попереднє):** OTP auto-loads при power-on (ADR-NAU-001 оновлено). Явного OTP reload немає. Замість цього — analog init sequence (кроки 6-8, §2.3). Порядок: analog init (6-8) → CTRL1/CTRL2 (9-10).
 
 **Правильна послідовність для `_startupSequence()` (v1.5.0, §2.3):**
 ```
@@ -1649,16 +1646,16 @@ SETTLE_MS    Acq total    Timing risk    Рекомендація
 2:   Delay 10ms
 3:   Write PUD (підняття цифрової частини)
 4:   Wait PUR bit (timeout 200ms)
-5а:  Write AVDDS|PUA|PUD (підняття аналогової + internal LDO)
-5b:  REG_ADC_CTRL (0x15) |= 0x30  -- CLK_CHP disable (X-02 fix)
-6:   REG_PGA (0x1B) &= ~0x40      -- clear LDOMODE bit6 ONLY (НЕ писати 0x30!)
-7:   REG_PGA_PWR (0x1C) = 0x80    -- PGA_CAP_EN bit7 (X-03 fix)
-8:   CTRL1 = 0x2F  (GAINS=128x, VLDO=3.0V)   ← після analog init
-9:   CTRL2 = 0x30  (CRS=80SPS, CHS=CH1)      ← після analog init
-10:  Enable conversions (CS bit)
-11:  Delay 15ms, discard first sample
-12:  CALS (wait ≤400ms)
-13:  Restore CTRL2 = 0x30
+5:   Write AVDDS|PUA|PUD (підняття аналогової + internal LDO)
+6:   REG_ADC_CTRL (0x15) |= 0x30  -- CLK_CHP disable (X-02 fix)
+7:   REG_PGA (0x1B) &= ~0x40      -- clear LDOMODE bit6 ONLY (НЕ писати 0x30!)
+8:   REG_PGA_PWR (0x1C) = 0x80    -- PGA_CAP_EN bit7 (X-03 fix)
+9:   CTRL1 = 0x2F  (GAINS=128x, VLDO=3.0V)   ← після analog init
+10:  CTRL2 = 0x30  (CRS=80SPS, CHS=CH1)      ← після analog init
+11:  Enable conversions (CS bit)
+12:  Delay 15ms, discard first sample
+13:  CALS (wait ≤400ms)
+14:  Restore CTRL2 = 0x30
 ```
 
 **Апаратна верифікація (2026-04-10):** `Startup OK: PU_CTRL=0x9E REG_PGA=0x00` — BYPASS_EN=0 підтверджено.
