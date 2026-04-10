@@ -132,7 +132,6 @@ private:
     SemaphoreHandle_t _mutex        = nullptr;
 
     // ── Constants ────────────────────────────────────────────────────────────
-    static constexpr float    MASS_REF_G     = 33.3f;   // ADR-NAU-005: XUSSR10 reference
     static constexpr uint16_t INIT_TIMEOUT_MS= 200;     // Power-up ready timeout
     static constexpr uint8_t  MAX_ERRORS     = 10;      // Error threshold -> ERROR state
 
@@ -172,6 +171,11 @@ private:
     void     _setError(uint8_t code, const char* fmt, ...);
 
 public:
+
+    // ── Public constants ──────────────────────────────────────────────────────
+    // Reference mass for mass_n normalization (ADR-NAU-005).
+    // Used in doMeasCompute() to compute mass_n = mass_g / MASS_REF_G for 7D vector (D-12d).
+    static constexpr float MASS_REF_G = 33.3f;   // XUSSR10, heaviest class
 
     // ── IPlugin metadata ──────────────────────────────────────────────────────
     const char* getName()    const override { return "NAU7802Plugin"; }

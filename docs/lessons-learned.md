@@ -43,6 +43,22 @@ SDA/SCL/Hz зберігаються в `_sda`, `_scl`, `_i2cHz` при `initiali
 
 ---
 
+## 2026-04-10 — D-12d: `constexpr` у `private` недоступний для зовнішніх callerів
+
+**Середовище:** C++17 / GCC ESP32, NAU7802Plugin.h  
+**Симптом:** Помилка компіляції `'constexpr const float NAU7802Plugin::MASS_REF_G' is private within this context` при спробі використати `NAU7802Plugin::MASS_REF_G` в `src/main.cpp` та в `saveDiscoveryDump()`.  
+**Причина:** `MASS_REF_G = 33.3f` була у `private:` блоці NAU7802Plugin.h. У C++ `private static constexpr` повністю недоступні зовні класу навіть для читання.  
+**Рішення:** Переміщено `MASS_REF_G` до нового `public:` блоку:
+```cpp
+// NAU7802Plugin.h — public section
+static constexpr float MASS_REF_G = 33.3f;   // XUSSR10, heaviest class (ADR-NAU-005)
+```
+Видалено з `private:` блоку. Всі посилання з main.cpp (`sMassG / NAU7802Plugin::MASS_REF_G`) компілюються нормально.  
+**Де в коді:** `lib/NAU7802Plugin/src/NAU7802Plugin.h` — public constants block  
+**Правило:** `static constexpr` що виступають частиною публічного API (документовані в архіт. специф.) **мусять** бути в `public:` секції. "Constant as implementation detail" → private. "Constant as interface spec" → public.
+
+---
+
 ## 2026-03-11 — ESP32-S3 Boot Loop: три незалежні причини
 
 **Середовище:** ESP32-S3FN8 (M5Stack Cardputer-Adv), PlatformIO, espressif32 6.13.0  

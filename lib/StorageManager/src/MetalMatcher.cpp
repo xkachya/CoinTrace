@@ -54,17 +54,17 @@ bool MetalMatcher::loadConfig(SDCardManager* sd, SemaphoreHandle_t spiMutex) {
         return false;
     }
 
-    // Parse full_weights[6]  (ADR-VEC-002: size 5 still accepted for backward compat)
+    // Parse full_weights[7]  (D-12d: size 6 still accepted for backward compat)
     JsonArray fw = doc["full_weights"];
     const uint8_t fw_n = (uint8_t)fw.size();
-    for (uint8_t i = 0; i < fw_n && i < 6; i++) {
+    for (uint8_t i = 0; i < fw_n && i < 7; i++) {
         cfg_.full_weights[i] = fw[i] | cfg_.full_weights[i];
     }
 
-    // Parse quick_weights[6]  (size 5 still accepted for backward compat)
+    // Parse quick_weights[7]  (size 6 still accepted for backward compat)
     JsonArray qw = doc["quick_weights"];
     const uint8_t qw_n = (uint8_t)qw.size();
-    for (uint8_t i = 0; i < qw_n && i < 6; i++) {
+    for (uint8_t i = 0; i < qw_n && i < 7; i++) {
         cfg_.quick_weights[i] = qw[i] | cfg_.quick_weights[i];
     }
 
@@ -72,24 +72,26 @@ bool MetalMatcher::loadConfig(SDCardManager* sd, SemaphoreHandle_t spiMutex) {
     cfg_.min_confidence     = doc["min_confidence"]     | cfg_.min_confidence;
     cfg_.ferro_thresh_dL1_n = doc["ferro_thresh_dL1_n"] | cfg_.ferro_thresh_dL1_n;
 
-    log_i("Matcher", "SD config loaded — sigma=%.2f full_w=[%.1f,%.1f,%.1f,%.1f,%.1f,%.1f]",
+    log_i("Matcher", "SD config loaded — sigma=%.2f full_w=[%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f]",
           cfg_.sigma,
           cfg_.full_weights[0], cfg_.full_weights[1], cfg_.full_weights[2],
-          cfg_.full_weights[3], cfg_.full_weights[4], cfg_.full_weights[5]);
+          cfg_.full_weights[3], cfg_.full_weights[4], cfg_.full_weights[5],
+          cfg_.full_weights[6]);
     return true;
 }
 
 // ── matchFull() ───────────────────────────────────────────────────────────────
 
-MatchResult MetalMatcher::matchFull(const Measurement& m, float df_n, float df1_n) const {
+MatchResult MetalMatcher::matchFull(const Measurement& m, float df_n, float df1_n, float mass_n) const {
     // Normalization inside (ADR-M6: caller never touches 800/2000 constants)
     const float dRp1_n = VectorCompute::dRp1_n(m);
     const float k1v    = VectorCompute::k1(m);
     const float k2v    = VectorCompute::k2(m);
     // df_n  = (fSensor@0.6mm  − fSensor_empty) / fSensor_empty — passed from doMeasCompute() (ADR-VEC-001)
     // df1_n = (fSensor@1.6mm  − fSensor_empty) / fSensor_empty — passed from doMeasCompute() (ADR-VEC-002)
+    // mass_n = mass_g / MASS_REF_G from NAU7802Plugin; -1.0f = sentinel (D-12d)
     const float dL1_n  = VectorCompute::dL1_n(m);
-    return doMatch(dRp1_n, k1v, k2v, df_n, dL1_n, df1_n, cfg_.full_weights, ALGO_FULL);
+    return doMatch(dRp1_n, k1v, k2v, df_n, dL1_n, df1_n, cfg_.full_weights, ALGO_FULL, mass_n);
 }
 
 // ── matchQuick() ──────────────────────────────────────────────────────────────
@@ -102,7 +104,8 @@ MatchResult MetalMatcher::matchQuick(float rpLive, float rpBase,
     const float dRp1_n = (rpBase > 1.0f) ? (rpBase - rpLive) / 800.0f : 0.0f;
     const float dL1_n  = (lLive - lBase) / 2000.0f;
     // k1, k2, df_n = 0.0 — unavailable in Quick (no spacers), quick_weights nullify them
-    return doMatch(dRp1_n, 0.0f, 0.0f, 0.0f, dL1_n, 0.0f, cfg_.quick_weights, ALGO_QUICK);
+    // mass_n = -1.0f (sentinel) — mass not acquired during Quick, w6=0 enforced by sentinel
+    return doMatch(dRp1_n, 0.0f, 0.0f, 0.0f, dL1_n, 0.0f, cfg_.quick_weights, ALGO_QUICK, -1.0f);
 }
 
 // ── doMatch() ─────────────────────────────────────────────────────────────────
@@ -119,7 +122,8 @@ MatchResult MetalMatcher::matchQuick(float rpLive, float rpBase,
 //   Optimisation path: cache_->query(…, return_distances_only) in Phase 2.
 
 MatchResult MetalMatcher::doMatch(float dRp1_n, float k1, float k2, float df_n,
-                                  float dL1_n, float df1_n, const float* weights, uint8_t algo) const {
+                                  float dL1_n, float df1_n, const float* weights, uint8_t algo,
+                                  float mass_n) const {
     MatchResult result = {};
     result.algo  = algo;
     result.valid = false;
@@ -131,7 +135,7 @@ MatchResult MetalMatcher::doMatch(float dRp1_n, float k1, float k2, float df_n,
     // Fetch top-4 from cache using our weights.
     // top-1 → result, top-2..top-4 → alternatives[].
     QueryResult qr[4] = {};
-    const uint8_t n = cache_->query(dRp1_n, k1, k2, df_n, dL1_n, df1_n, qr, 4, weights);
+    const uint8_t n = cache_->query(dRp1_n, k1, k2, df_n, dL1_n, df1_n, qr, 4, weights, mass_n);
 
     if (n == 0) {
         return result;
@@ -164,6 +168,10 @@ MatchResult MetalMatcher::doMatch(float dRp1_n, float k1, float k2, float df_n,
     result.dist_components[3] = sqrtf(weights[3] * d3 * d3);
     result.dist_components[4] = sqrtf(weights[4] * d4 * d4);
     result.dist_components[5] = sqrtf(weights[5] * d5 * d5);
+    // D-12d: dim-6 contribution; zerod when either side is a sentinel
+    const float eff_w6  = (mass_n >= 0.0f && top->mass_n >= 0.0f) ? weights[6] : 0.0f;
+    const float d6_mass = (top->mass_n >= 0.0f) ? (mass_n - top->mass_n) : 0.0f;
+    result.dist_components[6] = sqrtf(eff_w6 * d6_mass * d6_mass);
 
     // ── Alternatives (top-2..top-4) ───────────────────────────────────────────
     result.alt_count = 0;
@@ -183,11 +191,11 @@ MatchResult MetalMatcher::doMatch(float dRp1_n, float k1, float k2, float df_n,
 // [SD-A-03] log_i only — no Logger::*
 
 void MetalMatcher::logTopCandidates(const MatchResult& r) const {
-    log_i("Meas", "#1 %-8s conf=%.2f dist=%.4f [%.3f|%.3f|%.3f|%.3f|%.3f|%.3f] ferro=%s",
+    log_i("Meas", "#1 %-8s conf=%.2f dist=%.4f [%.3f|%.3f|%.3f|%.3f|%.3f|%.3f|%.3f] ferro=%s",
           r.metal_code, r.confidence, r.distance,
           r.dist_components[0], r.dist_components[1],
           r.dist_components[2], r.dist_components[3], r.dist_components[4],
-          r.dist_components[5], r.is_ferro ? "Y" : "n");
+          r.dist_components[5], r.dist_components[6], r.is_ferro ? "Y" : "n");
     for (uint8_t i = 0; i < r.alt_count; ++i) {
         log_i("Meas", "#%u %-8s conf=%.2f dist=%.4f",
               i + 2,

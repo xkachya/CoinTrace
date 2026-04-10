@@ -135,7 +135,7 @@ bool FingerprintCache::init(LittleFSManager& lfs, SDCardManager* sdCard,
 
 uint8_t FingerprintCache::query(float dRp1_n, float k1, float k2, float df_n, float dL1_n, float df1_n,
                                 QueryResult* results, uint8_t maxResults,
-                                const float* weights) const {
+                                const float* weights, float mass_n) const {
     if (!ready_ || count_ == 0 || results == nullptr || maxResults == 0) return 0;
 
     const uint8_t topN = (maxResults < QUERY_TOP_N) ? maxResults : QUERY_TOP_N;
@@ -157,6 +157,9 @@ uint8_t FingerprintCache::query(float dRp1_n, float k1, float k2, float df_n, fl
     const float w3    = weights ? weights[3] : 1.0f;
     const float w4    = weights ? weights[4] : 1.0f;
     const float w5    = weights ? weights[5] : 1.0f;
+    // D-12d: w6 active only when live mass_n is set (not sentinel) AND weights array has slot 6.
+    // DB entries with mass_n=-1.0f contribute d6=0 (zeroed per-entry below).
+    const float w6    = (mass_n >= 0.0f && weights) ? weights[6] : 0.0f;
     const float sigma2 = CONFIDENCE_SIGMA * CONFIDENCE_SIGMA;
     const uint8_t slots = (topN < count_) ? topN : (uint8_t)count_;
 
@@ -169,9 +172,11 @@ uint8_t FingerprintCache::query(float dRp1_n, float k1, float k2, float df_n, fl
         const float d3 = df_n   - e.df_n;
         const float d4 = dL1_n  - e.dL1_n;
         const float d5 = df1_n  - e.df1_n;
+        // D-12d: d6 zero if DB entry has no mass_n (old gen-6 entries, or NAU absent on recording)
+        const float d6 = (e.mass_n >= 0.0f) ? (mass_n - e.mass_n) : 0.0f;
 
         // Weighted Euclidean distance. weights==nullptr → equal weights 1.0 (METAL_MATCHER_ARCHITECTURE.md §8).
-        const float dist = sqrtf(w0*d0*d0 + w1*d1*d1 + w2*d2*d2 + w3*d3*d3 + w4*d4*d4 + w5*d5*d5);
+        const float dist = sqrtf(w0*d0*d0 + w1*d1*d1 + w2*d2*d2 + w3*d3*d3 + w4*d4*d4 + w5*d5*d5 + w6*d6*d6);
 
         // Insert into sorted results (ascending distance)
         for (uint8_t j = 0; j < slots; ++j) {
@@ -346,6 +351,7 @@ bool FingerprintCache::buildFromSD(LittleFSManager& lfs, SDCardManager& sd,
         e.df_n          = c["df_n"]    | 0.0f;  // ADR-VEC-001: slope replaced by df_n
         e.dL1_n         = c["dL1_n"]   | 0.0f;
         e.df1_n         = c["df1_n"]   | 0.0f;  // ADR-VEC-002: freq shift @1.6mm; 0.0 for gen-3 entries
+        e.mass_n        = c["mass_n"]  | -1.0f; // D-12d: normalized mass; -1.0 for gen-6/no-NAU entries
         e.radius_95pct  = entry["radius_95pct"]  | 0.0f;
         e.records_count = entry["records_count"] | 0;
 
@@ -419,6 +425,7 @@ bool FingerprintCache::loadFromLFS(fs::LittleFSFS& fs) {
         e.df_n          = c["df_n"]    | 0.0f;  // ADR-VEC-001: slope replaced by df_n
         e.dL1_n         = c["dL1_n"]   | 0.0f;
         e.df1_n         = c["df1_n"]   | 0.0f;  // ADR-VEC-002: freq shift @1.6mm; 0.0 for gen-3 entries
+        e.mass_n        = c["mass_n"]  | -1.0f; // D-12d: normalized mass; -1.0 for gen-6/no-NAU entries
         e.radius_95pct  = entry["radius_95pct"]  | 0.0f;
         e.records_count = entry["records_count"] | 0;
 
@@ -444,15 +451,15 @@ bool FingerprintCache::saveToLFS(fs::LittleFSFS& fs, uint32_t generation) {
         const CacheEntry& e = entries_[i];
         if (i > 0) f.print(',');
 
-        char buf[384];  // max entry ~310 bytes: id(31)+metal_code(7)+coin_name(47)+protocol_id(23)+JSON+7 floats (includes df1_n)
+        char buf[400];  // max entry ~325 bytes: id+metal_code+coin_name+protocol_id+JSON+8 floats (incl. mass_n D-12d)
         snprintf(buf, sizeof(buf),
             "{\"id\":\"%s\",\"metal_code\":\"%s\",\"coin_name\":\"%s\","
             "\"protocol_id\":\"%s\","
             "\"centroid\":{\"dRp1_n\":%.4f,\"k1\":%.4f,\"k2\":%.4f,"
-            "\"df_n\":%.4f,\"dL1_n\":%.4f,\"df1_n\":%.4f},"
+            "\"df_n\":%.4f,\"dL1_n\":%.4f,\"df1_n\":%.4f,\"mass_n\":%.4f},"
             "\"radius_95pct\":%.4f,\"records_count\":%u}",
             e.id, e.metal_code, e.coin_name, e.protocol_id,
-            e.dRp1_n, e.k1, e.k2, e.df_n, e.dL1_n, e.df1_n,
+            e.dRp1_n, e.k1, e.k2, e.df_n, e.dL1_n, e.df1_n, e.mass_n,
             e.radius_95pct, (unsigned)e.records_count);
         f.print(buf);
     }

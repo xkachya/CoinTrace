@@ -62,6 +62,8 @@ static LDC1101Plugin*    gLDC = nullptr;
 // PluginSystem yet (D-12d). Pointer is kept for C-13 smoke test and future
 // D-12c calibration wizard ('K' key). Null if hardware absent.
 static NAU7802Plugin*    gNAU = nullptr;
+// D-12d: current measurement mass_g; -1.0f = not measured (NAU absent / uncalibrated / STEP_WEIGHT not reached yet)
+static float             sMassG = -1.0f;
 
 // RTC memory survives esp_restart() — used to pass boot reason into the
 // normal Logger pipeline (→ LittleFS log) after a recovery restart.
@@ -853,6 +855,11 @@ static void saveDiscoveryDump(const MatchResult& mr) {
         pv["df_n"] = roundf((sSteps[0].fSensorHz - baseFS) / baseFS * 10000.0f) / 10000.0f;
     if (sSteps[1].fSensorHz > 0.0f && baseFS > 0.0f)  // ADR-VEC-002
         pv["df1_n"] = roundf((sSteps[1].fSensorHz - baseFS) / baseFS * 10000.0f) / 10000.0f;
+    {   // D-12d: include mass_n when NAU calibrated; omit otherwise (backward compat gen-6 DB)
+        const float pv_mass_n = (sMassG > 0.0f) ? (sMassG / NAU7802Plugin::MASS_REF_G) : -1.0f;
+        if (pv_mass_n >= 0.0f)
+            pv["mass_n"] = roundf(pv_mass_n * 10000.0f) / 10000.0f;
+    }
 
     // Discovery-specific derived parameters
     JsonObject dd = doc["discovery_derived"].to<JsonObject>();
@@ -931,10 +938,12 @@ static void doMeasCompute() {
     // ── 3. Fingerprint match via MetalMatcher (skip on drift — unreliable vector) ──
     // matchFull() normalises internally via VectorCompute (ADR-M6).
     // df_n = (fSensor_coin - fSensor_empty) / fSensor_empty is passed explicitly (ADR-VEC-001).
+    // mass_n = sMassG / MASS_REF_G; sentinel -1.0f when NAU absent/uncalibrated (D-12d).
     // logTopCandidates() emits #1..#4 with per-axis dist breakdown to UART.
     MatchResult mr = {};  // always declared — used by D-3 saveDiscoveryDump()
+    const float mass_n = (sMassG > 0.0f) ? (sMassG / NAU7802Plugin::MASS_REF_G) : -1.0f;
     if (gMatcher.isReady() && !sMeas.driftWarn) {
-        mr = gMatcher.matchFull(sMeas.m, meas_df_n, meas_df1_n);
+        mr = gMatcher.matchFull(sMeas.m, meas_df_n, meas_df1_n, mass_n);
         gMatcher.logTopCandidates(mr);
         if (mr.valid) {
             strlcpy(sMeas.m.metal_code, mr.metal_code, sizeof(sMeas.m.metal_code));
@@ -1768,6 +1777,7 @@ void loop() {
   
   // Plugin update loop (runs all enabled plugins, ≤ 10 ms each)
   gPluginSystem.update();
+  if (gNAU) gNAU->update();  // D-12d: NAU7802 non-blocking acquisition pump (ADR-NAU-003)
 
   // ── One-time diagnostic: LFS task stack watermark ────────────────────────────
   // Logged once after 10 s so task has processed all boot-log entries.

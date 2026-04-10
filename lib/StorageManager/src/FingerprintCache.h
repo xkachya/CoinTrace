@@ -58,6 +58,7 @@ struct CacheEntry {
     float    df_n;              // (fSensor_coin - fSensor_empty) / fSensor_empty  (ADR-VEC-001)
     float    dL1_n;             // normalized = dL1 / 2000 µH
     float    df1_n;             // (fSensor@1.6mm − fSensor_empty) / fSensor_empty  (ADR-VEC-002)
+    float    mass_n;            // normalized = mass_g / NAU7802Plugin::MASS_REF_G  (D-12d); -1.0f = not in DB
     float    radius_95pct;
     uint16_t records_count;
 };
@@ -144,12 +145,13 @@ public:
     //
     // Thread safe for concurrent reads (no writes after init()).
     //
-    // weights: optional array [w_dRp1_n, w_k1, w_k2, w_df_n, w_dL1_n, w_df1_n].  (ADR-VEC-002)
-    //   nullptr → equal weights 1.0 (backward-compatible with all existing callers).
+    // weights: optional array [w_dRp1_n, w_k1, w_k2, w_df_n, w_dL1_n, w_df1_n, w_mass_n].  (D-12d)
+    //   nullptr → equal weights 1.0 for dims 0-5; mass_n dim is zeroed via sentinel anyway.
     //   MetalMatcher passes cfg_.full_weights or cfg_.quick_weights (METAL_MATCHER_ARCHITECTURE.md §8).
+    // mass_n: normalized live mass (= mass_g / MASS_REF_G); -1.0f = sentinel (not measured → dim zeroed).
     uint8_t query(float dRp1_n, float k1, float k2, float df_n, float dL1_n, float df1_n,
                   QueryResult* results, uint8_t maxResults = QUERY_TOP_N,
-                  const float* weights = nullptr) const;
+                  const float* weights = nullptr, float mass_n = -1.0f) const;
 
 private:
     // ── Storage ────────────────────────────────────────────────────────────

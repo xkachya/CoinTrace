@@ -55,9 +55,9 @@ struct MatchResult {
 
     // ── Debug / tuning ─────────────────────────────────────────────────────
     // Per-axis weighted contribution: √(wi·Δi²) for each component.
-    // Zero for axes where wi = 0 (e.g. k1/k2 in Quick mode).
+    // Zero for axes where wi = 0 (e.g. k1/k2 in Quick mode, mass_n when sentinel).
     // Use these for tuning: compare non-zero axes to identify which dimension drives mismatch.
-    float   dist_components[6]; // [dRp1_n, k1, k2, df_n, dL1_n, df1_n]  (ADR-VEC-002)
+    float   dist_components[7]; // [dRp1_n, k1, k2, df_n, dL1_n, df1_n, mass_n]  (D-12d)
 
     // ── Alternatives ──────────────────────────────────────────────────────
     Alternative alternatives[3];
@@ -71,11 +71,12 @@ public:
 
     // ── Configuration (loaded from SD:/CoinTrace/matcher.json) ───────────────
     struct Config {
-        // Weights for 6D vector: [dRp1_n, k1, k2, df_n, dL1_n, df1_n]  (ADR-VEC-002)
-        // C-5/C-8 defaults (METAL_MATCHER_ARCHITECTURE.md §7):
-        float full_weights[6]    = {1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 0.0f};
-        // Quick Screen: k1/k2/df_n=0.0 → only dRp1_n and dL1_n contribute; df1_n inactive
-        float quick_weights[6]   = {1.5f, 0.0f, 0.0f, 0.0f, 2.5f, 0.0f};
+        // Weights for 7D vector: [dRp1_n, k1, k2, df_n, dL1_n, df1_n, mass_n]  (D-12d)
+        // C-5/C-8 defaults for dims 0-5 (METAL_MATCHER_ARCHITECTURE.md §7);
+        // mass_n weight=5.0: strong discriminator once DB gen-7 records accumulate.
+        float full_weights[7]    = {1.0f, 1.0f, 1.0f, 0.0f, 1.0f, 0.0f, 5.0f};
+        // Quick Screen: mass_n not acquired during quick scan; weight=0 (sentinel zeros it anyway)
+        float quick_weights[7]   = {1.5f, 0.0f, 0.0f, 0.0f, 2.5f, 0.0f, 0.0f};
         // Gaussian confidence: conf = exp(−dist²/σ²). σ=0.35 validated on C-5 dataset.
         float sigma              = 0.35f;
         // Below min_confidence → valid=false
@@ -104,15 +105,18 @@ public:
 
     // ── Matching ──────────────────────────────────────────────────────────────
 
-    // Full 5D match. Normalizes Measurement internally via VectorCompute.
+    // Full 7D match. Normalizes Measurement internally via VectorCompute.
     // Requires complete 4-position cycle (rp[0..2] + l[0..1] valid).
+    // mass_n = mass_g / MASS_REF_G from NAU7802Plugin; -1.0f = sentinel (NAU absent / uncalibrated).
     // Call from doMeasCompute() after STEP_DRIFT capture.
-    MatchResult matchFull(const Measurement& m, float df_n = 0.0f, float df1_n = 0.0f) const;
+    MatchResult matchFull(const Measurement& m, float df_n = 0.0f, float df1_n = 0.0f,
+                          float mass_n = -1.0f) const;
 
     // Quick 2D match. Normalizes raw sensor values internally (ADR-M6).
     //   rpLive, lLive  — current live readings  (getLiveRp(), getLiveL())
     //   rpBase, lBase  — no-coin baseline        (getBaseline(), getLBaseline())
-    // Uses quick_weights[5] = [1.5, 0, 0, 0, 2.5].
+    // mass_n not available during quick scan — always defaults to -1.0f (sentinel).
+    // Uses quick_weights[5] = [1.5, 0, 0, 0, 2.5, 0, 0].
     // ⚠️ Phase 1 does NOT call this — it uses threshold-based classifyQuick() instead.
     //    Phase 2 (after Wave 9 C-5 quick_centroid data) will call this from drawQuickScreen().
     MatchResult matchQuick(float rpLive, float rpBase,
@@ -137,6 +141,8 @@ private:
     // Shared implementation for matchFull and matchQuick.
     // Calls cache_->query() with the given weights, builds MatchResult with
     // dist_components[], is_ferro, alternatives[], and our cfg_.sigma confidence.
+    // mass_n: sentinel -1.0f → dim-6 weight zeroed → pure 6D fallback.
     MatchResult doMatch(float dRp1_n, float k1, float k2, float df_n,
-                        float dL1_n, float df1_n, const float* weights, uint8_t algo) const;
+                        float dL1_n, float df1_n, const float* weights, uint8_t algo,
+                        float mass_n = -1.0f) const;
 };

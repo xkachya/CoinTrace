@@ -1,8 +1,8 @@
 # NAU7802 Weight Sensor — Architecture Specification
 
-**Версія:** 1.6.0  
+**Версія:** 1.7.0  
 **Дата:** 2026-04-10  
-**Статус:** 🔄 Active — D-12c ✅ done (calibration wizard hw-verified); D-12d next  
+**Статус:** 🔄 Active — D-12d ✅ done (7D infrastructure: gNAU->update, matchFull 7D, NDJSON mass_n); D-12e next  
 **Hardware:** Nuvoton NAU7802 24-bit ADC + 100g load cell  
 **Chip revision:** NAU7802 Rev 2.6 (datasheet EN)  
 **Мотивація:** Wave 10 — 7D production vector (додається `mass_n`) для вирішення 5 критичних пар < 1.0σ у gen-6 DB  
@@ -1735,13 +1735,23 @@ SETTLE_MS    Acq total    Timing risk    Рекомендація
 - [x] **FIX B-10:** `_ensureConversionsRunning()` pre-flight у `tare()` + `calibrate()` — WiFi-induced I2C hang/chip reset (PU_CTRL=0xFF або CS=0) відновлюється автоматично
 - [x] Hardware verified: zero_offset=-113845, scale=0.00005337 g/count, ref=20.0g, sigma=78-143 MARGINAL
 
-### D-12d: Acquisition integration
+### D-12d: Acquisition integration ✅ DONE (2026-04-10)
 - [x] `startAcquisition()` / `isAcquisitionComplete()` / `getLastMassG()` / `getLastMassN()`
 - [x] Non-blocking state machine в `_updateAcqStateMachine()`
-- [ ] Виклик `gNAU->update()` в main loop
-- [ ] Виклик `gNAU->startAcquisition()` в STEP_WEIGHT entry (ADR-NAU-008)
-- [ ] Зчитування `mass_g` в COMPUTE state
-- [ ] mass_n = mass_g / MASS_REF_G в production_vector (7D)
+- [x] Виклик `gNAU->update()` в main loop (loop() після gPluginSystem.update())
+- [x] `static float sMassG = -1.0f` global в main.cpp (сентинель -1.0f = NAU відсутній/не калібрований)
+- [x] `NAU7802Plugin::MASS_REF_G` перенесено в public (ADR-NAU-005)
+- [x] `FingerprintCache::CacheEntry` розширено: додано `float mass_n = -1.0f` + парсинг `c["mass_n"] | -1.0f` в обох місцях (SD + LFS)
+- [x] `FingerprintCache::query()` розширено: додано `float mass_n = -1.0f` param; w6 активний лише коли live mass_n задано
+- [x] `MetalMatcher::Config` розширено: `full_weights[7]`, `quick_weights[7]` (дефолт w6=5.0/0.0)
+- [x] `MetalMatcher::MatchResult` розширено: `dist_components[7]`
+- [x] `matchFull(..., float mass_n=-1.0f)` — 4-ий default-param; зворотна сумісність збережена
+- [x] `matchQuick()` і `doMatch()` оновлено із sentinel -1.0f
+- [x] `doMeasCompute()`: `mass_n = sMassG / MASS_REF_G` передається в matchFull (sentinel fallback = pure 6D)
+- [x] NDJSON `production_vector`: додано `mass_n` (опускається коли NAU відсутній → gen-6 DB backward compat)
+- [x] `saveToLFS()` серіалізує mass_n (вкл.юч. sentinel -1.0f)
+- [x] **Firmware build: SUCCESS** (RAM 64.6%, Flash 58.9%); **native-test 10/10 PASSED** (no regressions)
+- [ ] Виклик `gNAU->startAcquisition()` в STEP_WEIGHT entry (ADR-NAU-008) — D-12e
 
 ### D-12e: NDJSON + DB schema
 - [ ] Додати `mass_g`, `mass_n` в NDJSON top-level та production_vector
@@ -1767,6 +1777,7 @@ SETTLE_MS    Acq total    Timing risk    Рекомендація
 ---
 
 *Документ: `docs/architecture/NAU7802_ARCHITECTURE.md`*  
+*Версія: 1.7.0 | Дата: 2026-04-10 — D-12d done: 6D→7D infrastructure — gNAU->update() in loop(), sMassG global, FingerprintCache::CacheEntry+mass_n, query() 7-param, MetalMatcher::Config/MatchResult[7], matchFull 4th default param, doMeasCompute() mass_n sentinel, NDJSON production_vector mass_n field, saveToLFS mass_n serialize, NAU7802Plugin::MASS_REF_G перенесено в public; firmware build SUCCESS, native-test 10/10 PASSED*  
 *Версія: 1.6.0 | Дата: 2026-04-10 — D-12c hw-verified: calibration wizard `runCalibrationWizard()` ('K' key), 3-screen flow (tare→calibrate→confirm), scale=0.00005337 g/count @ 20g ref; B-10: `_ensureConversionsRunning()` pre-flight у tare()/calibrate() усуває WiFi-induced I2C hang (PU_CTRL=0xFF) та chip reset (CS=0); §9.10 B-10 додано; §12 D-12c checklist [x]*  
 *Версія: 1.4.0 | Дата: 2026-04-09 — B-08 post-commit audit: CTRL1/CTRL2 бітові позиції виправлені; CTRL1_VAL 0xBC→0x2F (VLDO[5:3]+GAINS[2:0]); CTRL2_VAL 0x60→0x30 (CRS[6:4]); mask ~0xE0→~0x70; §2.2/§2.3/§2.4 arch doc синхронізовано*  
 *Версія: 1.3.0 | Дата: 2026-04-09 — post-review fixes: (1) §2.2 PU_CTRL bit table виправлена (AVDDS=bit7, не bit3); (2) I2C_CTRL 0x1F→0x11; REVISION_ID додано; (3) §2.3 startup sequence оновлена (імпл. AVDDS step 4, CALS steps 13-14 документовано); (4) §12 D-12a/b/c чекліст оновлено [x]; code: delay(1)→10ms, NVS key виправлено*  
