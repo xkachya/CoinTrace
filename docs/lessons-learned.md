@@ -19,6 +19,30 @@
 
 ---
 
+## 2026-04-10 — NAU7802: tare()/calibrate() зависали після WiFi startup
+
+**Середовище:** ESP32-S3 (M5Cardputer-Adv), NAU7802Plugin, I2C SDA=8 SCL=9 400kHz  
+**Симптом:** Натискання K → wizard → ENTER (порожня платформа) → `tare() capture failed` через ~6-15 секунд, хоча smoke test при завантаженні проходив успішно. Інший запуск: tare пройшов, потім `I2C write failed: reg=0x02 err=5` + `calibrate() capture failed`.
+
+**Причина:** ESP32 WiFi init (`WiFi.begin()`) два незалежних ефекти:
+1. **I2C bus hang (PU_CTRL=0xFF):** WiFi використовує GPIO interrupts і DMA, що може спричинити voltage glitch або bit-bang конфлікт на I2C-шині. `Wire.endTransmission()` повертає `err=5` (timeout), `_readReg()` повертає `0xFF`. `_isReady()` завжди false → `_blockingCaptureSamples()` крутить петлю весь deadline (32×200мс = 6400мс) із 0 зразків → повертає false.
+2. **Chip register reset (CS=0):** Короткочасний просід 3.3V під час WiFi radio init скидає регістри NAU7802 (зберігає `_initialized=true` у RAM, але CS-bit у PU_CTRL = 0 → мікросхема не запускає конверсії).
+
+**Рішення:** `_ensureConversionsRunning()` pre-flight перед будь-якою blocking операцією:
+```cpp
+// 1. Якщо PU_CTRL=0xFF → Wire.end() / Wire.begin(sda,scl) / Wire.setClock(hz) / re-probe
+// 2. Якщо CS=0 (chip reset) → _startupSequence() + delay(50)
+// Викликається на початку tare() і calibrate(float, uint16_t)
+```
+SDA/SCL/Hz зберігаються в `_sda`, `_scl`, `_i2cHz` при `initialize()` (default 8/9/400000).
+
+**Де в коді:** `lib/NAU7802Plugin/src/NAU7802Plugin.cpp` — `_ensureConversionsRunning()`, `tare()`, `calibrate(float, uint16_t)`  
+**Архітектура:** `docs/architecture/NAU7802_ARCHITECTURE.md` §9.10 B-10
+
+**Правило:** Будь-які blocking I2C операції після WiFi.begin() **мусять** перевіряти стан шини та CS-біт перед початком capture-петлі. ESP32 WiFi = потенційний I2C disruptor.
+
+---
+
 ## 2026-03-11 — ESP32-S3 Boot Loop: три незалежні причини
 
 **Середовище:** ESP32-S3FN8 (M5Stack Cardputer-Adv), PlatformIO, espressif32 6.13.0  

@@ -147,6 +147,12 @@ private:
     char              _lastErrorMsg[64] = {};
     ErrorCode         _lastError        = {0, "No error"};
 
+    // ── I2C bus recovery parameters (used in tare() pre-flight) ─────────────
+    // Stored at initialize() time so tare() can reset the bus after WiFi-induced hangs.
+    int8_t            _sda          = 8;         // SDA GPIO; overridden by config "nau7802.sda"
+    int8_t            _scl          = 9;         // SCL GPIO; overridden by config "nau7802.scl"
+    uint32_t          _i2cHz        = 400000;    // I2C clock Hz; overridden by "nau7802.i2c_hz"
+
     // ── Private hardware methods ─────────────────────────────────────────────
     bool     _writeReg(uint8_t reg, uint8_t val);
     uint8_t  _readReg(uint8_t reg);
@@ -161,6 +167,7 @@ private:
 
     // ── Private calibration helpers ──────────────────────────────────────────
     bool     _blockingCaptureSamples(uint16_t n, float* out_mean, float* out_sigma);
+    bool     _ensureConversionsRunning();  // Pre-flight: recover I2C bus / chip reset before blocking ops
 
     void     _setError(uint8_t code, const char* fmt, ...);
 

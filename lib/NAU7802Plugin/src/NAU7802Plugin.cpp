@@ -242,10 +242,13 @@ bool NAU7802Plugin::initialize(PluginContext* ctx) {
         return false;
     }
 
-    // Optional: load I2C address from config
+    // Optional: load I2C address + bus parameters from config
     if (ctx->config) {
         int addr = ctx->config->getInt("nau7802.i2c_addr", 0x2A);
         if (addr > 0) _addr = (uint8_t)addr;
+        _sda   = (int8_t) ctx->config->getInt("nau7802.sda",    8);
+        _scl   = (int8_t) ctx->config->getInt("nau7802.scl",    9);
+        _i2cHz = (uint32_t)ctx->config->getInt("nau7802.i2c_hz", 400000);
     }
 
     // Check hardware presence before startup sequence
@@ -517,9 +520,48 @@ bool NAU7802Plugin::calibrate() {
     return false;
 }
 
+// Pre-flight: verify chip is alive and conversions are running before any blocking op.
+// ESP32 WiFi startup can (a) corrupt the I2C bus (PU_CTRL=0xFF) or (b) cause a brief
+// voltage dip that resets NAU7802 registers (CS cleared, conversions stopped).
+// Both make _blockingCaptureSamples() spin for the full deadline with 0 collected samples.
+bool NAU7802Plugin::_ensureConversionsRunning() {
+    uint8_t pu = _readReg(REG_PU_CTRL);
+    if (pu == 0xFF) {
+        if (_ctx && _ctx->log) {
+            _ctx->log->warning("NAU7802",
+                "pre-flight: PU_CTRL=0xFF — I2C bus hung; resetting (SDA=%d SCL=%d %lukHz)",
+                _sda, _scl, (unsigned long)(_i2cHz / 1000));
+        }
+        _ctx->wire->end();
+        delay(5);
+        _ctx->wire->begin(_sda, _scl);
+        _ctx->wire->setClock(_i2cHz);
+        delay(5);
+        pu = _readReg(REG_PU_CTRL);
+        if (pu == 0xFF) {
+            _setError(9, "NAU7802: I2C unresponsive after bus recovery");
+            return false;
+        }
+    }
+    if (!(pu & PU_CTRL_CS)) {
+        if (_ctx && _ctx->log) {
+            _ctx->log->warning("NAU7802",
+                "pre-flight: PU_CTRL=0x%02X — CS=0 (chip reset); re-running startup", pu);
+        }
+        if (!_startupSequence()) {
+            _setError(9, "NAU7802: startup recovery failed");
+            return false;
+        }
+        delay(50);  // allow first conversions at 80 SPS (~12.5 ms)
+    }
+    return true;
+}
+
 bool NAU7802Plugin::tare(uint16_t samples) {
     if (!_initialized) return false;
     _acqState = AcqState::IDLE;  // Abort any in-progress acquisition before blocking I2C (A-07)
+
+    if (!_ensureConversionsRunning()) return false;
 
     // Stay at 80 SPS for tare — empirically confirmed optimal for this noise environment.
     // Noise source is low-frequency mechanical vibration (0.3–3 Hz from fan/surface), NOT 50 Hz mains.
@@ -532,7 +574,11 @@ bool NAU7802Plugin::tare(uint16_t samples) {
     bool ok = _blockingCaptureSamples(samples, &mean, &sigma);
 
     if (!ok) {
-        _setError(9, "NAU7802: tare() capture failed");
+        uint8_t diag = _readReg(REG_PU_CTRL);
+        _setError(9, "NAU7802: tare() capture failed — PU_CTRL=0x%02X CS=%d CR=%d",
+                     diag,
+                     (diag != 0xFF) ? (int)!!(diag & PU_CTRL_CS) : -1,
+                     (diag != 0xFF) ? (int)!!(diag & PU_CTRL_CR) : -1);
         return false;
     }
 
@@ -569,6 +615,8 @@ bool NAU7802Plugin::calibrate(float known_mass_g, uint16_t samples) {
         return false;
     }
 
+    if (!_ensureConversionsRunning()) return false;
+
     // Stay at 80 SPS for calibration — same reason as tare() (see tare() comment).
 
     float mean, sigma;
@@ -578,7 +626,11 @@ bool NAU7802Plugin::calibrate(float known_mass_g, uint16_t samples) {
     _writeReg(REG_CTRL2, CTRL2_VAL);
 
     if (!ok) {
-        _setError(11, "NAU7802: calibrate() capture failed");
+        uint8_t diag = _readReg(REG_PU_CTRL);
+        _setError(11, "NAU7802: calibrate() capture failed — PU_CTRL=0x%02X CS=%d CR=%d",
+                      diag,
+                      (diag != 0xFF) ? (int)!!(diag & PU_CTRL_CS) : -1,
+                      (diag != 0xFF) ? (int)!!(diag & PU_CTRL_CR) : -1);
         return false;
     }
 

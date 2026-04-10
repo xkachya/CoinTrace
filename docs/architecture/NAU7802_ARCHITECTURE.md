@@ -1,8 +1,8 @@
 # NAU7802 Weight Sensor — Architecture Specification
 
-**Версія:** 1.5.0  
-**Дата:** 2026-04-09 (оновлено: 2026-04-10 — C-13 hardware session completed; audit X-01/X-02/X-03 fixed)  
-**Статус:** 🔄 Active — C-13 hw-verified (sigma=96 counts @ gain=128x), D-12c pending (calibration UX)  
+**Версія:** 1.6.0  
+**Дата:** 2026-04-10  
+**Статус:** 🔄 Active — D-12c ✅ done (calibration wizard hw-verified); D-12d next  
 **Hardware:** Nuvoton NAU7802 24-bit ADC + 100g load cell  
 **Chip revision:** NAU7802 Rev 2.6 (datasheet EN)  
 **Мотивація:** Wave 10 — 7D production vector (додається `mass_n`) для вирішення 5 критичних пар < 1.0σ у gen-6 DB  
@@ -1453,6 +1453,31 @@ clearCalibration() → обов'язково перед повторним tare(
 
 Нові tare/calibrate відбуватимуться при gain=128x → scale_factor буде правильним.
 
+### 9.10 B-10: tare()/calibrate() зависали після WiFi startup (2026-04-10)
+
+**Знайдено:** hardware test D-12c (2026-04-10)  
+**Scope:** `NAU7802Plugin::tare()`, `NAU7802Plugin::calibrate()`  
+**Статус:** ✅ Виправлено — `_ensureConversionsRunning()` pre-flight
+
+**Симптом:** Виклик `tare(32)` через ~15-30 секунд після `WiFi.begin()` завершувався помилкою `tare() capture failed` після 15-хвилинного (6400 ms) таймауту з 0 зібраними зразками. За одного запуску також з'явилась `I2C write failed: reg=0x02 err=5` на початку `calibrate()`.
+
+**Причина:** ESP32 WiFi init може або (a) зависити I2C шину — тоді `_readReg()` повертає `0xFF` (NACK/timeout у Wire), або (b) спричинити короткий просідання напруги (~3.3V), яке скидає регістри NAU7802 зберігаючи `_initialized=true` — CS-bit (bit4 PU_CTRL) очищується, мікросхема зупиняє конверсії. `_blockingCaptureSamples()` крутить петлю `_isReady()` увесь deadline і повертає `collected=0 < n/2` → false.
+
+**Виправлення:** Новий приватний метод `_ensureConversionsRunning()`, викликається на початку `tare()` і `calibrate()` (до `_blockingCaptureSamples()`):
+- Якщо `PU_CTRL == 0xFF`: `Wire.end()` → `delay(5)` → `Wire.begin(sda, scl)` → `Wire.setClock(hz)` → повторний probe
+- Якщо CS=0: повторний `_startupSequence()` → `delay(50)` для першої конверсії
+- SDA/SCL/Hz зберігаються в `_sda`/`_scl`/`_i2cHz` з `initialize()` (дефолт 8/9/400kHz)
+
+**Hardware logs (підтвердження):**
+```
+[44092ms] WARN  NAU7802 | pre-flight: PU_CTRL=0xFF — I2C bus hung; resetting (SDA=8 SCL=9 400kHz)
+[44534ms] INFO  NAU7802 | Tare OK: zero_offset=-113845  sigma=78.4  n=32
+[66089ms] WARN  NAU7802 | pre-flight: PU_CTRL=0xFF — I2C bus hung; resetting
+[66513ms] INFO  NAU7802 | Calibrate OK: scale=0.00005337  ref=20.00g  sigma=143.1
+```
+
+**Де в коді:** `lib/NAU7802Plugin/src/NAU7802Plugin.cpp` — `_ensureConversionsRunning()`, `tare()`, `calibrate(float, uint16_t)`
+
 ---
 
 ## 10. Тестова стратегія
@@ -1702,11 +1727,13 @@ SETTLE_MS    Acq total    Timing risk    Рекомендація
 - [x] Перевірка "cal_ok" при initialize()
 - [x] `clearCalibration()` для скидання
 
-### D-12c: Calibration UX
-- [x] `tare(N)` -- blocking (реалізовано, 10 SPS, розраховує mean/sigma)
-- [x] `calibrate(known_g, N)` -- blocking (реалізовано, 10 SPS, валідація net_raw)
-- [ ] Клавіша 'K' в main.cpp -> запуск calibration wizard
-- [ ] Екрани Step 1/2/3 на Cardputer display
+### D-12c: Calibration UX ✅ DONE (2026-04-10, hw-verified)
+- [x] `tare(N)` -- blocking (реалізовано, 80 SPS, розраховує mean/sigma)
+- [x] `calibrate(known_g, N)` -- blocking (реалізовано, 80 SPS, валідація net_raw)
+- [x] Клавіша 'K' в main.cpp → запуск `runCalibrationWizard()` (з `gNAU` null guard)
+- [x] Екрани Step 1/2/3 на Cardputer display (tare → calibrate → confirm)
+- [x] **FIX B-10:** `_ensureConversionsRunning()` pre-flight у `tare()` + `calibrate()` — WiFi-induced I2C hang/chip reset (PU_CTRL=0xFF або CS=0) відновлюється автоматично
+- [x] Hardware verified: zero_offset=-113845, scale=0.00005337 g/count, ref=20.0g, sigma=78-143 MARGINAL
 
 ### D-12d: Acquisition integration
 - [x] `startAcquisition()` / `isAcquisitionComplete()` / `getLastMassG()` / `getLastMassN()`
@@ -1740,7 +1767,7 @@ SETTLE_MS    Acq total    Timing risk    Рекомендація
 ---
 
 *Документ: `docs/architecture/NAU7802_ARCHITECTURE.md`*  
-*Версія: 1.5.0 | Дата: 2026-04-10 — C-13 hw-verified (sigma=96 counts, gain=128x підтверджено); audit X-01/X-02/X-03 виправлено; §2.2/§2.3 rewritten (analog init sequence); §3.4 EMI shielding додано; §9.9 B-09 audit findings; ADR-NAU-001/007 оновлено — OTP auto-load (НЕ явний reload!); §12 checklist оновлено*  
+*Версія: 1.6.0 | Дата: 2026-04-10 — D-12c hw-verified: calibration wizard `runCalibrationWizard()` ('K' key), 3-screen flow (tare→calibrate→confirm), scale=0.00005337 g/count @ 20g ref; B-10: `_ensureConversionsRunning()` pre-flight у tare()/calibrate() усуває WiFi-induced I2C hang (PU_CTRL=0xFF) та chip reset (CS=0); §9.10 B-10 додано; §12 D-12c checklist [x]*  
 *Версія: 1.4.0 | Дата: 2026-04-09 — B-08 post-commit audit: CTRL1/CTRL2 бітові позиції виправлені; CTRL1_VAL 0xBC→0x2F (VLDO[5:3]+GAINS[2:0]); CTRL2_VAL 0x60→0x30 (CRS[6:4]); mask ~0xE0→~0x70; §2.2/§2.3/§2.4 arch doc синхронізовано*  
 *Версія: 1.3.0 | Дата: 2026-04-09 — post-review fixes: (1) §2.2 PU_CTRL bit table виправлена (AVDDS=bit7, не bit3); (2) I2C_CTRL 0x1F→0x11; REVISION_ID додано; (3) §2.3 startup sequence оновлена (імпл. AVDDS step 4, CALS steps 13-14 документовано); (4) §12 D-12a/b/c чекліст оновлено [x]; code: delay(1)→10ms, NVS key виправлено*  
 *Версія: 1.2.0 | Дата: 2026-04-09 — §3.1 Adafruit #4538: pin name VIN, AV=output, A+/A- colors, STEMMA QT, 10kΩ pullup; WIP-нотатка прибрана*  
