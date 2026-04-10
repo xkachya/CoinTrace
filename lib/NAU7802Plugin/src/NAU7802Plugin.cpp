@@ -13,6 +13,8 @@
 //   - wireMutex NOT used here — I2C only from update() = single task (§3.2)
 
 #include "NAU7802Plugin.h"
+#include "Logger.h"         // full Logger definition (PluginContext.h only forward-declares)
+#include "ConfigManager.h"  // full ConfigManager definition (PluginContext.h only forward-declares)
 #include <Preferences.h>
 #include <cstring>
 #include <cstdarg>
@@ -132,24 +134,35 @@ bool NAU7802Plugin::_startupSequence() {
     if (!_writeReg(REG_PU_CTRL, PU_CTRL_AVDDS | PU_CTRL_PUA | PU_CTRL_PUD)) return false;
     delay(1);
 
-    // Step 5: Read OTP byte 1 (REG_OTP_B1 = 0x15) — MUST precede CTRL1/CTRL2 (ADR-NAU-007)
-    uint8_t otp_b1 = _readReg(REG_OTP_B1);
-    if (otp_b1 == 0xFF) {
-        _setError(3, "NAU7802: OTP byte 1 read failed");
+    // Step 5: Disable ADC chopper clock — per datasheet §9.1 startup sequence.
+    // Register 0x15 is the ADC Control register (NOT OTP). Both Adafruit and SparkFun
+    // libraries write bits[5:4]=11 here: "Turn off CLK_CHP from 9.1 power on sequencing".
+    // Default CLK_CHP=00 injects maximum chopper noise into ADC output.
+    uint8_t adc_ctrl = _readReg(REG_ADC_CTRL);
+    if (adc_ctrl == 0xFF) {
+        _setError(3, "NAU7802: ADC control register (0x15) read failed");
         return false;
     }
+    if (!_writeReg(REG_ADC_CTRL, adc_ctrl | ADC_CHP_DIS)) return false;
 
-    // Step 6: Reload OTP into PGA — bits[5:3] from OTP_B1, PGA_CAP_EN=1 (ADR-NAU-007)
-    if (!_writeReg(REG_PGA, (otp_b1 & 0x38) | 0x30)) return false;
+    // Step 6: Configure REG_PGA (0x1B) — clear LDOMODE (bit6) for low-ESR caps (low-noise mode).
+    // CRITICAL: ONLY clear bit6. Both reference libs only clear bit6 of this register.
+    // bit4 = BYPASS_EN MUST remain 0 — if set to 1, PGA is bypassed entirely and
+    // effective gain = 1x regardless of CTRL1 GAINS setting (audit X-01: was writing 0x30
+    // which set BYPASS_EN=1 + OUT_EN=1, causing 151 counts/g instead of 21,474 counts/g).
+    uint8_t pga = _readReg(REG_PGA);
+    if (!_writeReg(REG_PGA, pga & ~PGA_LDOMODE_BIT)) return false;  // clear bit6 only
 
-    // Step 7: PGA power config — must follow OTP reload (ADR-NAU-007)
-    if (!_writeReg(REG_PGA_PWR, PGA_PWR_VAL)) return false;  // PGA_CAP_EN=1, bypass=0
+    // Step 7: Enable 330pF PGA decoupling capacitor — REG_PGA_PWR bit7 = PGA_CAP_EN = 0x80.
+    // Per datasheet §9.14 application note (SparkFun: setBit(PGA_CAP_EN, PGA_PWR_REG)).
+    // Previous PGA_PWR_VAL=0x30 was wrong: it set MSTR_BIAS_CURR bits[6:4] instead (audit X-03).
+    if (!_writeReg(REG_PGA_PWR, PGA_PWR_VAL)) return false;  // 0x80 = PGA_CAP_EN only
 
-    // Step 8: Configure LDO + PGA gain (CTRL1) — AFTER OTP reload (ADR-NAU-007, B-05)
+    // Step 8: Configure LDO + PGA gain (CTRL1) — after analog init steps 5-7
     //   VLDO=3.0V (bits[7:5]=101b=0xA0) | GAINS=128x (bits[4:2]=111b=0x1C) = 0xBC
     if (!_writeReg(REG_CTRL1, CTRL1_VAL)) return false;
 
-    // Step 9: Configure sample rate + channel (CTRL2) — AFTER OTP reload (ADR-NAU-007, B-05)
+    // Step 9: Configure sample rate + channel (CTRL2) — after analog init steps 5-7
     //   CRS=80SPS (bits[7:5]=011b=0x60), CH1
     if (!_writeReg(REG_CTRL2, CTRL2_VAL)) return false;
 
@@ -187,8 +200,25 @@ bool NAU7802Plugin::_startupSequence() {
     if (!_writeReg(REG_CTRL2, CTRL2_VAL)) return false;
 
     if (_ctx && _ctx->log) {
-        _ctx->log->info("NAU7802", "Startup OK: PU_CTRL=0x%02X OTP_B1=0x%02X LDO=3.0V PGA=128 80SPS",
-                        _readReg(REG_PU_CTRL), otp_b1);
+        uint8_t pu     = _readReg(REG_PU_CTRL);
+        uint8_t ctrl1  = _readReg(REG_CTRL1);
+        uint8_t ctrl2  = _readReg(REG_CTRL2);
+        uint8_t pga_rb = _readReg(REG_PGA);
+        _ctx->log->info("NAU7802", "Startup OK: PU_CTRL=0x%02X REG_PGA=0x%02X LDO=3.0V PGA=128 80SPS",
+                        pu, pga_rb);
+        if (pga_rb & PGA_BYPASS_EN) {
+            // BYPASS_EN=1 means PGA is bypassed: effective gain=1x NOT 128x
+            // sensitivity will be ~151 counts/g instead of ~21474 counts/g
+            _ctx->log->error("NAU7802", "BYPASS_EN=1 in REG_PGA=0x%02X — PGA bypassed! gain=1x not 128x",
+                             pga_rb);
+        }
+        // Readback CTRL1/CTRL2 — mismatch indicates I2C write failure during init
+        if (ctrl1 != CTRL1_VAL || ctrl2 != CTRL2_VAL) {
+            _ctx->log->warning("NAU7802", "Register mismatch: CTRL1=0x%02X(exp 0x%02X) CTRL2=0x%02X(exp 0x%02X)",
+                               ctrl1, CTRL1_VAL, ctrl2, CTRL2_VAL);
+        } else {
+            _ctx->log->debug("NAU7802", "Regs OK: CTRL1=0x%02X CTRL2=0x%02X", ctrl1, ctrl2);
+        }
     }
     return true;
 }
@@ -236,7 +266,7 @@ bool NAU7802Plugin::initialize(PluginContext* ctx) {
         _ctx->log->info("NAU7802", "Calibration loaded: zero=%ld scale=%.6f mass_ref=%.1fg",
                         (long)_zeroOffset, _scaleFactor, _calMassG);
     } else {
-        _ctx->log->warn("NAU7802", "No calibration in NVS — run tare() + calibrate()");
+        _ctx->log->warning("NAU7802", "No calibration in NVS — run tare() + calibrate()");
     }
 
     _initialized = true;
@@ -480,7 +510,7 @@ bool NAU7802Plugin::calibrate() {
     // Returns false always: _calibrated stays false, _scaleFactor stays 1.0f.
     // Caller using ISensorPlugin* must use tare() + calibrate(float, uint16_t) explicitly. (A-03)
     if (_ctx && _ctx->log) {
-        _ctx->log->warn("NAU7802",
+        _ctx->log->warning("NAU7802",
             "calibrate() via ISensorPlugin performs tare only — use calibrate(float, uint16_t) for full calibration");
     }
     tare(32);
@@ -491,15 +521,15 @@ bool NAU7802Plugin::tare(uint16_t samples) {
     if (!_initialized) return false;
     _acqState = AcqState::IDLE;  // Abort any in-progress acquisition before blocking I2C (A-07)
 
-    // Switch to 10 SPS for low-noise tare measurement (CRS[2:0] at bits[6:4], mask ~0x70, B-08)
-    _writeReg(REG_CTRL2, (CTRL2_VAL & ~0x70) | (0x00 << 4));  // CRS = 000 = 10 SPS
-    delay(120);  // Filter settling at 10 SPS (~100 ms)
+    // Stay at 80 SPS for tare — empirically confirmed optimal for this noise environment.
+    // Noise source is low-frequency mechanical vibration (0.3–3 Hz from fan/surface), NOT 50 Hz mains.
+    // Evidence: sigma=14 at 80 SPS (0.06s window) vs sigma=1,460,033 at 10 SPS (3.2s window).
+    // 10 SPS measurement window (3.2s) captures multiple full cycles of 0.3–3 Hz noise → catastrophic.
+    // 80 SPS measurement window (0.4s) stays below the noise period → sigma<20 achievable.
+    // 50 Hz mains not present: if it were, 10 SPS would give BETTER sigma via sinc³ null — opposite observed.
 
     float mean, sigma;
     bool ok = _blockingCaptureSamples(samples, &mean, &sigma);
-
-    // Restore 80 SPS
-    _writeReg(REG_CTRL2, CTRL2_VAL);
 
     if (!ok) {
         _setError(9, "NAU7802: tare() capture failed");
@@ -519,8 +549,14 @@ bool NAU7802Plugin::tare(uint16_t samples) {
     }
 
     if (_ctx && _ctx->log) {
-        _ctx->log->info("NAU7802", "Tare OK: zero_offset=%ld (sigma=%.1f raw_counts, n=%d)",
-                        (long)_zeroOffset, sigma, samples);
+        // Interpret sigma: < 20 = good; 20-1000 = marginal/noise; > 1000 = floating/bad contact
+        const char* quality;
+        if      (sigma <    20.0f) quality = "GOOD ✓ (< 20)";
+        else if (sigma <   100.0f) quality = "MARGINAL (20-100, check shielding)";
+        else if (sigma < 10000.0f) quality = "POOR (100-10K, noise/cable issue)";
+        else                       quality = "FAIL (>10K — A+/A- floating or bad contact)";
+        _ctx->log->info("NAU7802", "Tare OK: zero_offset=%ld  sigma=%.1f  n=%d  quality=%s",
+                        (long)_zeroOffset, sigma, samples, quality);
     }
     return true;
 }
@@ -533,14 +569,12 @@ bool NAU7802Plugin::calibrate(float known_mass_g, uint16_t samples) {
         return false;
     }
 
-    // Switch to 10 SPS for low-noise calibration (CRS[2:0] at bits[6:4], mask ~0x70, B-08)
-    _writeReg(REG_CTRL2, (CTRL2_VAL & ~0x70) | (0x00 << 4));  // CRS = 10 SPS
-    delay(120);
+    // Stay at 80 SPS for calibration — same reason as tare() (see tare() comment).
 
     float mean, sigma;
     bool ok = _blockingCaptureSamples(samples, &mean, &sigma);
 
-    // Restore 80 SPS
+    // Restore 80 SPS (already at 80 SPS — explicit for clarity)
     _writeReg(REG_CTRL2, CTRL2_VAL);
 
     if (!ok) {
@@ -678,23 +712,41 @@ bool NAU7802Plugin::runSelfTest() {
         return false;
     }
 
-    // 2. Read 5 consecutive ADC samples — check all are non-zero
+    // 2. Read 5 consecutive ADC samples — log all values for diagnostics
+    int32_t samples[5] = {};
     for (int i = 0; i < 5; i++) {
         uint32_t t = millis();
         while (!_isReady() && (millis() - t) < 100) delay(2);
-        int32_t raw;
-        if (!_readAdc24(raw)) {
+        if (!_readAdc24(samples[i])) {
             _setError(15, "NAU7802 self-test: ADC read failed at sample %d", i);
             return false;
         }
-        if (raw == 0) {
+        if (samples[i] == 0) {
             _setError(16, "NAU7802 self-test: ADC output is zero at sample %d", i);
             return false;
         }
     }
 
     if (_ctx && _ctx->log) {
-        _ctx->log->info("NAU7802", "Self-test PASSED");
+        // Analyze range and drift direction to distinguish noise sources:
+        //   range < 100, |drift| < 50   → STABLE  (good)
+        //   range > 100, |drift| < range/2 → NOISY   (EMI or vibration)
+        //   |drift| >= range/2            → DRIFTING (mechanical creep — load cell under preload)
+        int32_t minVal = samples[0], maxVal = samples[0];
+        for (int i = 1; i < 5; i++) {
+            if (samples[i] < minVal) minVal = samples[i];
+            if (samples[i] > maxVal) maxVal = samples[i];
+        }
+        int32_t range = maxVal - minVal;
+        int32_t drift = samples[4] - samples[0];  // net displacement over 5 samples
+        const char* stability;
+        if      (range < 100)                      stability = "STABLE ✓";
+        else if (labs(drift) >= range / 2)         stability = "DRIFTING (mechanical creep — check load cell mounting/preload)";
+        else                                       stability = "NOISY (EMI/vibration — check shielding)";
+        _ctx->log->info("NAU7802",
+            "Self-test PASSED  raw[0..4]: %ld %ld %ld %ld %ld  range=%ld  %s",
+            (long)samples[0], (long)samples[1], (long)samples[2],
+            (long)samples[3], (long)samples[4], (long)range, stability);
     }
     return true;
 }

@@ -12,16 +12,21 @@
 //   - PGA gain 1x/2x/4x/8x/16x/32x/64x/128x
 //   - Sample rates: 10/20/40/80/320 SPS (CTRL2 CRS[2:0] at bits[6:4], shift <<4)
 //   - Internal LDO: 2.4/2.7/3.0/3.3/3.6/3.9/4.2/4.5 V (CTRL1 VLDO[2:0] at bits[5:3])
-//   - OTP reload MANDATORY on every power-up (see _startupSequence(), ADR-NAU-001)
+//   - Analog init: CLK_CHP disable (0x15|=0x30), clear LDOMODE (0x1B&~0x40), PGA_CAP_EN (0x1C|=0x80)
+//     Verified against Adafruit_NAU7802 + SparkFun Qwiic Scale libs (audit 2026-04-10)
 //   - DRDY pin not connected in v1 hardware — polling CR bit in PU_CTRL bit 5 (ADR-NAU-002)
 //
-// ADR-NAU-001: OTP reload mandatory — skipping it leaves PGA/LDO at wrong values
+// ADR-NAU-001: [SUPERSEDED 2026-04-10] OTP auto-loads at power-on; no explicit reload needed.
+//   Original impl wrote 0x30 to REG_PGA (0x1B) → BYPASS_EN=1 → effective gain=1x not 128x.
+//   Evidence: 151 counts/g observed vs 168 (bypass model) vs 21474 (128x model).
+//   Fix: CLK_CHP via 0x15|=0x30; LDOMODE via 0x1B&~0x40; PGA_CAP_EN via 0x1C|=0x80.
+//   Source: docs/external/2026-04-10.NAU7802_IMPLEMENTATION_AUDIT.md (X-01, X-02, X-03)
 // ADR-NAU-002: DRDY pin not connected in v1; use PU_CTRL.CR bit (bit 5 = 0x20) polling
 // ADR-NAU-003: Strategy A (no async FreeRTOS task); all I2C in update(), <= 250 us/call
 // ADR-NAU-004: mass_n = -1.0f sentinel when NAU unavailable (6D fallback in FingerprintCache)
 // ADR-NAU-005: MASS_REF_G = 33.3 (XUSSR10 reference coin, heaviest class)
 // ADR-NAU-006: SETTLE_MS = 500 ms (mechanical settling verified; 200 ms insufficient)
-// ADR-NAU-007: CTRL1/CTRL2 must be written AFTER OTP reload; CRS at bits[6:4] (not [7:5]) B-08
+// ADR-NAU-007: CTRL1/CTRL2 written after analog init (steps 5-7); B-08 CRS at bits[6:4] still valid
 
 #pragma once
 
@@ -29,7 +34,7 @@
 #include "IDiagnosticPlugin.h"
 #include "PluginContext.h"
 #include <Arduino.h>
-#include <Wire.h>
+#include <Wire.h>            // NAU7802 is I2C-only (addr 0x2A, SDA=GPIO8, SCL=GPIO9)
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
@@ -55,10 +60,9 @@ private:
     static constexpr uint8_t REG_ADCO_B2   = 0x12;  // ADC output byte 2 (MSB)
     static constexpr uint8_t REG_ADCO_B1   = 0x13;  // ADC output byte 1
     static constexpr uint8_t REG_ADCO_B0   = 0x14;  // ADC output byte 0 (LSB)
-    static constexpr uint8_t REG_OTP_B1    = 0x15;  // OTP byte 1
-    static constexpr uint8_t REG_PGA       = 0x1B;  // PGA config
-    static constexpr uint8_t REG_OTP_B0    = 0x1B;  // OTP byte 0 (same address as REG_PGA)
-    static constexpr uint8_t REG_PGA_PWR   = 0x1C;  // PGA power control
+    static constexpr uint8_t REG_ADC_CTRL  = 0x15;  // ADC control: CLK_CHP in bits[5:4] (NOT OTP)
+    static constexpr uint8_t REG_PGA       = 0x1B;  // PGA config: LDOMODE(6) BYPASS_EN(4)
+    static constexpr uint8_t REG_PGA_PWR   = 0x1C;  // PGA power: PGA_CAP_EN(7)
     static constexpr uint8_t REG_DEV_REV   = 0x1F;  // Device revision / I2C_CTRL extended
 
     // PU_CTRL bits
@@ -90,8 +94,11 @@ private:
     static constexpr uint8_t CTRL2_CALS      = 0x04;  // Calibration start bit
     static constexpr uint8_t CTRL2_CAL_ERROR = 0x08;  // Calibration error flag
 
-    // PGA_PWR bits (§7.4.12)
-    static constexpr uint8_t PGA_PWR_VAL     = 0x30;  // PGA_CAP_EN=1, ADC bypass=0
+    // REG_PGA (0x1B) / REG_ADC_CTRL (0x15) / REG_PGA_PWR (0x1C) bit constants
+    static constexpr uint8_t PGA_PWR_VAL     = 0x80;  // PGA_CAP_EN = bit7 (§9.14, SparkFun ref)
+    static constexpr uint8_t ADC_CHP_DIS     = 0x30;  // bits[5:4]=11 → CLK_CHP off (§9.1)
+    static constexpr uint8_t PGA_LDOMODE_BIT = 0x40;  // bit6: 0 = low-ESR caps (low-noise mode)
+    static constexpr uint8_t PGA_BYPASS_EN   = 0x10;  // bit4: 1 = bypass PGA — MUST remain 0
 
     // ── Plugin state ─────────────────────────────────────────────────────────
     PluginContext*    _ctx         = nullptr;

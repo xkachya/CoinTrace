@@ -17,6 +17,7 @@
 #include "PluginSystem.h"
 #include "PluginContext.h"
 #include "LDC1101Plugin.h"
+#include "NAU7802Plugin.h"   // Wave 10 D-12a — weight sensor (I2C, GPIO8/GPIO9)
 #include "NVSManager.h"
 #include "WiFiManager.h"     // Wave 8 A-1
 #include "HttpServer.h"      // Wave 8 A-2
@@ -57,6 +58,10 @@ static HttpServer        gHttp;                    // Wave 8 A-2 — REST API + 
 // can safely call delete (ownership contract — PLUGIN_ARCHITECTURE.md §3.1).
 // Hold a raw pointer (non-owning) for direct coin-state access in loop().
 static LDC1101Plugin*    gLDC = nullptr;
+// NAU7802Plugin (Wave 10 D-12a): heap-allocated in setup(), NOT added to
+// PluginSystem yet (D-12d). Pointer is kept for C-13 smoke test and future
+// D-12c calibration wizard ('K' key). Null if hardware absent.
+static NAU7802Plugin*    gNAU = nullptr;
 
 // RTC memory survives esp_restart() — used to pass boot reason into the
 // normal Logger pipeline (→ LittleFS log) after a recovery restart.
@@ -1185,7 +1190,64 @@ void setup() {
   }
   // ── END STEP-0 ──────────────────────────────────────────────────────────────
 
-  // ── 6. WiFiManager (Wave 8 A-1) §17.2 [10] ──────────────────────────────
+  // ── C-13: NAU7802 smoke test ─────────────────────────────────────────────
+  // Temporary hardware verification block (NAU7802_ARCHITECTURE.md §11.4).
+  // REMOVE after C-13 session confirms: PU_CTRL=0x9E, sigma<20 counts, tare OK.
+  // Hardware: Adafruit NAU7802 #4538, SDA=GPIO8, SCL=GPIO9 (shared Wire bus),
+  //           load cell connected per §3.1 (GREEN=A+, WHITE=A−).
+  {
+    gLogger.info("C13", "=== NAU7802 SMOKE TEST START ===");
+    gLogger.info("C13", "Ensure load cell platform is EMPTY, waiting 3s...");
+    delay(3000);
+
+    gNAU = new NAU7802Plugin();
+    if (gNAU->initialize(&gCtx)) {
+      // _startupSequence() already logged:
+      //   "Startup OK: PU_CTRL=0xXX OTP_B1=0xXX LDO=3.0V PGA=128 80SPS"
+      // Expected: PU_CTRL=0x9E = AVDDS|PUR|CS (0x80|0x08|0x10)
+
+      // Self-test: PUR set + 5 ADC reads non-zero
+      const bool stOk = gNAU->runSelfTest();
+      gLogger.info("C13", "Self-test:   %s", stOk ? "PASS ✓" : "FAIL ✗");
+
+      if (stOk) {
+        // tare(32) at 10 SPS: ~3.2s blocking.
+        // Logs: "Tare OK: zero_offset=XXXXXX (sigma=Y.Z raw_counts, n=32)"
+        // B-07 criterion: sigma < 20 counts → good OTP reload + PGA=128x
+        // sigma 20-100 counts → marginal (noise issue)
+        // sigma > 100 counts → OTP reload likely failed → check startup sequence
+        gLogger.info("C13", "Running tare(32) at 80 SPS — ~0.4s...");
+        const bool tareOk = gNAU->tare(32);
+        gLogger.info("C13", "Tare:        %s", tareOk ? "OK ✓  (check sigma^ B-07: expect <20 counts)" : "FAIL ✗");
+
+        // Stability check: re-run self-test after 2s settle.
+        // Compare range/drift to first self-test above:
+        //   DRIFTING → STABLE  = creep finished, load cell was under temporary preload
+        //   DRIFTING → DRIFTING = persistent mechanical preload (bad mounting or wire tension)
+        //   NOISY    → STABLE   = platform was still moving during first test
+        gLogger.info("C13", "Stability check: waiting 2s, then re-sampling...");
+        delay(2000);
+        gNAU->runSelfTest();  // second pass — compare range/stability to first
+
+        gLogger.info("C13", "--- SMOKE TEST SUMMARY ---");
+        gLogger.info("C13", "  Self-test:  %s", stOk   ? "PASS" : "FAIL");
+        gLogger.info("C13", "  Tare:       %s", tareOk ? "PASS" : "FAIL");
+        gLogger.info("C13", "  Calibration: NOT YET — put known weight, press 'K' (D-12c)");
+      } else {
+        gLogger.error("C13", "Self-test FAILED — ADC not responding (check power, wiring)");
+        gLogger.error("C13", "  Tip: verify load cell connected to A+/A- before power-on");
+      }
+    } else {
+      // initialize() failed → NAU7802 absent or I2C error
+      gLogger.error("C13", "NAU7802 initialize() FAILED");
+      gLogger.error("C13", "  Check: SDA=GPIO8 SCL=GPIO9, VIN=3.3V, GND");
+      gLogger.error("C13", "  Check: I2C addr 0x2A (ADDR pin tied to GND)");
+      delete gNAU;
+      gNAU = nullptr;
+    }
+    gLogger.info("C13", "=== NAU7802 SMOKE TEST END ===");
+  }
+  // ── END C-13 ─────────────────────────────────────────────────────────────
   // begin() blocks ≤10 s in STA mode, then falls back to AP automatically.
   LOG_DEBUG(&gLogger, "Heap", "before WiFi: %u B free", (uint32_t)ESP.getFreeHeap());
   gWifi.begin(gNVS);

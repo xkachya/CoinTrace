@@ -374,3 +374,96 @@ monitor_port = COM4   ; FT232RL (не USB-CDC COM3)
 **Правило:** Після будь-якої зміни TC1/TC2 — повірити fSENSOR baseline по boot log і перерахувати min_freq_nibble. Цільовий margin: ≥ 15% від fSENSOR.
 
 ---
+
+## 2026-04-10 — NAU7802: BYPASS_EN=1 — тихий зрив підсилення (silent gain failure)
+
+**Середовище:** NAU7802 24-bit ADC, `lib/NAU7802Plugin`, D-12a startup sequence (v1.4.0 і старіше)  
+**Симптом:** Чутливість 151 counts/g замість очікуваних ~21,474 counts/g при GAINS=128x. `raw ADC ≈ -21,000` (від'ємний, повільно дрейфує). sigma=14,258 counts при порожній платформі = ~94g RMS. Самодіагностика: самотест NOISY/DRIFTING навіть після механічного усунення вібрацій.
+
+**Причина (X-01 CRITICAL):** Стара startup sequence читала регістр `0x15` (помилково названий `REG_OTP_B1`), потім записувала `(value & 0x38) | 0x30` у `REG_PGA` (0x1B). Оскільки `REG_ADC_CTRL(0x15)` = `0x00` після reset → результат запису: `0x30`. Але `0x30 = OUT_EN(bit5) | BYPASS_EN(bit4)` → PGA обходиться. Ефективний gain = 1x замість 128x — **без жодного error**, чіп працює «нормально».
+
+**Діагноз:** Порівняння моделей чутливості:
+```
+Виміряна:         151 counts/g  (відповідає gain=1x: 168 counts/g ± load cell tolerance)
+Очікувана 128x:   21,474 counts/g  (у 142 рази більше)
+```
+
+**Рішення:**
+```cpp
+// ❌ НЕПРАВИЛЬНО (v1.4.0): читає ADC_CTRL, а не OTP; пише BYPASS_EN=1
+uint8_t otp_b1 = _readReg(REG_ADC_CTRL);       // 0x15 = ADC Control, NOT OTP !
+_writeReg(REG_PGA, (otp_b1 & 0x38) | 0x30);    // 0x30 = OUT_EN | BYPASS_EN ← БАГИ!
+
+// ✅ ПРАВИЛЬНО (v1.5.0): тільки LDOMODE bit6 очищується
+uint8_t pga = _readReg(REG_PGA);
+_writeReg(REG_PGA, pga & ~PGA_LDOMODE_BIT);     // PGA_LDOMODE_BIT = 0x40
+```
+
+**Апаратне підтвердження після виправлення:**
+```
+Startup OK: PU_CTRL=0x9E REG_PGA=0x00  ← BYPASS_EN=0 ✅
+raw ADC: ~+113,000  (vs ~-21,000 раніше)  ← 128x підтверджено
+sigma=96 counts = 4.5 mg ✅
+```
+
+**Де в коді:** `lib/NAU7802Plugin/src/NAU7802Plugin.cpp` — `_startupSequence()` step 6; `NAU7802Plugin.h` — `PGA_LDOMODE_BIT = 0x40`  
+**Де задокументовано:** `docs/architecture/NAU7802_ARCHITECTURE.md §9.9 B-09`, `ADR-NAU-001`  
+**Правило:** Перед будь-яким `_writeReg(REG_PGA, ...)` — звірятись з datasheet. `REG_PGA(0x1B)`: bit4=BYPASS_EN ПОВИНЕН залишатись 0. Reference libs (Adafruit, SparkFun) тільки `&= ~0x40`.
+
+---
+
+## 2026-04-10 — NAU7802: три помилки в initialization (audit X-01/X-02/X-03)
+
+**Середовище:** NAU7802 startup sequence, `lib/NAU7802Plugin` v1.4.0  
+**Симптом:** Описано окремо для кожного:
+
+### X-02 [CRITICAL]: CLK_CHP не вимкнений
+
+**Причина:** REG 0x15 неправильно ідентифікований як `REG_OTP_B1`. Насправді — `REG_ADC_CTRL`. Bits[5:4]=CLK_CHP після reset = 00 (максимальний chopper noise). Reference libs (Adafruit, SparkFun) записують `reg[0x15] |= 0x30` як один з перших кроків init.
+
+**Рішення:** Додати крок до startup: `_writeReg(REG_ADC_CTRL, adc_ctrl | ADC_CHP_DIS)` де `ADC_CHP_DIS = 0x30`.
+
+### X-03 [HIGH]: PGA_CAP_EN не активований
+
+**Причина:** `PGA_CAP_EN = bit7 = 0x80`. Старе `PGA_PWR_VAL = 0x30` встановлювало `MSTR_BIAS_CURR = 0b011` (bits[6:4]). Внутрішній 330pF конденсатор PGA (§9.14 datasheet) не підключався.
+
+**Рішення:** `PGA_PWR_VAL = 0x80` (тільки bit7=PGA_CAP_EN).
+
+**Де в коді:** `lib/NAU7802Plugin/src/NAU7802Plugin.h` — `REG_ADC_CTRL`, `ADC_CHP_DIS`, `PGA_PWR_VAL`  
+**Правило:** При ініціалізації нового I²C/SPI сенсора — завжди порівнювати свій init sequence з двома незалежними open-source реалізаціями (Adafruit + SparkFun). Якщо кроки відрізняються — перечитати datasheet того регістра.
+
+---
+
+## 2026-04-10 — Load cell: апаратне налагодження (broken wire + EMI + vibration)
+
+**Середовище:** 1kg load cell (wheatstone bridge), 4-wire (E+/E-/A+/A-), NAU7802 Adafruit breakout #4538, M5Stack Cardputer на столі  
+**Симптом (сесія C-13):** Серія несподіваних результатів:
+
+| Симптом | Причина | Рішення |
+|---|---|---|
+| `err=2 NACK` при initialize() | Обрив I²C дроту | Перепаяти |
+| sigma=1,460,000, range=23,839 DRIFTING | Обрив аналогового дроту A+ | Перепаяти |
+| sigma=6,997 (после ремонту) | Механічна вібрація від вентилятора ПК через стіл | Підняти пристрій на пінополістирол |
+| sigma=2,000 | LDC1101 котушка + металевий корпус load cell поряд (< 5 см) | Розмістити load cell ≥ 10 см від котушки |
+| sigma=17 (momentary) | Механічне повзання після монтажу | Дати 30-60 хв settling |
+| sigma=96 (стабільно) | Незахищений 4-wire кабель поряд з блоком живлення ПК | Відсунути кабель |
+
+**Підсумок:** Від `sigma=1.46M → 96 counts` (4.5 mg) виключно через апаратне усунення проблем, без змін коду.
+
+**Де задокументовано:** `docs/architecture/NAU7802_ARCHITECTURE.md §3.4 EMI shielding`, `§9.9 B-09`  
+**Правило:** Якщо sigma >> 100 counts при gain=128x — спочатку перевірити (1) цілісність дротів (омметром), (2) механічну ізоляцію від поверхні, (3) відстань від LDC1101 котушки та corе PSU.
+
+---
+
+## 2026-04-10 — NAU7802: 80 SPS значно краще ніж 10 SPS (при вібрації навколишнього середовища)
+
+**Середовище:** NAU7802, ESP32-S3, ambient mechanical noise (вентилятор ПК ~50 Hz, будинкова вібрація ~1-3 Hz, open desk)  
+**Симптом початковий:** При 10 SPS для tare(): 32 семпли за ~3.2 секунди → sigma катастрофічна (тисячі counts), вимір нестабільний навіть після ремонту проводів.  
+**При 80 SPS:** 32 семпли за ~0.4 секунди → sigma=96 counts (4.5 mg) ✅
+
+**Причина:** При 10 SPS вікно 3.2 с захоплює *повні цикли* механічного шуму (1-3 Hz). При 80 SPS вікно 0.4 с потрапляє *всередину* одного циклу шуму — averaging works. `Δt = N/SPS`: при N=32 → 10 SPS: 3.2 с >> 1/3 Hz (333 ms) → шум не усереднюється. 80 SPS: 0.4 с < 1/3 Hz → мінімум варіації.
+
+**Де задокументовано:** `docs/architecture/NAU7802_ARCHITECTURE.md §2.3`, ADR-NAU-003  
+**Правило:** У середовищі з низькочастотною вібрацією (1-10 Hz) — використовуй максимальний доступний SPS (80 або 320), не мінімальний. Averaging window < 0.2 × T_noise_period — для NAU7802 на відкритому столі: SPS ≥ 80.
+
+---

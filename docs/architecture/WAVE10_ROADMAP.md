@@ -1,12 +1,12 @@
 # Wave 10 Roadmap — Mass Dimension + Sensor Reproducibility
 
-**Статус:** 🔄 Active — D-12a WIP написаний, під peer review (5 register bugs документовано → виправляються)  
-**Версія:** 1.0.0  
-**Дата:** 2026-04-08  
+**Статус:** 🔄 Active — D-12a+D-12b ✅ committed; audit X-01/X-02/X-03 fixed (2026-04-10); NAU7802 gain=128x hw-verified (sigma=96 counts = 4.5mg); **D-12c next**  
+**Версія:** 1.2.0  
+**Дата:** 2026-04-08 (оновлено: 2026-04-10)  
 **Попередня хвиля:** Wave 9 — Measurement Science (CLOSED 2026-04-08; gen-7 DB: 28 entries, 13 classes, 5 пар < 1.0σ — physics constraint)  
 **Тригер:** A-7 pairwise analysis (gen-7): 5 пар < 1.0σ — всі в silver-vs-silver zone. NAU7802 + 7D вектор: prooved → all 5 pairs > 2.0σ (W_mass=5.0 × mass_n). Wave 10 triggered.  
-**HEAD:** `df626f2` — fix(db): D-11e XZNNIP_a outliers excluded (r95: 0.661→0.135)  
-**Cross-ref:** `docs/external/2026-04-08.WAVE10_ARCHITECTURE_PLAN.md`, `docs/architecture/NAU7802_ARCHITECTURE.md v1.1.0`, `docs/architecture/WAVE9_ROADMAP.md v2.0.0`
+**HEAD:** `8c5f7fc` — docs(nau7802): fix arch doc inconsistencies per full analysis N-01/N-02/N-04 *(uncommitted: X-01/X-02/X-03 audit fixes + arch doc v1.5.0)*  
+**Cross-ref:** `docs/external/2026-04-08.WAVE10_ARCHITECTURE_PLAN.md`, `docs/architecture/NAU7802_ARCHITECTURE.md v1.5.0`, `docs/architecture/WAVE9_ROADMAP.md v2.0.0`
 
 ---
 
@@ -53,9 +53,9 @@ Wave 9 довела, що 6D LDC1101-вектор вичерпаний для si
 
 | Задача | Track | HW? | Залежить від | Статус | Опис |
 |--------|-------|-----|-------------|--------|------|
-| **D-12a Plugin skeleton** | A | ❌ | NAU7802_ARCHITECTURE v1.1.0 | 🔄 WIP | Driver: `_startupSequence()` + OTP + `update()` + state machine. Fix 5 bugs перед commit. |
-| **D-12b NVS calibration** | A | ❌ | D-12a ✅ | ⬜ | `saveCalibration()` / `loadCalibration()` NVS namespace "nau7802", 5 keys. |
-| **D-12c UX wizard** | A | ❌ | D-12b ✅ | ⬜ | Key 'K': tare → known weight prompt → verify. OLED + Serial feedback. |
+| **D-12a Plugin skeleton** | A | ❌ | NAU7802_ARCHITECTURE v1.5.0 | ✅ DONE | Driver + analog init (X-01/X-02/X-03 fixed 2026-04-10). gain=128x hw-verified. |
+| **D-12b NVS calibration** | A | ❌ | D-12a ✅ | ✅ DONE | `saveCalibration()` / `loadCalibration()` NVS namespace "nau7802", 5 keys. |
+| **D-12c UX wizard** | A | ❌ | D-12b ✅ | 🔄 NEXT | Key 'K': tare → known weight prompt → verify. Наявні гирі: 1g/2g/5g/10g/20g/50g. |
 | **D-12d 7D integration** | A | ❌ | D-12c ✅ | ⬜ | `mass_n` в `production_vector`, NDJSON schema v8, DB gen-8, matcher v6. |
 | **D-12e Sequential workflow** | A | ❌ | D-12d ✅ | ⬜ | STEP_WEIGHT→STEP_QUICK→Full. matchQuick(7D+mass_n). ADR-NAU-008. A-3 unblocked! |
 | **A-3 Quick Screen Phase 2** | A | ❌ | D-12e ✅ | ⬜ | matchQuick() з 7D (mass_n). Розблокований: STEP_QUICK = Phase 2 в production flow. |
@@ -475,18 +475,23 @@ Flash: 58.1%  (поточний — зафіксовано D-8)
 
 ### Wave 10 Phase 1 — NAU7802 driver (D-12a..12c):
 
-**D-12a — Driver:**
-- [x] ~~5 register bugs~~  → усі 5 виправлені до commit
-- [ ] `initialize()` returns `true` з NAU7802 на I²C bus
-- [ ] `getWeight()` = SENTINEL до calibration
-- [ ] `getWeight()` = ±0.1g на reference coin після calibration
-- [ ] Serial log: `[NAU7802] startup OK, 80SPS, GAINS=128x`
-- [ ] 137 native tests pass (нові не потрібні для D-12a)
+**D-12a — Driver:** ✅ DONE (committed 2026-04-10)
+- [x] ~~5 register bugs~~ → усі 5 виправлені до commit
+- [x] **FIX X-01:** BYPASS_EN=0 — REG_PGA &= ~0x40; gain=128x підтверджено апаратно
+- [x] **FIX X-02:** CLK_CHP disabled — REG_ADC_CTRL (0x15) |= 0x30
+- [x] **FIX X-03:** PGA_PWR_VAL=0x80 (PGA_CAP_EN bit7)
+- [x] `initialize()` returns `true` з NAU7802 на I²C bus
+- [x] Boot log: `Startup OK: PU_CTRL=0x9E REG_PGA=0x00` + BYPASS_EN runtime check
+- [x] Self-test STABLE/NOISY/DRIFTING аналіз (range 5 зразків)
+- [x] `getWeight()` = SENTINEL до calibration
+- [x] 137 native tests pass
+- [ ] `getWeight()` = ±0.1g на reference coin — після D-12c calibration
 
-**D-12b — NVS:**
-- [ ] Calibration persist через power-cycle
-- [ ] Missing/corrupted NVS → SENTINEL (graceful)
-- [ ] `cal_ok = 0` після factory reset
+**D-12b — NVS:** ✅ DONE (committed 2026-04-10)
+- [x] Calibration persist через power-cycle
+- [x] Missing/corrupted NVS → SENTINEL (graceful)
+- [x] `cal_ok = 0` після factory reset
+- [x] `clearCalibration()` — обов'язковий NVS reset після X-01 fix (old scale_factor at gain=1x invalid)
 
 **D-12c — UX wizard:**
 - [ ] Wizard < 15s від 'K' до completion
@@ -643,6 +648,7 @@ compare_coils(
 ---
 
 *Документ: `docs/architecture/WAVE10_ROADMAP.md`*  
-*Версія: 1.1.0 | Дата: 2026-04-08 (оновлено: 2026-04-08 — D-12e redesign sequential, A-3 unblocked, coil profile system)*  
-*Базується на: WAVE9_ROADMAP.md v2.0.0, NAU7802_ARCHITECTURE.md v1.1.0, docs/external/2026-04-08.WAVE10_ARCHITECTURE_PLAN.md*  
-*Наступне оновлення: після D-12a hw-verify (register bugs confirmed fixed)*
+*Версія: 1.2.0 | Дата: 2026-04-10 — D-12a+D-12b ✅ DONE; audit X-01/X-02/X-03 applied; gain=128x hw-verified (sigma=96 counts=4.5mg); D-12c NEXT (наявні гирі: 1/2/5/10/20/50g)*  
+*Версія: 1.1.0 | Дата: 2026-04-08 — D-12e redesign sequential, A-3 unblocked, coil profile system*  
+*Базується на: WAVE9_ROADMAP.md v2.0.0, NAU7802_ARCHITECTURE.md v1.5.0, docs/external/2026-04-08.WAVE10_ARCHITECTURE_PLAN.md*  
+*Наступне оновлення: після D-12c calibration wizard (key 'K')*
