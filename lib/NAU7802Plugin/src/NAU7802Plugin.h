@@ -211,6 +211,10 @@ public:
     // isCalibrated() — true if both tare and scale are set and loaded from NVS
     bool isCalibrated() const { return _calibrated; }
 
+    // Calibration constants (valid only when isCalibrated(); used by smoke test + diagnostics)
+    float   getScaleFactor() const { return _scaleFactor; }
+    int32_t getZeroOffset()  const { return _zeroOffset; }
+
     // ── Non-blocking acquisition control ─────────────────────────────────────
     // Called from Measurement Workflow at STEP_BASE entry
     void startAcquisition();

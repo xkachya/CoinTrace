@@ -1426,7 +1426,12 @@ void setup() {
         gLogger.info("C13", "--- SMOKE TEST SUMMARY ---");
         gLogger.info("C13", "  Self-test:  %s", stOk   ? "PASS" : "FAIL");
         gLogger.info("C13", "  Tare:       %s", tareOk ? "PASS" : "FAIL");
-        gLogger.info("C13", "  Calibration: NOT YET — put known weight, press 'K' (D-12c)");
+        if (gNAU->isCalibrated()) {
+            gLogger.info("C13",  "  Calibration: OK ✓  (scale=%.8f  zero=%d)",
+                         gNAU->getScaleFactor(), (int)gNAU->getZeroOffset());
+        } else {
+            gLogger.info("C13",  "  Calibration: NOT YET — put known weight, press 'K' (D-12c)");
+        }
       } else {
         gLogger.error("C13", "Self-test FAILED — ADC not responding (check power, wiring)");
         gLogger.error("C13", "  Tip: verify load cell connected to A+/A- before power-on");
