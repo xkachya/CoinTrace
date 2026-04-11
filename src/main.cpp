@@ -64,6 +64,11 @@ static LDC1101Plugin*    gLDC = nullptr;
 static NAU7802Plugin*    gNAU = nullptr;
 // D-12d: current measurement mass_g; -1.0f = not measured (NAU absent / uncalibrated / STEP_WEIGHT not reached yet)
 static float             sMassG = -1.0f;
+// P1.3: STEP_WEIGHT acquisition retry counter — reset at each new session start
+static uint8_t           sWeightRetryCount = 0;
+static constexpr uint8_t kWeightRetryMax   = 3;
+// D-12e+: true after user presses 1st ENTER (coin is on scale); false until then
+static bool              sWeightAcqStarted = false;
 
 // RTC memory survives esp_restart() — used to pass boot reason into the
 // normal Logger pipeline (→ LittleFS log) after a recovery restart.
@@ -93,6 +98,7 @@ constexpr uint32_t kOtaRollbackMs  = 60000;       // 60-second confirm deadline
 // Abort:    Backspace or 120-second step timeout → IDLE.
 enum class MeasState : uint8_t {
     IDLE,        // awaiting ENTER or HTTP /measure/start trigger
+    STEP_WEIGHT, // D-12e: NAU7802 mass acquisition — skipped to STEP_BASE if !calibrated
     STEP_BASE,   // base spacer 0.6mm  (d≈0.6mm) — press ENTER → rp[0]/l[0]
     STEP_1,      // +1mm spacer        (d≈1.6mm) — press ENTER → rp[1]/l[1]
     STEP_3,      // +2mm spacer        (d≈2.6mm) — press ENTER → rp[2]/l[2]
@@ -667,6 +673,35 @@ static void drawQuickScreen(float liveRp, float liveL, float basRp, float basL) 
 }
 
 static void drawMeasStep_full(const MeasSession& s, uint16_t rpLive = 0) {
+    // D-12e: STEP_WEIGHT — dedicated weight acquisition screen (pre-step 0)
+    if (s.state == MeasState::STEP_WEIGHT) {
+        M5Cardputer.Display.fillScreen(BLACK);
+        M5Cardputer.Display.setTextSize(1);
+        M5Cardputer.Display.setTextColor(DARKGREY);
+        M5Cardputer.Display.setCursor(2, 2);
+        M5Cardputer.Display.print("CoinTrace");
+        M5Cardputer.Display.setTextSize(2);
+        M5Cardputer.Display.setTextColor(CYAN);
+        M5Cardputer.Display.setCursor(5, 12);
+        M5Cardputer.Display.print("Weigh Coin");
+        M5Cardputer.Display.setTextSize(1);
+        M5Cardputer.Display.setTextColor(WHITE);
+        M5Cardputer.Display.setCursor(5, 36);
+        M5Cardputer.Display.print("Place coin on scale,");
+        M5Cardputer.Display.setCursor(5, 48);
+        M5Cardputer.Display.print("then press ENTER.");
+        M5Cardputer.Display.fillRect(0, 61, 240, 14, BLACK);  // periodic update fills on next tick
+        M5Cardputer.Display.setTextColor(DARKGREY);
+        M5Cardputer.Display.setCursor(5, 84);
+        M5Cardputer.Display.print("Bksp = skip (6D mode)");
+        const uint32_t elapsed_w  = millis() - s.stepMs;
+        const uint32_t secsLeft_w = elapsed_w < 120000UL ? (120000UL - elapsed_w) / 1000 : 0;
+        M5Cardputer.Display.setTextColor(secsLeft_w < 30 ? ORANGE : DARKGREY);
+        M5Cardputer.Display.setCursor(5, 108);
+        M5Cardputer.Display.printf("Timeout: %3us  Bksp=Skip", secsLeft_w);
+        return;
+    }
+
     M5Cardputer.Display.fillScreen(BLACK);
 
     // ── Header ─────────────────────────────────────────────────────────────
@@ -676,8 +711,8 @@ static void drawMeasStep_full(const MeasSession& s, uint16_t rpLive = 0) {
     M5Cardputer.Display.print("CoinTrace");
 
     // ── Step indicator ─────────────────────────────────────────────────────
-    // MeasState: STEP_BASE=1 .. STEP_DRIFT=4 map directly to display step 1..4
-    const uint8_t idx = (uint8_t)s.state;
+    // D-12e: STEP_BASE=(enum 2)..STEP_DRIFT=(enum 5) → display step idx 1..4
+    const uint8_t idx = (uint8_t)s.state - (uint8_t)MeasState::STEP_BASE + 1;
     M5Cardputer.Display.setTextSize(2);
     M5Cardputer.Display.setTextColor(CYAN);
     M5Cardputer.Display.setCursor(5, 12);
@@ -1475,6 +1510,7 @@ void setup() {
   gHttp.setSensorState(
     []() -> const char* {
       switch (sMeas.state) {
+        case MeasState::STEP_WEIGHT: return "MEASURING_STEP_WEIGHT";
         case MeasState::STEP_BASE:  return "MEASURING_STEP_BASE";
         case MeasState::STEP_1:     return "MEASURING_STEP_1";
         case MeasState::STEP_3:     return "MEASURING_STEP_3";
@@ -1542,7 +1578,33 @@ void loop() {
     // We use a local bool so the identical ENTER block runs once.
     const char syntheticEnter = '\r';
     // ── ENTER (BtnA): advance measurement step ────────────────────────────
-    if (sMeas.state >= MeasState::STEP_BASE && sMeas.state <= MeasState::STEP_DRIFT) {
+    if (sMeas.state == MeasState::STEP_WEIGHT) {
+      // D-12e+: two-phase — 1st press starts acquisition (coin on scale), 2nd press confirms
+      if (!sWeightAcqStarted) {
+        sWeightAcqStarted = true;
+        sWeightRetryCount = 0;
+        if (gNAU) gNAU->startAcquisition();
+        gLogger.info("Meas", "BtnA STEP_WEIGHT: acquisition started");
+        M5Cardputer.Display.fillRect(0, 61, 240, 14, BLACK);
+        M5Cardputer.Display.setTextSize(1);
+        M5Cardputer.Display.setTextColor(YELLOW);
+        M5Cardputer.Display.setCursor(5, 66);
+        M5Cardputer.Display.print("Acquiring...");
+      } else if (gNAU && gNAU->isAcquisitionComplete()) {
+        sMassG = gNAU->getLastMassG();
+        gLogger.info("Meas", "BtnA STEP_WEIGHT: mass=%.2f g  mass_n=%.4f",
+                     sMassG, sMassG / NAU7802Plugin::MASS_REF_G);
+        sMeas.state  = MeasState::STEP_BASE;
+        sMeas.stepMs = millis();
+        drawMeasStep_full(sMeas);
+      } else {
+        sMassG = -1.0f;
+        gLogger.warning("Meas", "BtnA STEP_WEIGHT: acq not ready/error — 6D fallback");
+        sMeas.state  = MeasState::STEP_BASE;
+        sMeas.stepMs = millis();
+        drawMeasStep_full(sMeas);
+      }
+    } else if (sMeas.state >= MeasState::STEP_BASE && sMeas.state <= MeasState::STEP_DRIFT) {
       if (!gLDC || !gLDC->isReady()) {
         gLogger.warning("Meas", "BtnA: sensor not ready");
       } else {
@@ -1606,15 +1668,24 @@ void loop() {
                gLDC->getCoinState() == LDC1101Plugin::CoinState::COIN_PRESENT &&
                gLFS.isDataMounted()) {
       // BtnA at IDLE + COIN_PRESENT → start session (same as HTTP POST)
-      sMeas = {};
-      sMeas.state   = MeasState::STEP_BASE;
-      sMeas.stepMs  = millis();
-      sMeas.m.ts    = millis() / 1000;
+      sMassG = -1.0f;  // D-12e: reset mass before each new session
+      sMeas  = {};
+      sMeas.stepMs = millis();
+      sMeas.m.ts   = millis() / 1000;
       strlcpy(sMeas.m.metal_code,  "UNKN",                    sizeof(sMeas.m.metal_code));
       strlcpy(sMeas.m.coin_name,   "Unclassified",            sizeof(sMeas.m.coin_name));
       strlcpy(sMeas.m.protocol_id, "p3_MIKROE3240_b06_012mm", sizeof(sMeas.m.protocol_id));
+      // D-12e: route to STEP_WEIGHT if NAU calibrated; else 6D fallback
+      if (gNAU && gNAU->isCalibrated()) {
+        sMeas.state = MeasState::STEP_WEIGHT;
+        sWeightRetryCount = 0;
+        sWeightAcqStarted = false;  // D-12e+: acquisition starts on 1st ENTER (coin on scale)
+        gLogger.info("Meas", "BtnA start: session started (STEP_WEIGHT — place coin & ENTER)");
+      } else {
+        sMeas.state = MeasState::STEP_BASE;
+        gLogger.info("Meas", "BtnA start: session started (STEP_BASE — 6D, NAU absent/uncal)");
+      }
       drawMeasStep_full(sMeas);
-      gLogger.info("Meas", "BtnA start: session started (STEP_BASE)");
     }
   }
 
@@ -1667,15 +1738,50 @@ void loop() {
               gLDC && gLDC->isReady() &&
               gLDC->getCoinState() == LDC1101Plugin::CoinState::COIN_PRESENT &&
               gLFS.isDataMounted()) {
-            sMeas = {};
-            sMeas.state   = MeasState::STEP_BASE;
-            sMeas.stepMs  = millis();
-            sMeas.m.ts    = millis() / 1000;
+            sMassG = -1.0f;  // D-12e: reset mass before each new session
+            sMeas  = {};
+            sMeas.stepMs = millis();
+            sMeas.m.ts   = millis() / 1000;
             strlcpy(sMeas.m.metal_code,  "UNKN",                    sizeof(sMeas.m.metal_code));
             strlcpy(sMeas.m.coin_name,   "Unclassified",            sizeof(sMeas.m.coin_name));
             strlcpy(sMeas.m.protocol_id, "p3_MIKROE3240_b06_012mm", sizeof(sMeas.m.protocol_id));
+            // D-12e: route to STEP_WEIGHT if NAU calibrated; else 6D fallback
+            if (gNAU && gNAU->isCalibrated()) {
+              sMeas.state = MeasState::STEP_WEIGHT;
+              sWeightRetryCount = 0;
+              sWeightAcqStarted = false;  // D-12e+: acquisition starts on 1st ENTER (coin on scale)
+              gLogger.info("Meas", "M/Enter: session started (STEP_WEIGHT — place coin & ENTER)");
+            } else {
+              sMeas.state = MeasState::STEP_BASE;
+              gLogger.info("Meas", "M/Enter: session started (STEP_BASE — 6D, NAU absent/uncal)");
+            }
             drawMeasStep_full(sMeas);
-            gLogger.info("Meas", "M/Enter: session started (STEP_BASE)");
+          } else if (sMeas.state == MeasState::STEP_WEIGHT) {
+            // D-12e+: two-phase — 1st ENTER starts acquisition (coin on scale), 2nd ENTER confirms
+            if (!sWeightAcqStarted) {
+              sWeightAcqStarted = true;
+              sWeightRetryCount = 0;
+              if (gNAU) gNAU->startAcquisition();
+              gLogger.info("Meas", "STEP_WEIGHT: acquisition started");
+              M5Cardputer.Display.fillRect(0, 61, 240, 14, BLACK);
+              M5Cardputer.Display.setTextSize(1);
+              M5Cardputer.Display.setTextColor(YELLOW);
+              M5Cardputer.Display.setCursor(5, 66);
+              M5Cardputer.Display.print("Acquiring...");
+            } else if (gNAU && gNAU->isAcquisitionComplete()) {
+              sMassG = gNAU->getLastMassG();
+              gLogger.info("Meas", "STEP_WEIGHT: mass=%.2f g  mass_n=%.4f",
+                           sMassG, sMassG / NAU7802Plugin::MASS_REF_G);
+              sMeas.state  = MeasState::STEP_BASE;
+              sMeas.stepMs = millis();
+              drawMeasStep_full(sMeas);
+            } else {
+              sMassG = -1.0f;
+              gLogger.warning("Meas", "STEP_WEIGHT: acq not ready/error — 6D fallback");
+              sMeas.state  = MeasState::STEP_BASE;
+              sMeas.stepMs = millis();
+              drawMeasStep_full(sMeas);
+            }
           } else if (sMeas.state >= MeasState::STEP_BASE && sMeas.state <= MeasState::STEP_DRIFT) {
             if (!gLDC || !gLDC->isReady()) {
               gLogger.warning("Meas", "ENTER: sensor not ready");
@@ -1737,10 +1843,19 @@ void loop() {
             }
           }
         } else if (key == '\b') {
-          // ── BACKSPACE: abort measurement session ──────────────────────────
-          if (sMeas.state != MeasState::IDLE) {
+          // ── BACKSPACE: at STEP_WEIGHT = skip (6D fallback); elsewhere = abort session ──
+          if (sMeas.state == MeasState::STEP_WEIGHT) {
+            // D-12e: skip NAU weighing — continue session in 6D fallback mode
+            sMassG            = -1.0f;
+            sWeightAcqStarted = false;
+            sMeas.state       = MeasState::STEP_BASE;
+            sMeas.stepMs      = millis();
+            drawMeasStep_full(sMeas);
+            gLogger.info("Meas", "STEP_WEIGHT skipped (Bksp) — 6D fallback");
+          } else if (sMeas.state != MeasState::IDLE) {
             gLogger.info("Meas", "Session aborted (Bksp)");
-            sMeas = {};
+            sMeas  = {};
+            sMassG = -1.0f;  // D-12e: reset mass on abort
             drawMeasIdle();
           }
         } else if ((key == 'r' || key == 'R') && sMeas.state == MeasState::IDLE && !sResultPending) {
@@ -1812,15 +1927,24 @@ void loop() {
       if (sMeas.state == MeasState::IDLE &&
           coinState    == LDC1101Plugin::CoinState::COIN_PRESENT &&
           gLFS.isDataMounted()) {
-        sMeas = {};
-        sMeas.state   = MeasState::STEP_BASE;
-        sMeas.stepMs  = millis();
-        sMeas.m.ts    = millis() / 1000;
+        sMassG = -1.0f;  // D-12e: reset mass before each new session
+        sMeas  = {};
+        sMeas.stepMs = millis();
+        sMeas.m.ts   = millis() / 1000;
         strlcpy(sMeas.m.metal_code,  "UNKN",                sizeof(sMeas.m.metal_code));
         strlcpy(sMeas.m.coin_name,   "Unclassified",        sizeof(sMeas.m.coin_name));
         strlcpy(sMeas.m.protocol_id, "p3_MIKROE3240_b06_012mm", sizeof(sMeas.m.protocol_id));
+        // D-12e: route to STEP_WEIGHT if NAU calibrated; else 6D fallback
+        if (gNAU && gNAU->isCalibrated()) {
+          sMeas.state = MeasState::STEP_WEIGHT;
+          sWeightRetryCount = 0;
+          sWeightAcqStarted = false;  // D-12e+: acquisition starts on 1st ENTER (coin on scale)
+          gLogger.info("Meas", "HTTP start: session started (STEP_WEIGHT — place coin & ENTER)");
+        } else {
+          sMeas.state = MeasState::STEP_BASE;
+          gLogger.info("Meas", "HTTP start: session started (STEP_BASE — 6D, NAU absent/uncal)");
+        }
         drawMeasStep_full(sMeas);
-        gLogger.info("Meas", "HTTP start: session started (STEP_BASE)");
       }
     }
 
@@ -1913,11 +2037,68 @@ void loop() {
       }
     }
 
-    // ── Per-step 120-second timeout ────────────────────────────────────────
-    if (sMeas.state >= MeasState::STEP_BASE && sMeas.state <= MeasState::STEP_DRIFT) {
+    // D-12e: STEP_WEIGHT periodic update — acquisition status + countdown (every 500 ms)
+    if (sMeas.state == MeasState::STEP_WEIGHT) {
+      static uint32_t sWeightUpdateMs = 0;
+      if (millis() - sWeightUpdateMs >= 500) {
+        sWeightUpdateMs = millis();
+
+        // P1.3: auto-retry on acquisition ERROR (fast-fail detected by state machine)
+        if (gNAU && gNAU->isAcquisitionError()) {
+          if (sWeightRetryCount < kWeightRetryMax) {
+            sWeightRetryCount++;
+            gLogger.warning("Meas", "STEP_WEIGHT: acq error — retry %u/%u",
+                            sWeightRetryCount, (uint8_t)kWeightRetryMax);
+            gNAU->startAcquisition();  // _ensureConversionsRunning() called internally
+            // Show retry feedback
+            M5Cardputer.Display.fillRect(0, 61, 240, 14, BLACK);
+            M5Cardputer.Display.setTextSize(1);
+            M5Cardputer.Display.setTextColor(ORANGE);
+            M5Cardputer.Display.setCursor(5, 66);
+            M5Cardputer.Display.printf("Retry %u/%u...", sWeightRetryCount, (uint8_t)kWeightRetryMax);
+          } else {
+            // All retries exhausted — show error, user can ENTER (6D) or Bksp (skip)
+            gLogger.warning("Meas", "STEP_WEIGHT: scale failed after %u retries — 6D fallback",
+                            (uint8_t)kWeightRetryMax);
+            M5Cardputer.Display.fillRect(0, 61, 240, 14, BLACK);
+            M5Cardputer.Display.setTextSize(1);
+            M5Cardputer.Display.setTextColor(RED);
+            M5Cardputer.Display.setCursor(5, 66);
+            M5Cardputer.Display.print("Scale error. ENTER=6D");
+          }
+        } else {
+          // Normal status update
+          M5Cardputer.Display.fillRect(0, 61, 240, 14, BLACK);
+          M5Cardputer.Display.setTextSize(1);
+          M5Cardputer.Display.setCursor(5, 66);
+          if (!sWeightAcqStarted) {
+            M5Cardputer.Display.setTextColor(WHITE);
+            M5Cardputer.Display.print("ENTER = start weighing");
+          } else if (gNAU && gNAU->isAcquisitionComplete()) {
+            M5Cardputer.Display.setTextColor(GREEN);
+            M5Cardputer.Display.printf("Ready: %.2f g", gNAU->getLastMassG());
+          } else {
+            M5Cardputer.Display.setTextColor(YELLOW);
+            M5Cardputer.Display.print("Acquiring...");
+          }
+        }
+        // Partial redraw — countdown line
+        const uint32_t el_w = millis() - sMeas.stepMs;
+        const uint32_t sl_w = el_w < 120000UL ? (120000UL - el_w) / 1000 : 0;
+        M5Cardputer.Display.fillRect(0, 103, 240, 14, BLACK);
+        M5Cardputer.Display.setTextColor(sl_w < 30 ? ORANGE : DARKGREY);
+        M5Cardputer.Display.setCursor(5, 108);
+        M5Cardputer.Display.printf("Timeout: %3us  Bksp=Skip", sl_w);
+      }
+    }
+
+    // ── Per-step 120-second timeout (including STEP_WEIGHT) ───────────────
+    if (sMeas.state >= MeasState::STEP_WEIGHT && sMeas.state <= MeasState::STEP_DRIFT) {
       if (millis() - sMeas.stepMs > 120000UL) {
         gLogger.warning("Meas", "Step %u timeout — session aborted", (uint8_t)sMeas.state);
-        sMeas = {};
+        sMeas             = {};
+        sMassG            = -1.0f;  // D-12e: reset mass on timeout
+        sWeightAcqStarted = false;
         drawMeasIdle();
       }
     }

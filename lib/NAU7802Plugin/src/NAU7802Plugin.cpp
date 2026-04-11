@@ -97,7 +97,20 @@ bool NAU7802Plugin::_readAdc24(int32_t& out) {
 bool NAU7802Plugin::_isReady() {
     // ADR-NAU-002: poll PU_CTRL.CR bit (bit5) — 1 = conversion result ready
     uint8_t val = _readReg(REG_PU_CTRL);
-    return (val != 0xFF) && (val & PU_CTRL_CR);
+    if (val == 0xFF) {
+        // P1.1: fast I2C escalation — 5 consecutive 0xFF (~60ms at 80SPS) → ERROR.
+        // Prevents 3-second silent SAMPLING timeout when WiFi DMA kills the I2C bus.
+        _i2cFailCount++;
+        if (_i2cFailCount >= I2C_FAIL_THRESHOLD && _acqState == AcqState::SAMPLING) {
+            _acqState  = AcqState::ERROR;
+            _ds.status = HealthStatus::SENSOR_FAULT;
+            _setError(20, "NAU7802: I2C dead (%u consecutive 0xFF) — fast escalate",
+                      _i2cFailCount);
+        }
+        return false;
+    }
+    _i2cFailCount = 0;  // reset on any successful I2C read
+    return (val & PU_CTRL_CR) != 0;
 }
 
 bool NAU7802Plugin::_waitPowerUpReady(uint16_t timeout_ms) {
@@ -359,6 +372,23 @@ void NAU7802Plugin::_updateAcqStateMachine() {
         break;  // ~5 us total (millis() comparison)
 
     case AcqState::SAMPLING: {
+        // Safety timeout: 3 s overall since acquisition start
+        if ((millis() - _acqStartMs) > (SETTLE_MS + 3000UL)) {
+            _acqState  = AcqState::ERROR;
+            _ds.status = HealthStatus::SENSOR_FAULT;
+            _setError(11, "NAU7802: SAMPLING timeout (%u samples)", _sampleIdx);
+            break;
+        }
+        // P1.3 fast-fail: 0 samples after 500 ms in SAMPLING → chip stalled.
+        // _isReady() may return false without 0xFF if I2C data is corrupted-but-plausible.
+        // At 80 SPS the first sample must appear within 12.5 ms; 500 ms budget is generous.
+        if (_sampleIdx == 0 && (millis() - _acqStartMs) > (SETTLE_MS + 500UL)) {
+            _acqState  = AcqState::ERROR;
+            _ds.status = HealthStatus::SENSOR_FAULT;
+            _setError(12, "NAU7802: SAMPLING stalled (0/%u samples, %lums) — fast fail",
+                      N_SAMPLES, (unsigned long)(millis() - _acqStartMs));
+            break;
+        }
         // One sample per update() call — only if ADC ready
         if (!_isReady()) break;  // ~75 us, not ready -> skip
 
@@ -415,10 +445,17 @@ void NAU7802Plugin::_updateAcqStateMachine() {
 
 void NAU7802Plugin::startAcquisition() {
     if (!_initialized) return;
-    _acqStartMs = millis();
-    _sampleIdx  = 0;
-    _errorCount = 0;
-    _acqState   = AcqState::SETTLING;
+    // B-12: same pre-flight as B-10 in tare()/calibrate() — WiFi-induced CS reset
+    // causes CS=0 → CR bit never set → _isReady() always false → SAMPLING hangs silently.
+    if (!_ensureConversionsRunning()) {
+        _setError(10, "NAU7802: startAcquisition pre-flight failed — acq skipped");
+        return;  // state stays IDLE → isAcquisitionComplete()=false → 6D fallback
+    }
+    _acqStartMs   = millis();
+    _sampleIdx    = 0;
+    _errorCount   = 0;
+    _i2cFailCount = 0;  // reset fast-escalation counter for new acquisition
+    _acqState     = AcqState::SETTLING;
 
     if (_ctx && _ctx->log) {
         _ctx->log->debug("NAU7802", "startAcquisition() -> SETTLING (%d ms)", SETTLE_MS);
@@ -427,6 +464,10 @@ void NAU7802Plugin::startAcquisition() {
 
 bool NAU7802Plugin::isAcquisitionComplete() const {
     return _acqState == AcqState::COMPLETE;
+}
+
+bool NAU7802Plugin::isAcquisitionError() const {
+    return _acqState == AcqState::ERROR;
 }
 
 float NAU7802Plugin::getLastMassG() const {
@@ -542,6 +583,43 @@ bool NAU7802Plugin::_ensureConversionsRunning() {
             _setError(9, "NAU7802: I2C unresponsive after bus recovery");
             return false;
         }
+        // B-12: After I2C hang, chip state is unknown (CS may read 1 but
+        // conversions stalled). Always re-run startup to guarantee CR ticks.
+        if (_ctx && _ctx->log) {
+            _ctx->log->warning("NAU7802",
+                "pre-flight: bus recovered (PU_CTRL=0x%02X) — re-running startup", pu);
+        }
+        if (!_startupSequence()) {
+            _setError(9, "NAU7802: startup recovery failed after bus hang");
+            return false;
+        }
+        // B-12: verify CR bit actually appears — confirms ADC is converting,
+        // not just that registers read back correctly. Timeout 150 ms = 12 conversions at 80SPS.
+        {
+            uint32_t t0 = millis();
+            uint8_t  cr_pu = 0;
+            bool     cr_ok = false;
+            while ((millis() - t0) < 150) {
+                cr_pu = _readReg(REG_PU_CTRL);
+                if ((cr_pu != 0xFF) && (cr_pu & PU_CTRL_CR)) { cr_ok = true; break; }
+                delay(5);
+            }
+            if (!cr_ok) {
+                if (_ctx && _ctx->log) {
+                    _ctx->log->error("NAU7802",
+                        "pre-flight: CR never set after recovery (PU_CTRL=0x%02X) — acq skipped",
+                        cr_pu);
+                }
+                _setError(9, "NAU7802: CR never set after startup recovery");
+                return false;  // caller stays IDLE → 6D fallback
+            }
+            if (_ctx && _ctx->log) {
+                _ctx->log->info("NAU7802",
+                    "pre-flight: CR verified OK (PU_CTRL=0x%02X, %lums)", cr_pu,
+                    (unsigned long)(millis() - t0));
+            }
+        }
+        return true;  // startup + CR verified — skip CS check below
     }
     if (!(pu & PU_CTRL_CS)) {
         if (_ctx && _ctx->log) {
@@ -553,6 +631,26 @@ bool NAU7802Plugin::_ensureConversionsRunning() {
             return false;
         }
         delay(50);  // allow first conversions at 80 SPS (~12.5 ms)
+    }
+    // Final sanity: verify CR is set (or will be set within 150 ms).
+    // Catches the case where CS=1 in PU_CTRL but ADC is internally stalled.
+    {
+        uint32_t t0 = millis();
+        bool     cr_ok = false;
+        uint8_t  cr_pu = 0;
+        while ((millis() - t0) < 150) {
+            cr_pu = _readReg(REG_PU_CTRL);
+            if ((cr_pu != 0xFF) && (cr_pu & PU_CTRL_CR)) { cr_ok = true; break; }
+            delay(5);
+        }
+        if (!cr_ok) {
+            if (_ctx && _ctx->log) {
+                _ctx->log->error("NAU7802",
+                    "pre-flight: CR never set (PU_CTRL=0x%02X) — acq skipped", cr_pu);
+            }
+            _setError(9, "NAU7802: CR never set — ADC stalled");
+            return false;
+        }
     }
     return true;
 }

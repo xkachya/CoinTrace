@@ -118,6 +118,7 @@ private:
     uint8_t           _sampleIdx   = 0;
     uint32_t          _acqStartMs  = 0;
     uint8_t           _errorCount  = 0;
+    uint8_t           _i2cFailCount = 0;  // P1.1: consecutive _isReady() 0xFF reads — fast escalation
 
     static constexpr uint8_t  N_SAMPLES   = 20;   // Samples per acquisition (80SPS -> 250ms)
     static constexpr uint16_t SETTLE_MS   = 500;  // ADR-NAU-006: mechanical settling (hw-verified)
@@ -134,6 +135,7 @@ private:
     // ── Constants ────────────────────────────────────────────────────────────
     static constexpr uint16_t INIT_TIMEOUT_MS= 200;     // Power-up ready timeout
     static constexpr uint8_t  MAX_ERRORS     = 10;      // Error threshold -> ERROR state
+    static constexpr uint8_t  I2C_FAIL_THRESHOLD = 5;  // P1.1: consecutive 0xFF in _isReady() -> fast ERROR (~60ms at 80SPS)
 
     // ── Diagnostics ─────────────────────────────────────────────────────────
     struct {
@@ -221,6 +223,9 @@ public:
 
     // True once COMPLETE state reached (result valid in _cachedMassG)
     bool isAcquisitionComplete() const;
+
+    // True if acquisition ended in ERROR (I2C/chip failure) — caller may retry
+    bool isAcquisitionError() const;
 
     // Current acquisition state (for debug/logging)
     AcqState getAcqState() const { return _acqState; }

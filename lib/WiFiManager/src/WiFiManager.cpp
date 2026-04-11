@@ -8,6 +8,7 @@
 #include <ESPmDNS.h>
 #include <M5Cardputer.h>
 #include <esp_mac.h>   // esp_efuse_mac_get_default() — reads eFuse, no WiFi driver required
+#include <esp_wifi.h>  // esp_wifi_set_ps() — P1.2: disable power save to reduce I2C DMA interference
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 namespace {
@@ -34,6 +35,11 @@ namespace {
 bool WiFiManager::startAP(const char* ssid) {
     WiFi.mode(WIFI_AP);
     if (!WiFi.softAP(ssid, kAPPass)) return false;
+
+    // P1.2: disable WiFi power save — eliminates DTIM beacon burst I2C collisions.
+    // Without this, WiFi wakes every 100ms (DTIM=1) causing I2C bus contention.
+    // Trade-off: +~30mA idle current vs. stable I2C at 80SPS (ADR-NAU-010).
+    esp_wifi_set_ps(WIFI_PS_NONE);
 
     // Explicitly set 192.168.4.1 — default on ESP32 but set for clarity.
     WiFi.softAPConfig(
@@ -66,6 +72,10 @@ bool WiFiManager::startSTA(const char* ssid, const char* pass) {
     strlcpy(ssid_, ssid, sizeof(ssid_));
     strlcpy(ip_, WiFi.localIP().toString().c_str(), sizeof(ip_));
     mode_ = Mode::STA;
+
+    // P1.2: disable WiFi power save — eliminates DTIM beacon burst I2C collisions.
+    // Must be called after WL_CONNECTED (driver fully up). Same rationale as AP mode.
+    esp_wifi_set_ps(WIFI_PS_NONE);
 
     // mDNS: disabled to preserve heap on ESP32-S3FN8 (no PSRAM).
     // MDNS.begin() uses ~15 KB — too expensive when free heap after WiFi is ~29 KB.

@@ -2,7 +2,7 @@
 
 **Версія:** 1.7.0  
 **Дата:** 2026-04-10  
-**Статус:** 🔄 Active — D-12d ✅ done (7D infrastructure: gNAU->update, matchFull 7D, NDJSON mass_n); D-12e next  
+**Статус:** 🔄 Active — D-12e ✅ done (STEP_WEIGHT state machine + B-12/P1.1/P1.2/P1.3 I2C reliability, hw-verified); D-12f next  
 **Hardware:** Nuvoton NAU7802 24-bit ADC + 100g load cell  
 **Chip revision:** NAU7802 Rev 2.6 (datasheet EN)  
 **Мотивація:** Wave 10 — 7D production vector (додається `mass_n`) для вирішення 5 критичних пар < 1.0σ у gen-6 DB  
@@ -1751,14 +1751,25 @@ SETTLE_MS    Acq total    Timing risk    Рекомендація
 - [x] NDJSON `production_vector`: додано `mass_n` (опускається коли NAU відсутній → gen-6 DB backward compat)
 - [x] `saveToLFS()` серіалізує mass_n (вкл.юч. sentinel -1.0f)
 - [x] **Firmware build: SUCCESS** (RAM 64.6%, Flash 58.9%); **native-test 10/10 PASSED** (no regressions)
-- [ ] Виклик `gNAU->startAcquisition()` в STEP_WEIGHT entry (ADR-NAU-008) — D-12e
+- [x] Виклик `gNAU->startAcquisition()` в STEP_WEIGHT entry (ADR-NAU-008) — D-12e
 
-### D-12e: NDJSON + DB schema
-- [ ] Додати `mass_g`, `mass_n` в NDJSON top-level та production_vector
-- [ ] Оновити `FingerprintCache::query()` для 7D (ADR-NAU-004)
-- [ ] DB schema **version 7 -> 8** (gen-7 вже зайнятий D-11d/`df626f2`)
-- [ ] Protocol ID "p3_..." -> "p4_MIKROE3240_b06_012mm_mass"
-- [ ] matcher.json v5 -> v6: `full_weights=[1.5,0.0,1.0,3.0,2.5,0.4,5.0]`, `keys=[...,'mass_n']`
+### D-12e: STEP_WEIGHT state machine + I2C reliability ✅ DONE (2026-04-11, hw-verified)
+- [x] `MeasState::STEP_WEIGHT` між IDLE і STEP_BASE
+- [x] 3 точки старту сесії: STEP_WEIGHT якщо NAU откалібрований, інакше 6D fallback
+- [x] **Двофазовий ENTER**: 1-й ENTER = запустити вимір (монета вже на вагах), 2-й ENTER = підтвердити і просунутись (усуває 0g зчитування при передчасному старті)
+- [x] `sWeightAcqStarted` global — false до 1-го ENTER; скид при Backspace/timeout
+- [x] BtnA / keyboard ENTER: двофазова логіка (phase 1 → старт acq, phase 2 → читати масу + STEP_BASE)
+- [x] Backspace в STEP_WEIGHT: skip (6D) — не abort сесії
+- [x] `drawMeasStep_full`: екран STEP_WEIGHT (до 1-го ENTER — "ENTER = start weighing")
+- [x] Periodic 500 ms update: "ENTER = start weighing" / "Acquiring..." / "Ready: X.XXg" / "Retry X/3..." / "Scale error"
+- [x] Timeout guard розширено на STEP_WEIGHT (120 s)
+- [x] **B-12**: `_ensureConversionsRunning()` pre-flight в `startAcquisition()` + `_startupSequence()` завжди після I2C hang + CR verification (150 ms window)
+- [x] **P1.1**: `_i2cFailCount` fast escalation (5× 0xFF → ERROR за ~60 ms)
+- [x] **P1.2**: `esp_wifi_set_ps(WIFI_PS_NONE)` в WiFiManager (AP + STA) — усуває DTIM beacon burst колізії
+- [x] **P1.3**: 500 ms no-progress fast-fail в SAMPLING + auto-retry ×3 в STEP_WEIGHT periodic update
+- [x] `sWeightRetryCount` / `kWeightRetryMax=3` глобали; скид в 3-х точках входу в STEP_WEIGHT
+- [x] `isAcquisitionError()` public method на NAU7802Plugin
+- [x] **Firmware build: SUCCESS**; **native-test 10/10 PASSED**; **hw-verified** (2026-04-11, 33.33 g reference mass)
 
 ### D-12f: Tests
 - [ ] Unit тести (§10.1): shutdown, read, state machine, median, thread safety
@@ -1777,7 +1788,7 @@ SETTLE_MS    Acq total    Timing risk    Рекомендація
 ---
 
 *Документ: `docs/architecture/NAU7802_ARCHITECTURE.md`*  
-*Версія: 1.7.0 | Дата: 2026-04-10 — D-12d done: 6D→7D infrastructure — gNAU->update() in loop(), sMassG global, FingerprintCache::CacheEntry+mass_n, query() 7-param, MetalMatcher::Config/MatchResult[7], matchFull 4th default param, doMeasCompute() mass_n sentinel, NDJSON production_vector mass_n field, saveToLFS mass_n serialize, NAU7802Plugin::MASS_REF_G перенесено в public; firmware build SUCCESS, native-test 10/10 PASSED*  
+*Версія: 1.8.0 | Дата: 2026-04-11 — D-12e done: STEP_WEIGHT state machine (MeasState enum, 3 session start points, двофазовий ENTER — 1st=start acq, 2nd=confirm, sWeightAcqStarted, BtnA/Enter/Bksp handlers, drawMeasStep_full, periodic update, timeout); B-12 I2C pre-flight + startup recovery + CR verification; P1.1 _i2cFailCount fast escalation; P1.2 WIFI_PS_NONE in WiFiManager; P1.3 500ms no-progress fast-fail + auto-retry ×3 + isAcquisitionError(); firmware build SUCCESS, native-test 10/10 PASSED, hw-verified (33.33 g ref mass)*  
 *Версія: 1.6.0 | Дата: 2026-04-10 — D-12c hw-verified: calibration wizard `runCalibrationWizard()` ('K' key), 3-screen flow (tare→calibrate→confirm), scale=0.00005337 g/count @ 20g ref; B-10: `_ensureConversionsRunning()` pre-flight у tare()/calibrate() усуває WiFi-induced I2C hang (PU_CTRL=0xFF) та chip reset (CS=0); §9.10 B-10 додано; §12 D-12c checklist [x]*  
 *Версія: 1.4.0 | Дата: 2026-04-09 — B-08 post-commit audit: CTRL1/CTRL2 бітові позиції виправлені; CTRL1_VAL 0xBC→0x2F (VLDO[5:3]+GAINS[2:0]); CTRL2_VAL 0x60→0x30 (CRS[6:4]); mask ~0xE0→~0x70; §2.2/§2.3/§2.4 arch doc синхронізовано*  
 *Версія: 1.3.0 | Дата: 2026-04-09 — post-review fixes: (1) §2.2 PU_CTRL bit table виправлена (AVDDS=bit7, не bit3); (2) I2C_CTRL 0x1F→0x11; REVISION_ID додано; (3) §2.3 startup sequence оновлена (імпл. AVDDS step 4, CALS steps 13-14 документовано); (4) §12 D-12a/b/c чекліст оновлено [x]; code: delay(1)→10ms, NVS key виправлено*  
