@@ -849,6 +849,7 @@ static void saveDiscoveryDump(const MatchResult& mr) {
     doc["index"]      = sDiscoveryMeasIndex;
     doc["coin_name"]  = sMeas.m.coin_name;
     doc["metal_code"] = sMeas.m.metal_code;
+    doc["mass_g"]     = (sMassG > 0.0f) ? roundf(sMassG * 100.0f) / 100.0f : -1.0f;  // P0-B: top-level raw mass for build_gen8_db.py
 
     const char* stepNames[] = {"base_0.6mm", "addon_1.6mm", "addon_2.6mm", "drift_0.6mm"};
     JsonArray stepsArr = doc["steps"].to<JsonArray>();
@@ -1674,7 +1675,7 @@ void loop() {
       sMeas.m.ts   = millis() / 1000;
       strlcpy(sMeas.m.metal_code,  "UNKN",                    sizeof(sMeas.m.metal_code));
       strlcpy(sMeas.m.coin_name,   "Unclassified",            sizeof(sMeas.m.coin_name));
-      strlcpy(sMeas.m.protocol_id, "p3_MIKROE3240_b06_012mm", sizeof(sMeas.m.protocol_id));
+      strlcpy(sMeas.m.protocol_id, "p4_MIKROE3240_b06_mass",  sizeof(sMeas.m.protocol_id));
       // D-12e: route to STEP_WEIGHT if NAU calibrated; else 6D fallback
       if (gNAU && gNAU->isCalibrated()) {
         sMeas.state = MeasState::STEP_WEIGHT;
@@ -1744,7 +1745,7 @@ void loop() {
             sMeas.m.ts   = millis() / 1000;
             strlcpy(sMeas.m.metal_code,  "UNKN",                    sizeof(sMeas.m.metal_code));
             strlcpy(sMeas.m.coin_name,   "Unclassified",            sizeof(sMeas.m.coin_name));
-            strlcpy(sMeas.m.protocol_id, "p3_MIKROE3240_b06_012mm", sizeof(sMeas.m.protocol_id));
+            strlcpy(sMeas.m.protocol_id, "p4_MIKROE3240_b06_mass",  sizeof(sMeas.m.protocol_id));
             // D-12e: route to STEP_WEIGHT if NAU calibrated; else 6D fallback
             if (gNAU && gNAU->isCalibrated()) {
               sMeas.state = MeasState::STEP_WEIGHT;
@@ -1933,7 +1934,7 @@ void loop() {
         sMeas.m.ts   = millis() / 1000;
         strlcpy(sMeas.m.metal_code,  "UNKN",                sizeof(sMeas.m.metal_code));
         strlcpy(sMeas.m.coin_name,   "Unclassified",        sizeof(sMeas.m.coin_name));
-        strlcpy(sMeas.m.protocol_id, "p3_MIKROE3240_b06_012mm", sizeof(sMeas.m.protocol_id));
+        strlcpy(sMeas.m.protocol_id, "p4_MIKROE3240_b06_mass",  sizeof(sMeas.m.protocol_id));
         // D-12e: route to STEP_WEIGHT if NAU calibrated; else 6D fallback
         if (gNAU && gNAU->isCalibrated()) {
           sMeas.state = MeasState::STEP_WEIGHT;

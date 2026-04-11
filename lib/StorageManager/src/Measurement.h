@@ -33,5 +33,5 @@ struct Measurement {
     char     metal_code[8];   // "UNKN" until C-4+ classification
     char     coin_name[48];   // "Unclassified" until C-4+
     float    conf;            // 0.0–1.0 classification confidence (0.0 in P-3)
-    char     protocol_id[20]; // e.g. "p1_MIKROE3240_024mm" (hw-verified S-4)
+    char     protocol_id[32]; // e.g. "p4_MIKROE3240_b06_mass" (hw-verified S-4; 32B to fit p4_ IDs)
 };

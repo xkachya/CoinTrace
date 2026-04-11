@@ -1,8 +1,8 @@
 {
-  "version": 5,
-  "generated_at": "2026-04-07T00:00:00Z",
-  "full_weights": [1.5, 0.0, 1.0, 3.0, 2.5, 0.40],
-  "quick_weights": [2.0, 0.0, 0.0, 4.0, 2.5, 0.30],
+  "version": 6,
+  "generated_at": "2026-04-11T00:00:00Z",
+  "full_weights": [1.5, 0.0, 1.0, 3.0, 2.5, 0.40, 5.0],
+  "quick_weights": [2.0, 0.0, 0.0, 4.0, 2.5, 0.30, 5.0],
   "sigma": 0.35,
-  "notes": "Gen-5 DB (C-10/C-11 re-seed). 6D vector: [dRp1_n, k1, k2, df_n, dL1_n, df1_n] (ADR-VEC-002, positional weight order matches FingerprintCache::query()). w5=0.40 retained: df1_n cluster analysis shows XAG999 vs XZNNIP gap=0.0003 (collinear in main cluster), increasing w5 gives no separation gain and risks noise amplification. New classes: XFENIP (needs_reseed=True, r95=0.98-1.35, only 5 rec/side after drift filter), XFECUP, XNICKEL. Kennedy merge: XKENNEDY C-8 (10 rec) merged with XKENNED C-10 (10 rec) into single XKENNED (20 rec total, 10/side); centroids were overlapping (wdist < r95 sum). df_n weight 3.0 unchanged. Calibrated on C-10 sessions (2026-04-04)."
+  "notes": "v6: 7D vector [dRp1_n, k1, k2, df_n, dL1_n, df1_n, mass_n] — added w[6]=5.0 for mass_n (D-12 STEP_WEIGHT, protocol p4_MIKROE3240_b06_mass). gen-7 DB centroids are still 6D; gen-8 will be built after C-14 session with mass_n centroids. Until then mass_n dimension is present in NDJSON dumps but distance contribution is 0 for gen-7 records. Previous 6D notes (v5 / C-10/C-11): df1_n w=0.40 retained (XAG999 vs XZNNIP gap=0.0003 — collinear, no separation gain); XFENIP/XFECUP/XNICKEL added; XKENNEDY+XKENNED merged to XKENNED (20 rec)."
 }
