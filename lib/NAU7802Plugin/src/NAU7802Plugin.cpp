@@ -407,9 +407,20 @@ void NAU7802Plugin::_updateAcqStateMachine() {
 
         if (_sampleIdx >= N_SAMPLES) {
             // All samples collected — compute median and convert to grams
-            float median_raw = _computeMedian(_sampleBuf, N_SAMPLES);
+            float median_raw = _computeMedian(_sampleBuf, N_SAMPLES);  // sorts _sampleBuf in-place
             float mass_g = (median_raw - static_cast<float>(_zeroOffset)) * _scaleFactor;
             if (mass_g < 0.0f) mass_g = 0.0f;
+
+            // Compute stddev of all N_SAMPLES in grams — quality indicator
+            // Buffer is sorted after _computeMedian(); variance is order-independent.
+            float sum_raw = 0.0f, sum2_raw = 0.0f;
+            for (uint8_t i = 0; i < N_SAMPLES; i++) {
+                sum_raw  += _sampleBuf[i];
+                sum2_raw += _sampleBuf[i] * _sampleBuf[i];
+            }
+            float mean_raw = sum_raw / N_SAMPLES;
+            float var_raw  = (sum2_raw / N_SAMPLES) - (mean_raw * mean_raw);
+            float sigma_g  = (var_raw > 0.0f) ? sqrtf(var_raw) * fabsf(_scaleFactor) : 0.0f;
 
             float mass_n = _calibrated ? (mass_g / MASS_REF_G) : -1.0f;  // ADR-NAU-004
 
@@ -417,6 +428,7 @@ void NAU7802Plugin::_updateAcqStateMachine() {
             if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
                 _cachedMassG  = mass_g;
                 _cachedMassN  = mass_n;
+                _cachedSigmaG = sigma_g;
                 _cachedTs     = millis();
                 _cachedValid  = _calibrated;
                 xSemaphoreGive(_mutex);
@@ -424,8 +436,15 @@ void NAU7802Plugin::_updateAcqStateMachine() {
             _acqState  = AcqState::COMPLETE;
             _ds.status = HealthStatus::OK;
             if (_ctx && _ctx->log) {
-                _ctx->log->debug("NAU7802", "acq done: mass=%.2f g  mass_n=%.4f  n=%d",
-                                 mass_g, mass_n, N_SAMPLES);
+                // sigma_g > 0.3g is suspicious (coin oscillating or not fully on platform)
+                if (sigma_g > 0.3f) {
+                    _ctx->log->warning("NAU7802",
+                        "acq done: mass=%.2f g  mass_n=%.4f  sigma=%.3f g  n=%d  *** HIGH SIGMA — coin unstable?",
+                        mass_g, mass_n, sigma_g, N_SAMPLES);
+                } else {
+                    _ctx->log->debug("NAU7802", "acq done: mass=%.2f g  mass_n=%.4f  sigma=%.3f g  n=%d",
+                                     mass_g, mass_n, sigma_g, N_SAMPLES);
+                }
             }
         }
         break;  // TOTAL per ready update(): ~250 us  [OK]
@@ -479,6 +498,17 @@ float NAU7802Plugin::getLastMassG() const {
     float val = 0.0f;
     if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
         val = _cachedMassG;
+        xSemaphoreGive(_mutex);
+    }
+    return val;
+}
+
+float NAU7802Plugin::getLastSigmaG() const {
+    if (_acqState != AcqState::COMPLETE) return 0.0f;
+    if (!_mutex) return 0.0f;
+    float val = 0.0f;
+    if (xSemaphoreTake(_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+        val = _cachedSigmaG;
         xSemaphoreGive(_mutex);
     }
     return val;

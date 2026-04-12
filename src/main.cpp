@@ -2079,8 +2079,20 @@ void loop() {
             M5Cardputer.Display.setTextColor(WHITE);
             M5Cardputer.Display.print("ENTER = start weighing");
           } else if (gNAU && gNAU->isAcquisitionComplete()) {
-            M5Cardputer.Display.setTextColor(GREEN);
-            M5Cardputer.Display.printf("Ready: %.2f g", gNAU->getLastMassG());
+            const float _m = gNAU->getLastMassG();
+            const float _s = gNAU->getLastSigmaG();
+            // sigma > 0.3g: coin likely unstable — show ORANGE warning
+            // sigma > 0.8g: reading is suspect    — show RED  + "CHECK"
+            if (_s > 0.8f) {
+              M5Cardputer.Display.setTextColor(RED);
+              M5Cardputer.Display.printf("%.2fg s=%.2f CHECK!", _m, _s);
+            } else if (_s > 0.3f) {
+              M5Cardputer.Display.setTextColor(ORANGE);
+              M5Cardputer.Display.printf("%.2f g  s=%.2f ?", _m, _s);
+            } else {
+              M5Cardputer.Display.setTextColor(GREEN);
+              M5Cardputer.Display.printf("Ready: %.2f g  s=%.2f", _m, _s);
+            }
           } else {
             M5Cardputer.Display.setTextColor(YELLOW);
             M5Cardputer.Display.print("Acquiring...");

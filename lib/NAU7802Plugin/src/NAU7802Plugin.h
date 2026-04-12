@@ -128,6 +128,7 @@ private:
     // ── Cached result (protected by _mutex for thread safety) ───────────────
     float             _cachedMassG  = 0.0f;
     float             _cachedMassN  = 0.0f;
+    float             _cachedSigmaG = 0.0f;   // stddev of N_SAMPLES in grams — quality indicator
     uint32_t          _cachedTs     = 0;
     bool              _cachedValid  = false;
     SemaphoreHandle_t _mutex        = nullptr;
@@ -236,6 +237,11 @@ public:
     // Returns last normalized mass. mass_n = mass_g / MASS_REF_G.
     // Returns -1.0f (ADR-NAU-004) if not calibrated or acquisition not complete.
     float getLastMassN() const;
+
+    // Returns stddev of last acquisition samples in grams (quality indicator).
+    // Values < 0.05g = excellent; 0.05–0.3g = acceptable; > 0.5g = suspect (coin not settled).
+    // Valid only when isAcquisitionComplete(). Returns 0 if not complete.
+    float getLastSigmaG() const;
 
     // ── NVS calibration persistence ───────────────────────────────────────────
     bool saveCalibration();
