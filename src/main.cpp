@@ -2051,13 +2051,15 @@ void loop() {
             sWeightRetryCount++;
             gLogger.warning("Meas", "STEP_WEIGHT: acq error — retry %u/%u",
                             sWeightRetryCount, (uint8_t)kWeightRetryMax);
-            gNAU->startAcquisition();  // _ensureConversionsRunning() called internally
-            // Show retry feedback
+            // Show retry feedback BEFORE startAcquisition() — bus recovery may block
+            // ~1s inside _ensureConversionsRunning(), so display must update first
+            // to ensure "Retry N/3..." is visible during the blocking recovery period.
             M5Cardputer.Display.fillRect(0, 61, 240, 14, BLACK);
             M5Cardputer.Display.setTextSize(1);
             M5Cardputer.Display.setTextColor(ORANGE);
             M5Cardputer.Display.setCursor(5, 66);
             M5Cardputer.Display.printf("Retry %u/%u...", sWeightRetryCount, (uint8_t)kWeightRetryMax);
+            gNAU->startAcquisition();  // _ensureConversionsRunning() called internally
           } else {
             // All retries exhausted — show error, user can ENTER (6D) or Bksp (skip)
             gLogger.warning("Meas", "STEP_WEIGHT: scale failed after %u retries — 6D fallback",
