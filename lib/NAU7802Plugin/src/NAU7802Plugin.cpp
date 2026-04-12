@@ -445,11 +445,13 @@ void NAU7802Plugin::_updateAcqStateMachine() {
 
 void NAU7802Plugin::startAcquisition() {
     if (!_initialized) return;
+    _acqState = AcqState::IDLE;  // always reset stale COMPLETE/ERROR before new attempt
     // B-12: same pre-flight as B-10 in tare()/calibrate() — WiFi-induced CS reset
     // causes CS=0 → CR bit never set → _isReady() always false → SAMPLING hangs silently.
     if (!_ensureConversionsRunning()) {
+        _acqState = AcqState::ERROR;  // P1.3: trigger auto-retry in STEP_WEIGHT tick-loop
         _setError(10, "NAU7802: startAcquisition pre-flight failed — acq skipped");
-        return;  // state stays IDLE → isAcquisitionComplete()=false → 6D fallback
+        return;  // isAcquisitionError()=true → tick-loop retries up to kWeightRetryMax
     }
     _acqStartMs   = millis();
     _sampleIdx    = 0;

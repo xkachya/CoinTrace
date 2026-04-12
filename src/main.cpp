@@ -435,7 +435,7 @@ static void runCalibrationWizard() {
         M5Cardputer.update();
         if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
             const auto& st  = M5Cardputer.Keyboard.keysState();
-            const char  key = st.word.empty() ? (st.enter ? '\r' : '\0') : st.word[0];
+            const char  key = st.del ? '\b' : (st.word.empty() ? (st.enter ? '\r' : '\0') : st.word[0]);
             if (key == '\r' || key == '\n') break;
             if (key == '\b') {
                 gLogger.info("Cal", "Wizard aborted at step 1");
@@ -493,7 +493,7 @@ static void runCalibrationWizard() {
         M5Cardputer.update();
         if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
             const auto& st  = M5Cardputer.Keyboard.keysState();
-            const char  key = st.word.empty() ? (st.enter ? '\r' : '\0') : st.word[0];
+            const char  key = st.del ? '\b' : (st.word.empty() ? (st.enter ? '\r' : '\0') : st.word[0]);
             if (key == '\r' || key == '\n') break;
             if (key == '\b') {
                 gLogger.info("Cal", "Wizard aborted at step 2");
@@ -1700,8 +1700,9 @@ void loop() {
       const Keyboard_Class::KeysState& status = M5Cardputer.Keyboard.keysState();
       
       // status.enter is set by the library for the ↵ key (KEY_ENTER never lands in word)
-      if (!status.word.empty() || status.enter) {
-        const char key = status.word.empty() ? '\r' : status.word[0];
+      // status.del is set for Backspace — it also never lands in word (Keyboard.cpp:175)
+      if (!status.word.empty() || status.enter || status.del) {
+        const char key = status.del ? '\b' : (status.word.empty() ? '\r' : status.word[0]);
         LOG_DEBUG(&gLogger, "Input", "Key: %c (0x%02X)", key, (uint8_t)key);
 
         if (key == 'w' || key == 'W') {
