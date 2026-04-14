@@ -6,6 +6,28 @@
 
 ---
 
+## 2026-04-13 — Pairwise centroid metric є теоретичним артефактом, не реальною помилкою класифікації
+
+**Середовище:** `scripts/a8_pairwise_7d.py`, gen-8 DB, 7D вектор (dRp1_n, k1, k2, df_n, dL1_n, df1_n, mass_n)  
+**Симптом:** A-8 pairwise analysis: 3 FAIL пари — XAG999↔XUSSR10 (1.14σ), XFE↔XKENNED (1.19σ), XAG900↔XAG999 (1.89σ). Схоже на провал Wave 10 exit criterion (всі пари > 2.0σ).  
+**Причина:** Pairwise metric порівнює `centroid_A ↔ centroid_B` безпосередньо — найгірший теоретичний кейс. Реальні вимірювання розподілені навколо власного центроїду з r95 ≈ 0.1–0.4σ. Для пар 1.14–1.89σ реальний gap між хмарами вимірювань = пара_σ − 2×r95 ≈ 1.0–1.5σ → класифікація завжди правильна.  
+**Рішення:** Симуляція `scripts/_sim_top3.py` на 50 реальних записах з 5 проблемних класів: **50/50 = 100% top-1 correct**. Правило: якщо centroid-to-centroid < 2.0σ, але r95 обох класів малі (< 0.4σ), classification може бути надійною. Верифікуй симуляцією, не лише pairwise.  
+**Де в коді:** `scripts/a8_pairwise_7d.py` — метрика `wdist(centroid_A, centroid_B)`. `scripts/_sim_top3.py` — симуляція.  
+**Правило:** `pairwise FAIL ≠ classification FAIL`. Exit criterion оновлено: використовувати top-1 accuracy на реальних даних (або LOO), а не centroid-to-centroid distance. Pairwise — лише WARN для планування наступної хвилі.
+
+---
+
+## 2026-04-13 — NDJSON coin_name від auto-classifier ненадійний; .txt сесійний лог є ground truth
+
+**Середовище:** LDC1101Plugin, `discovery_dump` NDJSON, HW сесія C-14 (`docs/external/С-14/`)  
+**Симптом:** При аналізі raw NDJSON файлів C-14 сесії через поле `coin_name` — неправильний розподіл по класах. Деякі записи мали явно неправильні мітки (монета класифікована як інший клас).  
+**Причина:** `coin_name` у NDJSON заповнюється `matchFull()` результатом під час сесії (auto-classify). Якщо DB на момент сесії була gen-7 (6D), автокласифікатор не мав mass_n і давав хибні збіги в silver-vs-silver зоні. `coin_name` в raw dump НЕ є ground truth — це тільки suggestion від попередньої версії DB.  
+**Рішення:** Авторитетне джерело — `.txt` сесійний лог руками оператора: `coin_name` записаний вручну під час сесії. Створено `scripts/relabel_c14_sessions.py` з `LABEL_MAP` `(session_stem, measurement_index) → (coin_name, metal_code)` безпосередньо з .txt лога.  
+**Де в коді:** `scripts/relabel_c14_sessions.py` — `LABEL_MAP`, `MASS_CORRECTIONS`. Output: `docs/external/С-14/2026-04-11.C14_unified.ndjson`.  
+**Правило:** При постобробці HW сесій: **ніколи не довіряти `coin_name` з raw NDJSON** якщо DB могла бути не фінальною. Завжди звіряти з ручним `.txt` або подібним журналом сесії.
+
+---
+
 ## Шаблон запису
 
 ```

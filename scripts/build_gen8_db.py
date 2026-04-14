@@ -267,9 +267,6 @@ def main() -> None:
     print()
 
     # ── Check coverage ────────────────────────────────────────────────────────
-    all_expected = set(C14_GROUP_KEYS.values())
-    covered = {(gk, mc) for gk, mc in groups.keys()
-               for _ in [group_meta[gk]]}
     covered = set(groups.keys())
 
     print(f"  Groups found: {len(groups)}/{len(set(gk for gk, _ in C14_GROUP_KEYS.values()))}")
@@ -348,8 +345,7 @@ def main() -> None:
     print("  Next step: python scripts/a8_pairwise_7d.py")
     print("  Wave 10 exit criterion: all pairs > 2.0σ in 7D")
 
-    # ── Guard: remove this line after reviewing C-14 data and confirming gen-8 output ──
-    sys.exit(1)  # TODO(C-14): remove before committing gen-8 DB
+
 
 
 if __name__ == "__main__":
