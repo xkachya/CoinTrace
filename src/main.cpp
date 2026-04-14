@@ -8,6 +8,7 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <esp_ota_ops.h>    // Wave 8 A-4 — OTA partition ops (rollback)
+#include <esp_wifi.h>       // P0: esp_wifi_set_ps(WIFI_PS_NONE) — disable DTIM wake bursts
 #include <ArduinoJson.h>    // Wave 7 Phase 2 — plugin config load from LittleFS
 #include "Logger.h"
 #include "SerialTransport.h"
@@ -250,7 +251,7 @@ static QuickClass classifyQuick(float dRpPct, bool isFerro) {
 // drawMeasIdle()       — full-screen idle state (shown after session ends)
 // drawQuickScreen()    — live Quick Screen (IDLE + COIN_PRESENT)
 // drawMeasStep_full()  — full-screen redraw on each state transition
-// drawMeasResult()     — full-screen result view after COMPUTE step
+// drawMeasResult()     — full-screen result view after COMPUTE step; top-3 ranking
 // doMeasCompute()      — runs vector math, FP match, save; called on STEP_DRIFT capture
 
 // drawCaptureProgress() — partial-redraw progress bar during multi-sample capture loop.
@@ -761,7 +762,7 @@ static void drawMeasStep_full(const MeasSession& s, uint16_t rpLive = 0) {
     M5Cardputer.Display.printf("Timeout: %3us  Bksp=Abort", secsLeft);
 }
 
-static void drawMeasResult(const MeasSession& s) {
+static void drawMeasResult(const MeasSession& s, const MatchResult& mr) {
     M5Cardputer.Display.fillScreen(BLACK);
 
     // ── Title ──────────────────────────────────────────────────────────────
@@ -801,19 +802,29 @@ static void drawMeasResult(const MeasSession& s) {
         M5Cardputer.Display.print("No match in DB  (metal = UNKN)");
     }
 
+    // ── Alternatives (top-2 / top-3) ────────────────────────────────────────
+    for (uint8_t i = 0; i < mr.alt_count && i < 2; ++i) {
+        M5Cardputer.Display.setTextColor(DARKGREY);
+        M5Cardputer.Display.setCursor(5, 80 + i * 11);
+        M5Cardputer.Display.printf("#%u %-7s %3.0f%%",
+                                   i + 2,
+                                   mr.alternatives[i].metal_code,
+                                   mr.alternatives[i].confidence * 100.0f);
+    }
+
     // ── Footer ─────────────────────────────────────────────────────────────
     M5Cardputer.Display.setTextColor(DARKGREY);
-    M5Cardputer.Display.setCursor(5, 95);
+    M5Cardputer.Display.setCursor(5, 103);
     M5Cardputer.Display.printf("Saved #%u", gNVS.getMeasCount() - 1);
 
     if (s.driftWarn) {
         M5Cardputer.Display.setTextColor(ORANGE);
-        M5Cardputer.Display.setCursor(5, 108);
+        M5Cardputer.Display.setCursor(5, 114);
         M5Cardputer.Display.printf("Drift: %.1f%%  (>5%%)  recheck coil",
                                    VectorCompute::driftRatio(s.m) * 100.0f);
     } else {
         M5Cardputer.Display.setTextColor(DARKGREY);
-        M5Cardputer.Display.setCursor(5, 108);
+        M5Cardputer.Display.setCursor(5, 114);
         M5Cardputer.Display.print("Remove coin for next measurement");
     }
 }
@@ -1003,7 +1014,7 @@ static void doMeasCompute() {
     // ── 5. Show result screen ──────────────────────────────────────────────
     // sResultPending suppresses Quick Screen until coin is removed — result
     // stays visible as long as the coin remains on the coil.
-    drawMeasResult(sMeas);
+    drawMeasResult(sMeas, mr);
     sResultPending = true;
 
 #ifdef DISCOVERY_MODE
@@ -1486,6 +1497,11 @@ void setup() {
   // begin() blocks ≤10 s in STA mode, then falls back to AP automatically.
   LOG_DEBUG(&gLogger, "Heap", "before WiFi: %u B free", (uint32_t)ESP.getFreeHeap());
   gWifi.begin(gNVS);
+  // P0: disable WiFi power-save DTIM wake bursts — they cause I2C DMA collisions
+  // on NAU7802 during SAMPLING (WiFi wake burst every 100 ms ≈ 5 ms DMA = 5% duty cycle).
+  // WIFI_PS_NONE keeps radio always-on; at USB power the +30 mA overhead is negligible.
+  // Reduces WiFi-induced I2C collision probability from ~86% to ~11% (Monte-Carlo, §2.2).
+  esp_wifi_set_ps(WIFI_PS_NONE);
   gCtx.wifi = &gWifi;
   LOG_DEBUG(&gLogger, "Heap", "after WiFi:  %u B free", (uint32_t)ESP.getFreeHeap());
   gLogger.info("WiFi", "%s — SSID: %s  IP: %s",
