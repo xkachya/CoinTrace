@@ -193,29 +193,48 @@ bool NAU7802Plugin::_startupSequence() {
     if (pu == 0xFF) return false;
     if (!_writeReg(REG_PU_CTRL, pu | PU_CTRL_CS)) return false;
 
-    // Step 11: Wait for at least one conversion to complete (~12.5ms at 80 SPS)
-    delay(15);
+    // Step 11: Wait for first valid result after CS 0→1 (§2.1).
+    // "It takes 4-sample conversion time for the result to be ready."
+    // At 80SPS: 4 × 12.5ms = 50ms minimum. delay(15) was 3× too short.
+    delay(60);  // 50ms + 10ms margin
 
-    // Step 12: Read and discard first sample (data sheet §7.4 — first reading after
-    //   power-up is unreliable due to filter settling)
-    int32_t dummy;
-    _readAdc24(dummy);  // Result discarded; resets internal filter state
+    // Step 12: Discard 6+ conversion cycles to flush sigma-delta filter (§1.14).
+    // "host should wait through six cycles of data conversion" after reset to
+    // "stabilize all functions and flush all old internal data for full-accuracy output."
+    // At 80SPS: 6 cycles = 75ms. We discard 8 samples (~100ms) for margin.
+    // Previous code discarded only 1 sample (~12.5ms = 1 cycle) — insufficient.
+    {
+        int32_t dummy;
+        for (int i = 0; i < 8; i++) {
+            uint32_t t0 = millis();
+            while (!_isReady() && (millis() - t0) < 50) delay(2);
+            _readAdc24(dummy);
+        }
+    }
 
-    // Step 13: Perform internal zero-scale calibration of ADC (not of load cell)
-    //   CTRL2 CALS bit: set, wait, check CAL_ERR
+    // Step 13: Perform internal zero-scale calibration of ADC (not of load cell).
+    // §1.12: "After calibration, check CAL_ERR — if error, all data output could be invalid."
+    // Must check BOTH: CAL_ERR bit AND timeout. Silent timeout = silent miscalibration.
     uint8_t ctrl2 = _readReg(REG_CTRL2);
     if (!_writeReg(REG_CTRL2, ctrl2 | CTRL2_CALS)) return false;
     uint32_t cal_start = millis();
+    bool cal_done = false;
     while ((millis() - cal_start) < 400) {
         uint8_t c2 = _readReg(REG_CTRL2);
+        if (c2 == 0xFF) { delay(5); continue; }  // I2C error, retry
         if (!(c2 & CTRL2_CALS)) {  // CALS cleared = calibration done
             if (c2 & CTRL2_CAL_ERROR) {
-                _setError(4, "NAU7802: internal ADC calibration failed");
+                _setError(4, "NAU7802: internal ADC calibration error (CAL_ERR=1)");
                 return false;
             }
+            cal_done = true;
             break;
         }
         delay(5);
+    }
+    if (!cal_done) {
+        _setError(4, "NAU7802: internal ADC calibration timeout (400ms)");
+        return false;
     }
 
     // Step 14: Restore CTRL2 to production config (80 SPS, CH1, no cal trigger)
@@ -234,13 +253,16 @@ bool NAU7802Plugin::_startupSequence() {
             _ctx->log->error("NAU7802", "BYPASS_EN=1 in REG_PGA=0x%02X — PGA bypassed! gain=1x not 128x",
                              pga_rb);
         }
-        // Readback CTRL1/CTRL2 — mismatch indicates I2C write failure during init
+        // Readback CTRL1/CTRL2 — mismatch means register write didn't latch.
+        // CTRL2=0xFF is especially dangerous: CALS=1 (bit2) triggers calibration → CR
+        // never sets → SAMPLING stall. Treat mismatch as startup failure (return false)
+        // so P1.5 retry handles it instead of silently continuing with wrong config.
         if (ctrl1 != CTRL1_VAL || ctrl2 != CTRL2_VAL) {
-            _ctx->log->warning("NAU7802", "Register mismatch: CTRL1=0x%02X(exp 0x%02X) CTRL2=0x%02X(exp 0x%02X)",
-                               ctrl1, CTRL1_VAL, ctrl2, CTRL2_VAL);
-        } else {
-            _ctx->log->debug("NAU7802", "Regs OK: CTRL1=0x%02X CTRL2=0x%02X", ctrl1, ctrl2);
+            _setError(5, "NAU7802: register mismatch after startup (CTRL1=0x%02X exp 0x%02X, CTRL2=0x%02X exp 0x%02X)",
+                      ctrl1, CTRL1_VAL, ctrl2, CTRL2_VAL);
+            return false;
         }
+        _ctx->log->debug("NAU7802", "Regs OK: CTRL1=0x%02X CTRL2=0x%02X", ctrl1, ctrl2);
     }
     return true;
 }
@@ -698,13 +720,14 @@ bool NAU7802Plugin::_ensureConversionsRunning() {
                         "pre-flight regs: REG_PGA=0x%02X CTRL1=0x%02X(exp 0x%02X) CTRL2=0x%02X(exp 0x%02X)",
                         pga_chk, ctrl1_chk, CTRL1_VAL, ctrl2_chk, CTRL2_VAL);
                 }
-                if (pga_chk & PGA_BYPASS_EN) {
+                if ((pga_chk & PGA_BYPASS_EN) || (ctrl1_chk != CTRL1_VAL) || (ctrl2_chk != CTRL2_VAL)) {
                     if (_ctx && _ctx->log) {
                         _ctx->log->error("NAU7802",
-                            "pre-flight: REG_PGA=0x%02X has BYPASS_EN — re-running startup", pga_chk);
+                            "pre-flight: reg corrupt (PGA=0x%02X CTRL1=0x%02X CTRL2=0x%02X) — re-running startup",
+                            pga_chk, ctrl1_chk, ctrl2_chk);
                     }
                     if (!_startupSequence()) {
-                        _setError(9, "NAU7802: REG_PGA bypass recovery failed");
+                        _setError(9, "NAU7802: register corruption recovery failed (post-0xFF path)");
                         return false;
                     }
                 }
@@ -769,13 +792,14 @@ bool NAU7802Plugin::_ensureConversionsRunning() {
                     "pre-flight regs: REG_PGA=0x%02X CTRL1=0x%02X(exp 0x%02X) CTRL2=0x%02X(exp 0x%02X)",
                     pga_chk, ctrl1_chk, CTRL1_VAL, ctrl2_chk, CTRL2_VAL);
             }
-            if (pga_chk & PGA_BYPASS_EN) {
+            if ((pga_chk & PGA_BYPASS_EN) || (ctrl1_chk != CTRL1_VAL) || (ctrl2_chk != CTRL2_VAL)) {
                 if (_ctx && _ctx->log) {
                     _ctx->log->error("NAU7802",
-                        "pre-flight: REG_PGA=0x%02X has BYPASS_EN — re-running startup", pga_chk);
+                        "pre-flight: reg corrupt (PGA=0x%02X CTRL1=0x%02X CTRL2=0x%02X) — re-running startup",
+                        pga_chk, ctrl1_chk, ctrl2_chk);
                 }
                 if (!_startupSequence()) {
-                    _setError(9, "NAU7802: REG_PGA bypass recovery failed");
+                    _setError(9, "NAU7802: register corruption recovery failed (post-CS path)");
                     return false;
                 }
             }
