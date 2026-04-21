@@ -144,8 +144,11 @@ bool NAU7802Plugin::_startupSequence() {
     }
 
     // Step 4: Power-up analog + enable internal LDO (AVDDS=1, PUA=1, PUD=1)
+    // P1.5: delay(10) — after AVDDS+PUA the chip runs an internal analog startup that
+    // temporarily suspends I2C ACK (~1-5 ms window). delay(1) was insufficient at early
+    // boot (<5 s); delay(10) gives margin for the LDO + bias generator to settle.
     if (!_writeReg(REG_PU_CTRL, PU_CTRL_AVDDS | PU_CTRL_PUA | PU_CTRL_PUD)) return false;
-    delay(1);
+    delay(10);
 
     // Step 5: Disable ADC chopper clock — per datasheet §9.1 startup sequence.
     // Register 0x15 is the ADC Control register (NOT OTP). Both Adafruit and SparkFun
@@ -158,13 +161,19 @@ bool NAU7802Plugin::_startupSequence() {
     }
     if (!_writeReg(REG_ADC_CTRL, adc_ctrl | ADC_CHP_DIS)) return false;
 
-    // Step 6: Configure REG_PGA (0x1B) — clear LDOMODE (bit6) for low-ESR caps (low-noise mode).
-    // CRITICAL: ONLY clear bit6. Both reference libs only clear bit6 of this register.
-    // bit4 = BYPASS_EN MUST remain 0 — if set to 1, PGA is bypassed entirely and
-    // effective gain = 1x regardless of CTRL1 GAINS setting (audit X-01: was writing 0x30
-    // which set BYPASS_EN=1 + OUT_EN=1, causing 151 counts/g instead of 21,474 counts/g).
-    uint8_t pga = _readReg(REG_PGA);
-    if (!_writeReg(REG_PGA, pga & ~PGA_LDOMODE_BIT)) return false;  // clear bit6 only
+    // Step 6: Configure REG_PGA (0x1B) — initialize to 0x00 (all bits cleared).
+    // CRITICAL: LDOMODE (bit6) must be 0 for low-ESR caps (low-noise mode), and
+    // BYPASS_EN (bit4) MUST be 0 — if set, PGA is bypassed entirely and effective gain = 1x
+    // instead of 128x (151 counts/g instead of 21,474 counts/g; audit X-01).
+    // After register reset (step 1) or I2C bus hang recovery, REG_PGA may contain stale values.
+    // Writing 0x00 is safer than read-modify-write to clear specific bits.
+    if (!_writeReg(REG_PGA, 0x00)) return false;
+    // Verify write succeeded — catch "silent failures" where chip ACKs but doesn't latch
+    uint8_t pga_verify = _readReg(REG_PGA);
+    if (pga_verify != 0x00) {
+        _setError(6, "NAU7802: REG_PGA write failed (wrote 0x00, read back 0x%02X)", pga_verify);
+        return false;
+    }
 
     // Step 7: Enable 330pF PGA decoupling capacitor — REG_PGA_PWR bit7 = PGA_CAP_EN = 0x80.
     // Per datasheet §9.14 application note (SparkFun: setBit(PGA_CAP_EN, PGA_PWR_REG)).
@@ -271,10 +280,18 @@ bool NAU7802Plugin::initialize(PluginContext* ctx) {
         return false;
     }
 
-    // Execute 14-step OTP reload startup sequence (ADR-NAU-001)
+    // Execute 14-step OTP reload startup sequence (ADR-NAU-001).
+    // P1.5: one-shot retry — transient NACK during early boot (analog LDO settling
+    // window <10 ms after AVDDS+PUA) is recoverable by repeating the full sequence
+    // (Step 1 = full register reset, so retry is always safe).
     if (!_startupSequence()) {
-        _ds.status = HealthStatus::INITIALIZATION_FAILED;
-        return false;
+        _ctx->log->warning("NAU7802", "Startup failed — retrying once (P1.5 transient NACK recovery)");
+        delay(20);
+        if (!_startupSequence()) {
+            _ds.status = HealthStatus::INITIALIZATION_FAILED;
+            return false;
+        }
+        _ctx->log->info("NAU7802", "Startup OK on retry (P1.5)");
     }
 
     // Attempt to load saved calibration from NVS
@@ -385,8 +402,10 @@ void NAU7802Plugin::_updateAcqStateMachine() {
         if (_sampleIdx == 0 && (millis() - _acqStartMs) > (SETTLE_MS + 500UL)) {
             _acqState  = AcqState::ERROR;
             _ds.status = HealthStatus::SENSOR_FAULT;
-            _setError(12, "NAU7802: SAMPLING stalled (0/%u samples, %lums) — fast fail",
-                      N_SAMPLES, (unsigned long)(millis() - _acqStartMs));
+            uint8_t pu_s  = _readReg(REG_PU_CTRL);
+            uint8_t pga_s = _readReg(REG_PGA);
+            _setError(12, "NAU7802: SAMPLING stalled (0/%u samples, %lums) PU_CTRL=0x%02X REG_PGA=0x%02X",
+                      N_SAMPLES, (unsigned long)(millis() - _acqStartMs), pu_s, pga_s);
             break;
         }
         // One sample per update() call — only if ADC ready
@@ -439,11 +458,12 @@ void NAU7802Plugin::_updateAcqStateMachine() {
                 // sigma_g > 0.3g is suspicious (coin oscillating or not fully on platform)
                 if (sigma_g > 0.3f) {
                     _ctx->log->warning("NAU7802",
-                        "acq done: mass=%.2f g  mass_n=%.4f  sigma=%.3f g  n=%d  *** HIGH SIGMA — coin unstable?",
-                        mass_g, mass_n, sigma_g, N_SAMPLES);
+                        "acq done: mass=%.2f g  mass_n=%.4f  sigma=%.3f g  n=%d  raw_mean=%.0f  zero=%ld  *** HIGH SIGMA",
+                        mass_g, mass_n, sigma_g, N_SAMPLES, mean_raw, (long)_zeroOffset);
                 } else {
-                    _ctx->log->debug("NAU7802", "acq done: mass=%.2f g  mass_n=%.4f  sigma=%.3f g  n=%d",
-                                     mass_g, mass_n, sigma_g, N_SAMPLES);
+                    _ctx->log->debug("NAU7802",
+                        "acq done: mass=%.2f g  mass_n=%.4f  sigma=%.3f g  n=%d  raw_mean=%.0f  zero=%ld",
+                        mass_g, mass_n, sigma_g, N_SAMPLES, mean_raw, (long)_zeroOffset);
                 }
             }
         }
@@ -621,8 +641,25 @@ bool NAU7802Plugin::_ensureConversionsRunning() {
             _ctx->log->warning("NAU7802",
                 "pre-flight: bus recovered (PU_CTRL=0x%02X) — re-running startup", pu);
         }
-        if (!_startupSequence()) {
-            _setError(9, "NAU7802: startup recovery failed after bus hang");
+        // Retry startup up to 2 times to handle transient I2C/register issues during recovery
+        bool startup_ok = false;
+        for (uint8_t attempt = 0; attempt < 2; attempt++) {
+            if (_startupSequence()) {
+                startup_ok = true;
+                if (_ctx && _ctx->log && attempt > 0) {
+                    _ctx->log->info("NAU7802", "pre-flight: startup succeeded on attempt %d", attempt + 1);
+                }
+                break;
+            }
+            if (attempt == 0) {
+                if (_ctx && _ctx->log) {
+                    _ctx->log->warning("NAU7802", "pre-flight: startup attempt 1 failed, retrying...");
+                }
+                delay(10);  // Small delay before retry
+            }
+        }
+        if (!startup_ok) {
+            _setError(9, "NAU7802: startup recovery failed after bus hang (2 attempts)");
             return false;
         }
         // B-12: verify CR bit actually appears — confirms ADC is converting,
@@ -650,6 +687,28 @@ bool NAU7802Plugin::_ensureConversionsRunning() {
                     "pre-flight: CR verified OK (PU_CTRL=0x%02X, %lums)", cr_pu,
                     (unsigned long)(millis() - t0));
             }
+            // Verify REG_PGA is not corrupted — BYPASS_EN=1 would give gain=1x (wrong mass).
+            // Happens when I2C is still glitchy after bus hang: writes ACK but data corrupted.
+            {
+                uint8_t pga_chk  = _readReg(REG_PGA);
+                uint8_t ctrl1_chk = _readReg(REG_CTRL1);
+                uint8_t ctrl2_chk = _readReg(REG_CTRL2);
+                if (_ctx && _ctx->log) {
+                    _ctx->log->debug("NAU7802",
+                        "pre-flight regs: REG_PGA=0x%02X CTRL1=0x%02X(exp 0x%02X) CTRL2=0x%02X(exp 0x%02X)",
+                        pga_chk, ctrl1_chk, CTRL1_VAL, ctrl2_chk, CTRL2_VAL);
+                }
+                if (pga_chk & PGA_BYPASS_EN) {
+                    if (_ctx && _ctx->log) {
+                        _ctx->log->error("NAU7802",
+                            "pre-flight: REG_PGA=0x%02X has BYPASS_EN — re-running startup", pga_chk);
+                    }
+                    if (!_startupSequence()) {
+                        _setError(9, "NAU7802: REG_PGA bypass recovery failed");
+                        return false;
+                    }
+                }
+            }
         }
         return true;  // startup + CR verified — skip CS check below
     }
@@ -658,8 +717,25 @@ bool NAU7802Plugin::_ensureConversionsRunning() {
             _ctx->log->warning("NAU7802",
                 "pre-flight: PU_CTRL=0x%02X — CS=0 (chip reset); re-running startup", pu);
         }
-        if (!_startupSequence()) {
-            _setError(9, "NAU7802: startup recovery failed");
+        // Retry startup up to 2 times to handle transient I2C issues
+        bool startup_ok = false;
+        for (uint8_t attempt = 0; attempt < 2; attempt++) {
+            if (_startupSequence()) {
+                startup_ok = true;
+                if (_ctx && _ctx->log && attempt > 0) {
+                    _ctx->log->info("NAU7802", "pre-flight: startup succeeded on attempt %d", attempt + 1);
+                }
+                break;
+            }
+            if (attempt == 0) {
+                if (_ctx && _ctx->log) {
+                    _ctx->log->warning("NAU7802", "pre-flight: startup attempt 1 failed, retrying...");
+                }
+                delay(10);
+            }
+        }
+        if (!startup_ok) {
+            _setError(9, "NAU7802: startup recovery failed (chip reset, 2 attempts)");
             return false;
         }
         delay(50);  // allow first conversions at 80 SPS (~12.5 ms)
@@ -682,6 +758,27 @@ bool NAU7802Plugin::_ensureConversionsRunning() {
             }
             _setError(9, "NAU7802: CR never set — ADC stalled");
             return false;
+        }
+        // Verify REG_PGA integrity — same check as the 0xFF-recovery path above.
+        {
+            uint8_t pga_chk   = _readReg(REG_PGA);
+            uint8_t ctrl1_chk = _readReg(REG_CTRL1);
+            uint8_t ctrl2_chk = _readReg(REG_CTRL2);
+            if (_ctx && _ctx->log) {
+                _ctx->log->debug("NAU7802",
+                    "pre-flight regs: REG_PGA=0x%02X CTRL1=0x%02X(exp 0x%02X) CTRL2=0x%02X(exp 0x%02X)",
+                    pga_chk, ctrl1_chk, CTRL1_VAL, ctrl2_chk, CTRL2_VAL);
+            }
+            if (pga_chk & PGA_BYPASS_EN) {
+                if (_ctx && _ctx->log) {
+                    _ctx->log->error("NAU7802",
+                        "pre-flight: REG_PGA=0x%02X has BYPASS_EN — re-running startup", pga_chk);
+                }
+                if (!_startupSequence()) {
+                    _setError(9, "NAU7802: REG_PGA bypass recovery failed");
+                    return false;
+                }
+            }
         }
     }
     return true;

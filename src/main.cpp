@@ -67,7 +67,7 @@ static NAU7802Plugin*    gNAU = nullptr;
 static float             sMassG = -1.0f;
 // P1.3: STEP_WEIGHT acquisition retry counter — reset at each new session start
 static uint8_t           sWeightRetryCount = 0;
-static constexpr uint8_t kWeightRetryMax   = 3;
+static constexpr uint8_t kWeightRetryMax   = 5; // After 5 retries, skip weight acquisition and proceed with mass_n=-1 (sentinel)
 // D-12e+: true after user presses 1st ENTER (coin is on scale); false until then
 static bool              sWeightAcqStarted = false;
 
@@ -1370,8 +1370,12 @@ void setup() {
   }
 
   // ── 5. Plugin system ──────────────────────────────────────────
-  gLDC = new LDC1101Plugin();           // PluginSystem owns (deletes on end()); gLDC is non-owning
+  // PluginSystem takes ownership of all plugins (deletes them in end()).
+  // Non-owning pointers (gLDC, gNAU) kept for direct access in measurement workflow.
+  gLDC = new LDC1101Plugin();
+  gNAU = new NAU7802Plugin();
   gPluginSystem.addPlugin(gLDC);
+  gPluginSystem.addPlugin(gNAU);  // D-12d: lifecycle + update() managed by PluginSystem
   gPluginSystem.begin(&gCtx);  // calls canInitialize() → initialize() for each plugin
 
   gLogger.info("System", "CoinTrace ready — %d/%d plugins initialised",
@@ -1431,67 +1435,107 @@ void setup() {
   }
   // ── END STEP-0 ──────────────────────────────────────────────────────────────
 
-  // ── C-13: NAU7802 smoke test ─────────────────────────────────────────────
-  // Temporary hardware verification block (NAU7802_ARCHITECTURE.md §11.4).
-  // REMOVE after C-13 session confirms: PU_CTRL=0x9E, sigma<20 counts, tare OK.
+  // ── C-13: NAU7802 post-init diagnostics ──────────────────────────────────
+  // NAU7802 was initialized by gPluginSystem.begin() above — this block only
+  // runs deeper diagnostics: I2C bus check, two self-tests with mechanical
+  // settle delay, tare baseline, and full diagnostic snapshots.
   // Hardware: Adafruit NAU7802 #4538, SDA=GPIO8, SCL=GPIO9 (shared Wire bus),
   //           load cell connected per §3.1 (GREEN=A+, WHITE=A−).
   {
-    gLogger.info("C13", "=== NAU7802 SMOKE TEST START ===");
-    gLogger.info("C13", "Ensure load cell platform is EMPTY, waiting 3s...");
-    delay(3000);
-
-    gNAU = new NAU7802Plugin();
-    if (gNAU->initialize(&gCtx)) {
-      // _startupSequence() already logged:
-      //   "Startup OK: PU_CTRL=0xXX OTP_B1=0xXX LDO=3.0V PGA=128 80SPS"
-      // Expected: PU_CTRL=0x9E = AVDDS|PUR|CS (0x80|0x08|0x10)
-
-      // Self-test: PUR set + 5 ADC reads non-zero
-      const bool stOk = gNAU->runSelfTest();
-      gLogger.info("C13", "Self-test:   %s", stOk ? "PASS ✓" : "FAIL ✗");
-
-      if (stOk) {
-        // tare(32) at 10 SPS: ~3.2s blocking.
-        // Logs: "Tare OK: zero_offset=XXXXXX (sigma=Y.Z raw_counts, n=32)"
-        // B-07 criterion: sigma < 20 counts → good OTP reload + PGA=128x
-        // sigma 20-100 counts → marginal (noise issue)
-        // sigma > 100 counts → OTP reload likely failed → check startup sequence
-        gLogger.info("C13", "Running tare(32) at 80 SPS — ~0.4s...");
-        const bool tareOk = gNAU->tare(32);
-        gLogger.info("C13", "Tare:        %s", tareOk ? "OK ✓  (check sigma^ B-07: expect <20 counts)" : "FAIL ✗");
-
-        // Stability check: re-run self-test after 2s settle.
-        // Compare range/drift to first self-test above:
-        //   DRIFTING → STABLE  = creep finished, load cell was under temporary preload
-        //   DRIFTING → DRIFTING = persistent mechanical preload (bad mounting or wire tension)
-        //   NOISY    → STABLE   = platform was still moving during first test
-        gLogger.info("C13", "Stability check: waiting 2s, then re-sampling...");
-        delay(2000);
-        gNAU->runSelfTest();  // second pass — compare range/stability to first
-
-        gLogger.info("C13", "--- SMOKE TEST SUMMARY ---");
-        gLogger.info("C13", "  Self-test:  %s", stOk   ? "PASS" : "FAIL");
-        gLogger.info("C13", "  Tare:       %s", tareOk ? "PASS" : "FAIL");
-        if (gNAU->isCalibrated()) {
-            gLogger.info("C13",  "  Calibration: OK ✓  (scale=%.8f  zero=%d)",
-                         gNAU->getScaleFactor(), (int)gNAU->getZeroOffset());
-        } else {
-            gLogger.info("C13",  "  Calibration: NOT YET — put known weight, press 'K' (D-12c)");
-        }
-      } else {
-        gLogger.error("C13", "Self-test FAILED — ADC not responding (check power, wiring)");
-        gLogger.error("C13", "  Tip: verify load cell connected to A+/A- before power-on");
+    // HealthStatus → human-readable string for log output
+    auto healthStr = [](IDiagnosticPlugin::HealthStatus s) -> const char* {
+      switch (s) {
+        case IDiagnosticPlugin::HealthStatus::OK:                    return "OK";
+        case IDiagnosticPlugin::HealthStatus::DEGRADED:              return "DEGRADED";
+        case IDiagnosticPlugin::HealthStatus::SENSOR_FAULT:          return "SENSOR_FAULT";
+        case IDiagnosticPlugin::HealthStatus::INITIALIZATION_FAILED: return "INIT_FAILED";
+        case IDiagnosticPlugin::HealthStatus::NOT_FOUND:             return "NOT_FOUND";
+        case IDiagnosticPlugin::HealthStatus::CALIBRATION_NEEDED:    return "CAL_NEEDED";
+        case IDiagnosticPlugin::HealthStatus::OK_WITH_WARNINGS:      return "OK_WARNINGS";
+        default:                                                      return "UNKNOWN";
       }
-    } else {
-      // initialize() failed → NAU7802 absent or I2C error
-      gLogger.error("C13", "NAU7802 initialize() FAILED");
+    };
+
+    gLogger.info("C13", "=== NAU7802 DIAGNOSTICS START ===");
+
+    if (!gNAU || !gNAU->isReady()) {
+      gLogger.error("C13", "NAU7802 not initialized — diagnostics skipped");
       gLogger.error("C13", "  Check: SDA=GPIO8 SCL=GPIO9, VIN=3.3V, GND");
       gLogger.error("C13", "  Check: I2C addr 0x2A (ADDR pin tied to GND)");
-      delete gNAU;
-      gNAU = nullptr;
+      if (gNAU) {
+        auto err = gNAU->getLastError();
+        gLogger.error("C13", "  Last error [%d]: %s", err.code, err.message);
+      }
+    } else {
+      // ── I2C communication check — 3 consecutive PU_CTRL reads ────────────
+      const bool commOk = gNAU->checkCommunication();
+      gLogger.info("C13", "I2C comm (3x PU_CTRL):  %s", commOk ? "PASS ✓" : "FAIL ✗");
+
+      // ── Diagnostic snapshot (health, counters) ────────────────────────────
+      {
+        auto diag = gNAU->runDiagnostics();
+        gLogger.info("C13", "Diagnostics: health=%s  reads=%lu  fail=%lu  rate=%u%%",
+                     healthStr(diag.status),
+                     (unsigned long)diag.stats.totalReads,
+                     (unsigned long)diag.stats.failedReads,
+                     (unsigned)diag.stats.successRate);
+        if (diag.error.code != 0)
+          gLogger.warning("C13", "  Last error [%d]: %s", diag.error.code, diag.error.message);
+      }
+
+      // ── Self-test 1 — wait for empty platform to settle ──────────────────
+      gLogger.info("C13", "Ensure load cell platform is EMPTY, waiting 3s...");
+      delay(3000);
+      gLogger.info("C13", "--- Self-test [1/2] ---");
+      const bool st1Ok = gNAU->runSelfTest();
+      gLogger.info("C13", "Self-test 1:  %s", st1Ok ? "PASS ✓" : "FAIL ✗");
+
+      // ── Tare (only if self-test 1 passed) ────────────────────────────────
+      // B-07: sigma < 20 counts → good; 20–100: marginal; >100: OTP reload failed.
+      bool tareOk = false;
+      if (st1Ok) {
+        gLogger.info("C13", "Running tare(32) at 80 SPS — ~0.4s...");
+        tareOk = gNAU->tare(32);
+        gLogger.info("C13", "Tare:         %s", tareOk ? "OK ✓  (B-07: sigma<20 counts ideal)" : "FAIL ✗");
+      }
+
+      // ── Self-test 2 — after mechanical settle ─────────────────────────────
+      // Compare stability label to self-test 1:
+      //   DRIFTING → STABLE   = creep finished (temporary preload on cell)
+      //   DRIFTING → DRIFTING = persistent mechanical preload (bad mount / wire pull)
+      //   NOISY    → STABLE   = platform was still moving during self-test 1
+      //   NOISY    → NOISY    = EMI / cable — check shielding
+      gLogger.info("C13", "--- Self-test [2/2] — waiting 2s for mechanical settle...");
+      delay(2000);
+      const bool st2Ok = gNAU->runSelfTest();
+      gLogger.info("C13", "Self-test 2:  %s", st2Ok ? "PASS ✓" : "FAIL ✗");
+
+      // ── Post-settle diagnostic snapshot ──────────────────────────────────
+      {
+        auto diag2 = gNAU->runDiagnostics();
+        gLogger.info("C13", "Post-settle: health=%s  reads=%lu  fail=%lu  rate=%u%%",
+                     healthStr(diag2.status),
+                     (unsigned long)diag2.stats.totalReads,
+                     (unsigned long)diag2.stats.failedReads,
+                     (unsigned)diag2.stats.successRate);
+      }
+
+      // ── Summary ───────────────────────────────────────────────────────────
+      gLogger.info("C13", "--- DIAGNOSTICS SUMMARY ---");
+      gLogger.info("C13", "  Init:        OK ✓  (PluginSystem)");
+      gLogger.info("C13", "  I2C comm:    %s", commOk ? "PASS" : "FAIL");
+      gLogger.info("C13", "  Self-test 1: %s", st1Ok  ? "PASS" : "FAIL");
+      gLogger.info("C13", "  Tare:        %s", st1Ok  ? (tareOk ? "PASS" : "FAIL") : "SKIP (st1 failed)");
+      gLogger.info("C13", "  Self-test 2: %s", st2Ok  ? "PASS" : "FAIL");
+      if (gNAU->isCalibrated()) {
+        gLogger.info("C13", "  Calibration: OK ✓  (scale=%.8f  zero=%ld)",
+                     gNAU->getScaleFactor(), (long)gNAU->getZeroOffset());
+      } else {
+        gLogger.info("C13", "  Calibration: NOT YET — put known weight, press 'K' (D-12c)");
+      }
     }
-    gLogger.info("C13", "=== NAU7802 SMOKE TEST END ===");
+
+    gLogger.info("C13", "=== NAU7802 DIAGNOSTICS END ===");
   }
   // ── END C-13 ─────────────────────────────────────────────────────────────
   // begin() blocks ≤10 s in STA mode, then falls back to AP automatically.
@@ -1914,8 +1958,8 @@ void loop() {
   }
   
   // Plugin update loop (runs all enabled plugins, ≤ 10 ms each)
+  // NAU7802 included: gPluginSystem.update() calls gNAU->update() via PluginSystem (D-12d, ADR-NAU-003)
   gPluginSystem.update();
-  if (gNAU) gNAU->update();  // D-12d: NAU7802 non-blocking acquisition pump (ADR-NAU-003)
 
   // ── One-time diagnostic: LFS task stack watermark ────────────────────────────
   // Logged once after 10 s so task has processed all boot-log entries.
